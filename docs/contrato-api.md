@@ -1282,7 +1282,17 @@ Respuesta `200`:
 
 **`GET /panells/empaquetat`**
 
-Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&producte=`
+Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&producte=&categoriaId=&confirmacio=`
+
+> **Peticiones de Ari (29/09/2026):**
+>
+> - `categoriaId`: categoría del artículo de la línea, mismo criterio que
+>   `?categoriaId=` en `/panells/obrador`. Cada fila trae además
+>   `categoria` (nombre, `null` si el artículo no tiene categoría).
+> - `confirmacio`: `pendents` (líneas sin confirmar, `confirmatA` null) o
+>   `confirmades` (ya enviadas: se guardaron unidades y kilos
+>   enviados). Sin el parámetro, todas. Cualquier otro valor es
+>   `400 VALIDACIO`. Los `totals` respetan el filtro, como todos los demás.
 
 > `dataExpedicioFins`/`dataLliuramentFins` incluyen el día completo — ver
 > "Filtros de rango de fecha" en la sección 2 (capa 36).
@@ -1320,6 +1330,7 @@ Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramen
       "dataLliurament": "2026-08-18T00:00:00Z",
       "transportista": "DHL",
       "client": "Restaurant Example",
+      "categoria": "PECES NOBLES KG",
       "codi": "LLF01",
       "producte": "Llom fresc de porc",
       "unitatsDemanades": "10.00",

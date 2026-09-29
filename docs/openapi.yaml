@@ -1126,6 +1126,19 @@ paths:
             criterio que GET /panells/obrador, GET /panells/produccio y
             GET /rendiments-porcs.
           schema: { type: string }
+        - name: categoriaId
+          in: query
+          description: >-
+            Petición de Ari (29/09/2026). Categoría del artículo de la
+            línea, mismo criterio que GET /panells/obrador.
+          schema: { type: integer }
+        - name: confirmacio
+          in: query
+          description: >-
+            Petición de Ari (29/09/2026). "pendents" = líneas sin confirmar
+            (confirmatA null); "confirmades" = ya enviadas. Sin el
+            parámetro, todas. Otro valor = 400.
+          schema: { type: string, enum: [pendents, confirmades] }
         - $ref: '#/components/parameters/Pagina'
         - $ref: '#/components/parameters/Mida'
       responses:
@@ -1154,7 +1167,13 @@ paths:
                       kgLliurats: { type: string }
                       liniesConfirmades: { type: integer }
                       liniesPendents: { type: integer }
-                  dades: { type: array, items: { type: object } }
+                  dades:
+                    type: array
+                    items:
+                      type: object
+                      description: >-
+                        FilaPanellEmpaquetatApi (@dpages/shared). Incluye
+                        `categoria` (string, nullable) desde el 29/09/2026.
                   paginacio: { $ref: '#/components/schemas/Paginacio' }
 
   /api/v1/origens-comanda:
