@@ -18,10 +18,10 @@ info:
     cerrado; las fórmulas numéricas todavía no — ver
     docs/contrato-api.md sección 4.10), Panell Obrador por línea individual
     (ya no agrupado por producto), orígenes de pedido como tabla mantenible
-    (ya no un enum fijo), y usuarios/roles. Esta versión es SOLO contrato —
-    los endpoints nuevos (rendiments-porcs, panells/produccio,
-    usuaris, rols, jo) todavía no están implementados en el backend real
-    (origens-comanda, implementado desde la capa 43).
+    (ya no un enum fijo), y usuarios/roles. Los endpoints que en su momento
+    eran sólo contrato (rendiments-porcs, panells/produccio, usuaris, rols,
+    jo, origens-comanda) ya están implementados en el backend real, cada
+    uno con su suite de tests.
   contact:
     name: VisioFlow Tech
 

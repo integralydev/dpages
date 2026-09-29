@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { pool } from '../../../db/pool.js';
 import {
   construirPaginacio,
+  crearGuardaModul,
   enviarConflicte,
   enviarNoTrobat,
   enviarValidacio,
@@ -11,6 +12,13 @@ import {
   parsearPaginacio,
   resolverCategoriaUuid,
 } from './comu.js';
+
+// Guard estricto (B1): a diferencia de categories/productes/tarifes/
+// transportistes/clients, este recurso NO es dato de apoyo de ninguna otra
+// pantalla — confirmado con grep real del frontend (sólo pig-yields/page.tsx
+// lo consume, vía usePigYields; Panell Producció calcula el rendimiento con
+// SQL propio sobre la misma tabla, sin llamar a este endpoint HTTP).
+const GUARD_RENDIMENTS_PORCS = crearGuardaModul('rendiments-porcs');
 
 const REGEX_UNITATS_PER_PORC = /^\d+(\.\d{1,2})?$/;
 const REGEX_KG_PER_UNITAT = /^\d+(\.\d{1,3})?$/;
@@ -60,7 +68,7 @@ const SELECT_RENDIMENT = `
 `;
 
 export function registrarRutesRendimentsPorcs(fastify: FastifyInstance): void {
-  fastify.get('/rendiments-porcs', async (req, reply) => {
+  fastify.get('/rendiments-porcs', { preHandler: GUARD_RENDIMENTS_PORCS }, async (req, reply) => {
     const query = req.query as Record<string, unknown>;
     const { pagina, mida, offset } = parsearPaginacio(query);
 
@@ -116,7 +124,7 @@ export function registrarRutesRendimentsPorcs(fastify: FastifyInstance): void {
     };
   });
 
-  fastify.post('/rendiments-porcs', async (req, reply) => {
+  fastify.post('/rendiments-porcs', { preHandler: GUARD_RENDIMENTS_PORCS }, async (req, reply) => {
     // Issues #3/#4 — la fila se identifica por categoriaId +
     // agrupacioProduccio, no por producteId — el rendimiento de un cerdo se
     // define a nivel de Agrupació Producció, no de artículo individual.
@@ -219,63 +227,71 @@ export function registrarRutesRendimentsPorcs(fastify: FastifyInstance): void {
     }
   });
 
-  fastify.patch('/rendiments-porcs/:id', async (req, reply) => {
-    const idPublic = parsearIdPublic((req.params as { id: string }).id);
-    if (idPublic === null) return enviarNoTrobat(reply);
+  fastify.patch(
+    '/rendiments-porcs/:id',
+    { preHandler: GUARD_RENDIMENTS_PORCS },
+    async (req, reply) => {
+      const idPublic = parsearIdPublic((req.params as { id: string }).id);
+      if (idPublic === null) return enviarNoTrobat(reply);
 
-    // categoriaId/agrupacioProduccio són immutables un cop creada la fila
-    // (issues #3/#4 — mateix criteri que producteId abans d'aquesta
-    // migració, i que codi a PATCH /clients/:id): no es llegeixen del cos
-    // encara que vinguin, no hi ha camp per a ells acà.
-    const cos = req.body as Partial<{ unitatsPerPorc: string; kgPerUnitat: string }>;
+      // categoriaId/agrupacioProduccio són immutables un cop creada la fila
+      // (issues #3/#4 — mateix criteri que producteId abans d'aquesta
+      // migració, i que codi a PATCH /clients/:id): no es llegeixen del cos
+      // encara que vinguin, no hi ha camp per a ells acà.
+      const cos = req.body as Partial<{ unitatsPerPorc: string; kgPerUnitat: string }>;
 
-    if (
-      cos.unitatsPerPorc !== undefined &&
-      (!cos.unitatsPerPorc || !REGEX_UNITATS_PER_PORC.test(cos.unitatsPerPorc))
-    ) {
-      return enviarValidacio(reply, 'unitatsPerPorc ha de ser un número vàlid (ex. "2.00")', [
-        {
-          camp: 'unitatsPerPorc',
-          missatge: 'ha de ser un número vàlid amb com a màxim 2 decimals',
-        },
-      ]);
-    }
-    if (
-      cos.kgPerUnitat !== undefined &&
-      (!cos.kgPerUnitat || !REGEX_KG_PER_UNITAT.test(cos.kgPerUnitat))
-    ) {
-      return enviarValidacio(reply, 'kgPerUnitat ha de ser un número vàlid (ex. "3.500")', [
-        { camp: 'kgPerUnitat', missatge: 'ha de ser un número vàlid amb com a màxim 3 decimals' },
-      ]);
-    }
+      if (
+        cos.unitatsPerPorc !== undefined &&
+        (!cos.unitatsPerPorc || !REGEX_UNITATS_PER_PORC.test(cos.unitatsPerPorc))
+      ) {
+        return enviarValidacio(reply, 'unitatsPerPorc ha de ser un número vàlid (ex. "2.00")', [
+          {
+            camp: 'unitatsPerPorc',
+            missatge: 'ha de ser un número vàlid amb com a màxim 2 decimals',
+          },
+        ]);
+      }
+      if (
+        cos.kgPerUnitat !== undefined &&
+        (!cos.kgPerUnitat || !REGEX_KG_PER_UNITAT.test(cos.kgPerUnitat))
+      ) {
+        return enviarValidacio(reply, 'kgPerUnitat ha de ser un número vàlid (ex. "3.500")', [
+          { camp: 'kgPerUnitat', missatge: 'ha de ser un número vàlid amb com a màxim 3 decimals' },
+        ]);
+      }
 
-    const resultat = await pool.query<{ id: string }>(
-      `UPDATE rendiments_porcs SET
+      const resultat = await pool.query<{ id: string }>(
+        `UPDATE rendiments_porcs SET
          unitats_per_porc = COALESCE($2, unitats_per_porc),
          kg_per_unitat = COALESCE($3, kg_per_unitat)
        WHERE id_seq = $1
        RETURNING id`,
-      [idPublic, cos.unitatsPerPorc ?? null, cos.kgPerUnitat ?? null],
-    );
-    if (!resultat.rows[0]) return enviarNoTrobat(reply, 'Rendiment no trobat');
+        [idPublic, cos.unitatsPerPorc ?? null, cos.kgPerUnitat ?? null],
+      );
+      if (!resultat.rows[0]) return enviarNoTrobat(reply, 'Rendiment no trobat');
 
-    const actualitzat = await pool.query<FilaRendimentPorc>(
-      `${SELECT_RENDIMENT} WHERE r.id_seq = $1`,
-      [idPublic],
-    );
-    return aApi(actualitzat.rows[0]!);
-  });
+      const actualitzat = await pool.query<FilaRendimentPorc>(
+        `${SELECT_RENDIMENT} WHERE r.id_seq = $1`,
+        [idPublic],
+      );
+      return aApi(actualitzat.rows[0]!);
+    },
+  );
 
-  fastify.delete('/rendiments-porcs/:id', async (req, reply) => {
-    const idPublic = parsearIdPublic((req.params as { id: string }).id);
-    if (idPublic === null) return enviarNoTrobat(reply);
+  fastify.delete(
+    '/rendiments-porcs/:id',
+    { preHandler: GUARD_RENDIMENTS_PORCS },
+    async (req, reply) => {
+      const idPublic = parsearIdPublic((req.params as { id: string }).id);
+      if (idPublic === null) return enviarNoTrobat(reply);
 
-    const resultat = await pool.query<{ id: string }>(
-      'DELETE FROM rendiments_porcs WHERE id_seq = $1 RETURNING id',
-      [idPublic],
-    );
-    if (!resultat.rows[0]) return enviarNoTrobat(reply, 'Rendiment no trobat');
+      const resultat = await pool.query<{ id: string }>(
+        'DELETE FROM rendiments_porcs WHERE id_seq = $1 RETURNING id',
+        [idPublic],
+      );
+      if (!resultat.rows[0]) return enviarNoTrobat(reply, 'Rendiment no trobat');
 
-    reply.code(204);
-  });
+      reply.code(204);
+    },
+  );
 }

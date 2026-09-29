@@ -14,3 +14,5 @@ dump-local/
 
 *.sql
 !packages/backend/migrations/*.sql
+
+docs/entregables/
