@@ -16,3 +16,5 @@ dump-local/
 !packages/backend/migrations/*.sql
 
 github-actions-key.json
+
+docs/entregables/

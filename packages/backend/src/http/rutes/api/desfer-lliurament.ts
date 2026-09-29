@@ -1,7 +1,7 @@
 import type { LliuramentDesferRespostaApi } from '@dpages/shared';
 import type { FastifyInstance } from 'fastify';
 import { pool } from '../../../db/pool.js';
-import { enviarConflicte, enviarNoTrobat, parsearIdPublic } from './comu.js';
+import { crearGuardaModul, enviarConflicte, enviarNoTrobat, parsearIdPublic } from './comu.js';
 
 /**
  * Issue #19 — hasta ahora confirmat_a/confirmat_per sólo se podían SETEAR
@@ -19,39 +19,43 @@ import { enviarConflicte, enviarNoTrobat, parsearIdPublic } from './comu.js';
  * no vuelve a escribir todo desde cero.
  */
 export function registrarRutaDesferLliurament(fastify: FastifyInstance): void {
-  fastify.patch('/comandes/:comandaId/linies/:liniaId/lliurament/desfer', async (req, reply) => {
-    const params = req.params as { comandaId: string; liniaId: string };
-    const comandaIdPublic = parsearIdPublic(params.comandaId);
-    const liniaIdPublic = parsearIdPublic(params.liniaId);
-    if (comandaIdPublic === null || liniaIdPublic === null) {
-      return enviarNoTrobat(reply, 'Línia no trobada');
-    }
+  fastify.patch(
+    '/comandes/:comandaId/linies/:liniaId/lliurament/desfer',
+    { preHandler: crearGuardaModul('panell-empaquetat') },
+    async (req, reply) => {
+      const params = req.params as { comandaId: string; liniaId: string };
+      const comandaIdPublic = parsearIdPublic(params.comandaId);
+      const liniaIdPublic = parsearIdPublic(params.liniaId);
+      if (comandaIdPublic === null || liniaIdPublic === null) {
+        return enviarNoTrobat(reply, 'Línia no trobada');
+      }
 
-    const comanda = await pool.query<{ id: string; congelat_a: Date | null }>(
-      'SELECT id, congelat_a FROM comanda WHERE id_seq = $1',
-      [comandaIdPublic],
-    );
-    if (!comanda.rows[0]) return enviarNoTrobat(reply, 'Comanda no trobada');
-    if (comanda.rows[0].congelat_a !== null) {
-      return enviarConflicte(reply, 'La comanda està congelada i ja no admet canvis');
-    }
+      const comanda = await pool.query<{ id: string; congelat_a: Date | null }>(
+        'SELECT id, congelat_a FROM comanda WHERE id_seq = $1',
+        [comandaIdPublic],
+      );
+      if (!comanda.rows[0]) return enviarNoTrobat(reply, 'Comanda no trobada');
+      if (comanda.rows[0].congelat_a !== null) {
+        return enviarConflicte(reply, 'La comanda està congelada i ja no admet canvis');
+      }
 
-    const resultat = await pool.query<{ id_seq: string }>(
-      `UPDATE comanda_linia SET
+      const resultat = await pool.query<{ id_seq: string }>(
+        `UPDATE comanda_linia SET
          confirmat_a = NULL,
          confirmat_per = NULL
        WHERE id_seq = $1 AND comanda_id = $2
        RETURNING id_seq`,
-      [liniaIdPublic, comanda.rows[0].id],
-    );
-    if (!resultat.rows[0]) return enviarNoTrobat(reply, 'Línia no trobada');
+        [liniaIdPublic, comanda.rows[0].id],
+      );
+      if (!resultat.rows[0]) return enviarNoTrobat(reply, 'Línia no trobada');
 
-    const resposta: LliuramentDesferRespostaApi = {
-      liniaId: Number(resultat.rows[0].id_seq),
-      comandaId: comandaIdPublic,
-      confirmatA: null,
-      confirmatPer: null,
-    };
-    return resposta;
-  });
+      const resposta: LliuramentDesferRespostaApi = {
+        liniaId: Number(resultat.rows[0].id_seq),
+        comandaId: comandaIdPublic,
+        confirmatA: null,
+        confirmatPer: null,
+      };
+      return resposta;
+    },
+  );
 }

@@ -66,9 +66,42 @@ de verdad (no hay ningún modo "sin autenticación" salvo en desarrollo local
 del propio backend, con una variable de entorno que vos no controlás) — no lo
 des por opcional en ningún ambiente donde pruebes contra el backend real.
 
-Ningún endpoint restringe por rol: cualquier usuario autenticado puede llamar
-cualquier ruta. El rol (custom claim de Firebase) sólo decide en qué panel lo
-ubicás por defecto al entrar — ver `decisiones-arquitectura.md`, ADR-021.
+Todos los endpoints de negocio restringen por rol con un guard real de
+backend (`crearGuardaModul`, `http/rutes/api/comu.ts`): quien llame sin el
+módulo requerido en `usuari.rol.modulsPermesos` recibe `403 SENSE_PERMIS`.
+El rol (fila de `usuari` resuelta por `firebase_uid`, no un custom claim de
+Firebase) decide tanto en qué panel lo ubica el frontend por defecto al
+entrar como qué puede llamar de verdad contra el backend — ver
+`decisiones-arquitectura.md`, ADR-021 (superado por este hallazgo de
+seguridad: el criterio original de "ningún endpoint restringe por rol" ya
+no aplica).
+
+Tres criterios de guard, según el endpoint:
+
+- **Estricto** — exige el módulo dueño del recurso (`comandes`, `catalog`,
+  `tarifes`, `categories`, `transportistes`, `tarifes-clients`,
+  `rendiments-porcs`, `usuaris`, `rols`, o el `panell-*` correspondiente).
+  Aplica a la escritura de todo recurso (incluida toda escritura sobre
+  `comandes`: `POST /comandes`, `PATCH /comandes/:id`,
+  `POST`/`PATCH`/`DELETE .../linies`) y a la lectura de `/panells/*` y
+  `/rendiments-porcs`.
+- **De apoyo** — la lectura (`GET`) de `/categories`, `/productes`,
+  `/tarifes/matriu`, `/transportistes` y `/clients` acepta CUALQUIERA de
+  los 5 módulos operativos (`comandes`, `panell-oficina`, `panell-obrador`,
+  `panell-empaquetat`, `panell-produccio`) — son datos de referencia que
+  varias pantallas necesitan mostrar (ej. el nombre del transportista en el
+  Panell d'Oficina) sin que eso implique poder gestionar ese recurso. La
+  escritura de esos mismos 5 recursos sigue siendo estricta (módulo dueño).
+- **De lectura acotada, caso único** — `GET /comandes` y `GET /comandes/:id`
+  aceptan `comandes` O `panell-oficina` (no los 5 módulos operativos: se
+  confirmó que ningún otro panell consume esta ruta). Existe porque el
+  Panell d'Oficina lee el detalle de un pedido en modo estricto de sólo
+  lectura (`office/[id]/page.tsx`), compartiendo la misma ruta que la
+  gestión completa de pedidos (`orders/[id]/page.tsx`, con escritura). Hoy
+  no cambia el acceso de ningún rol real (`Oficina` ya tiene el módulo
+  `comandes` además de `panell-oficina`) — es una red de seguridad para un
+  rol futuro de "oficina, sólo lectura" creado en vivo vía `RoleFormModal`
+  con únicamente `panell-oficina`.
 
 ### CORS
 

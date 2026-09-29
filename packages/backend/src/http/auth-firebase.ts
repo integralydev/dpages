@@ -65,33 +65,40 @@ let appFirebaseAdmin: App | null = null;
  * (`verificarTokenFirebase` sigue con `obtenerAppFirebase()` y credenciales
  * por defecto, sin cambios).
  *
- * Motivo de la app separada: Identity Toolkit (el servicio detrás de
- * `createUser`/`generatePasswordResetLink`/`deleteUser`) gestiona sus
- * propios permisos por fuera de IAM de GCP — la cuenta de servicio de
- * Cloud Run (`dpages-backend@...`) no tiene acceso real ahí pese a sus
- * roles de IAM a nivel de proyecto. La única cuenta que sí tiene el rol
- * "Administrador de Firebase Authentication" aplicado de verdad es la que
- * el propio Firebase genera automáticamente
- * (`firebase-adminsdk-fbsvc@...`) — de ahí que esta app use una clave de
- * servicio explícita (`credential.cert`) en vez de las credenciales por
- * defecto de la instancia. El Admin SDK permite varias apps nombradas en
- * el mismo proceso, así que esto no interfiere con la app por defecto.
+ * Motivo de la app separada, histórico (I1): Identity Toolkit (el servicio
+ * detrás de `createUser`/`generatePasswordResetLink`/`deleteUser`) gestiona
+ * sus propios permisos por fuera de IAM de GCP — la cuenta de servicio de
+ * Cloud Run (`dpages-backend@...`) nunca tuvo el rol "Administrador de
+ * Firebase Authentication" aplicado ahí, pese a sus roles de IAM a nivel de
+ * proyecto. Por eso originalmente esta app usaba SIEMPRE una clave de
+ * servicio explícita (`credential.cert`, la del service account que Firebase
+ * genera automáticamente, `firebase-adminsdk-fbsvc@...`, que sí tenía ese rol).
  *
- * Perezoso, mismo criterio que `obtenerAppFirebase()`: la ausencia de
- * `FIREBASE_ADMIN_SDK_KEY_JSON` no debe impedir que el proceso arranque
- * (ningún otro endpoint la necesita) — recién falla cuando alguien
+ * Migración a ADC (I1, en curso): una vez que el rol se le otorgue TAMBIÉN a
+ * la cuenta de servicio de Cloud Run, Application Default Credentials
+ * (`initializeApp()` sin argumentos, mismo mecanismo que `obtenerAppFirebase()`)
+ * alcanza para esto también, sin necesitar ninguna clave pegada en una
+ * variable de entorno. Mientras ese rol no esté confirmado en producción,
+ * `FIREBASE_ADMIN_SDK_KEY_JSON` sigue funcionando como mecanismo explícito:
+ * si está configurada, tiene prioridad (permite no depender de que el IAM ya
+ * esté otorgado); si no está, se cae a ADC. Verificado localmente (llamada
+ * real de sólo lectura a Identity Toolkit, `listUsers`) que ADC funciona
+ * igual de bien que `cert()` cuando la cuenta detrás de las credenciales
+ * tiene el rol — la única cuenta que hoy lo tiene es
+ * `firebase-adminsdk-fbsvc@...`, la misma que ya usa `GOOGLE_APPLICATION_CREDENTIALS`
+ * en local (ver `.env.example`). En Cloud Run, ADC resuelve a
+ * `dpages-backend@...`, que TODAVÍA no tiene el rol — hasta que se confirme,
+ * producción sigue necesitando `FIREBASE_ADMIN_SDK_KEY_JSON` configurada.
+ *
+ * El Admin SDK permite varias apps nombradas en el mismo proceso, así que
+ * esto no interfiere con la app por defecto (`obtenerAppFirebase()`).
+ *
+ * Perezoso, mismo criterio que `obtenerAppFirebase()`: no depende de ninguna
+ * variable al arrancar el proceso — recién se resuelve cuando alguien
  * efectivamente llama a `POST /usuaris`.
  */
 async function obtenerAppFirebaseAdmin(): Promise<App> {
   if (appFirebaseAdmin !== null) return appFirebaseAdmin;
-
-  if (!env.FIREBASE_ADMIN_SDK_KEY_JSON) {
-    throw new Error(
-      'FIREBASE_ADMIN_SDK_KEY_JSON no está configurada — hace falta para crear/borrar ' +
-        'usuarios de Firebase y generar el link de establecimiento de contraseña ' +
-        '(POST /usuaris, capa 19). Ver docs/contrato-api.md sección 4.12.',
-    );
-  }
 
   const { getApps, initializeApp, cert } = await import('firebase-admin/app');
   const existente = getApps().find((app) => app.name === NOM_APP_FIREBASE_ADMIN);
@@ -100,8 +107,18 @@ async function obtenerAppFirebaseAdmin(): Promise<App> {
     return appFirebaseAdmin;
   }
 
-  const credencial = JSON.parse(env.FIREBASE_ADMIN_SDK_KEY_JSON) as ServiceAccount;
-  appFirebaseAdmin = initializeApp({ credential: cert(credencial) }, NOM_APP_FIREBASE_ADMIN);
+  // FIREBASE_ADMIN_SDK_KEY_JSON, si está presente, tiene prioridad sobre ADC
+  // — mecanismo legacy/explícito para no depender de que el rol IAM de
+  // Identity Toolkit ya esté otorgado a la cuenta de servicio de la
+  // instancia (ver comentario de arriba). Ausente: se usa ADC, igual que
+  // `obtenerAppFirebase()`.
+  if (env.FIREBASE_ADMIN_SDK_KEY_JSON) {
+    const credencial = JSON.parse(env.FIREBASE_ADMIN_SDK_KEY_JSON) as ServiceAccount;
+    appFirebaseAdmin = initializeApp({ credential: cert(credencial) }, NOM_APP_FIREBASE_ADMIN);
+    return appFirebaseAdmin;
+  }
+
+  appFirebaseAdmin = initializeApp({}, NOM_APP_FIREBASE_ADMIN);
   return appFirebaseAdmin;
 }
 

@@ -1139,3 +1139,37 @@ batch), con un conflicto de email y uno de `woo_customer_id`,
 confirmando que ambos pedidos terminan existiendo con su incidencia.
 El costo es el `SAVEPOINT` extra por pedido en el ~10% de los casos que
 chocan — insignificante frente a perder el pedido entero.
+
+---
+
+## ADR-024 — Sincronización con WooCommerce resuelta en backend, sin n8n
+
+**Estado**: Aceptado.
+
+**Contexto**: En una etapa temprana del proyecto se evaluó apoyar la
+sincronización con WooCommerce en n8n (automatización de terceros) en vez de
+resolverla con lógica propia. El equipo técnico decidió que no hacía falta
+depender de una herramienta externa para esto: el mecanismo real que
+terminó implementándose — webhook de notificación + polling incremental con
+cursor + reconciliación diaria, aterrizaje crudo y transformación propia
+(ADR-002/003, `sync/ingesta.ts`, `transform/comandes.ts`) — se resuelve
+enteramente a nivel de backend, sin ninguna pieza intermedia.
+
+**Decisión**: No usar n8n. Toda la lógica de sincronización (ingesta,
+normalización, resolución de artículo/cliente, idempotencia) vive en el
+backend del proyecto, en el código versionado de este repositorio.
+
+**Fecha**: no documentada con precisión en ningún commit ni ADR anterior a
+este. La evidencia indirecta disponible: el primer código de ingesta
+(`sync/ingesta.ts`, capa 5) se integró el 2026-08-15, ya con el mecanismo de
+cursor/polling que reemplaza cualquier automatización externa — por lo que
+para esa fecha la decisión de no depender de n8n ya estaba tomada y
+funcionando. Se documenta como aproximación razonable, no como fecha exacta
+confirmada; falta cerrarla con precisión con el equipo si hiciera falta para
+algún entregable formal.
+
+**Consecuencias**: Ninguna dependencia externa de automatización en el
+stack de sincronización — todo el comportamiento (reintentos, ventanas de
+consulta, manejo de fallos) es código propio, testeado y versionado junto
+al resto del backend, sin un sistema aparte que mantener o al que dar de
+alta accesos.

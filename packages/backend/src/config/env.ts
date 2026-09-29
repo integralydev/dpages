@@ -100,19 +100,23 @@ const esquemaEnv = z
     // (ninguna petición cross-origin pasa), no abierto a cualquiera.
     CORS_ORIGIN: z.string().url('debe ser una URL válida, ej. https://app.dpages.cat').optional(),
 
-    // Usada por POST /usuaris (crear/borrar usuario de Firebase, generar el
-    // link de establecimiento de contraseña). Identity Toolkit gestiona sus
-    // propios permisos por fuera de IAM de GCP: la cuenta de servicio de
-    // Cloud Run (dpages-backend@...) nunca tuvo permiso real ahí pese a sus
-    // roles de IAM a nivel de proyecto. Contenido COMPLETO del JSON de la
-    // cuenta de servicio que Firebase genera automáticamente
-    // (firebase-adminsdk-fbsvc@..., la única con el rol "Administrador de
-    // Firebase Authentication" aplicado de verdad) — no una ruta de archivo,
-    // no hay volúmenes montados en Cloud Run. Opcional acá a propósito: la
-    // ausencia se valida perezosamente, recién cuando algo intenta usarla
-    // (ver obtenerAppFirebaseAdmin en auth-firebase.ts), no al arrancar el
-    // proceso — el resto del sistema (verificación de tokens, Cloud SQL)
-    // sigue con las credenciales por defecto de la instancia, sin cambios.
+    // LEGACY (I1, migración en curso) — usada por POST /usuaris (crear/borrar
+    // usuario de Firebase, generar el link de establecimiento de contraseña).
+    // Mecanismo de transición: mientras el rol IAM "Administrador de Firebase
+    // Authentication" de Identity Toolkit no esté otorgado a la cuenta de
+    // servicio de Cloud Run (dpages-backend@...), esta variable, si está
+    // presente, tiene prioridad sobre Application Default Credentials (ver
+    // obtenerAppFirebaseAdmin en auth-firebase.ts) — permite seguir operando
+    // con la clave explícita del service account que Firebase genera
+    // automáticamente (firebase-adminsdk-fbsvc@..., la única que hoy tiene
+    // ese rol aplicado de verdad). Una vez que el rol se confirme también
+    // para dpages-backend@..., esta variable puede quitarse de producción sin
+    // tocar código: su ausencia hace que se use ADC directamente, mismo
+    // mecanismo que ya usa la verificación de tokens (obtenerAppFirebase()).
+    // Contenido COMPLETO del JSON de la cuenta de servicio (no una ruta de
+    // archivo, no hay volúmenes montados en Cloud Run). Opcional acá a
+    // propósito: la ausencia se resuelve perezosamente (cae a ADC), no al
+    // arrancar el proceso.
     FIREBASE_ADMIN_SDK_KEY_JSON: z.string().optional(),
   })
   .superRefine((data, ctx) => {

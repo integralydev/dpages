@@ -78,7 +78,10 @@ tocar nada:
   no hacen falta para arrancar): `TASQUES_OIDC_AUDIENCE` (sólo producción),
   `CORS_ORIGIN` (sólo producción — fuera de ella se usa un origen fijo de
   desarrollo), `INGESTA_HISTORIC_COMPLET`, `FIREBASE_ADMIN_SDK_KEY_JSON`
-  (sólo hace falta para `POST /usuaris`, alta de usuarios).
+  (LEGACY, en migración a Application Default Credentials — sigue haciendo
+  falta en producción para `POST /usuaris` mientras el rol IAM de Identity
+  Toolkit no esté otorgado a la cuenta de servicio de Cloud Run, ver más
+  abajo; en local no hace falta, ya funciona con ADC).
 
 **Sobre `GOOGLE_APPLICATION_CREDENTIALS` (no está en `.env.example`, es una
 variable estándar del SDK de Google, no propia del proyecto)**: con
@@ -93,6 +96,17 @@ ahí sí hace falta apuntarla a un archivo de credenciales de servicio
 `packages/backend/firebase-service-account*.json`, nunca comiteado). Ese
 archivo, igual que las credenciales de Firebase del paso 7, se entrega
 como parte del acta de cierre del proyecto.
+
+**I1 (migración a ADC para `POST /usuaris`)** — si ese mismo archivo ya está
+apuntado por `GOOGLE_APPLICATION_CREDENTIALS` y es el service account
+`firebase-adminsdk-fbsvc@...` (el que Firebase genera automáticamente, con el
+rol "Administrador de Firebase Authentication"), `POST /usuaris` también
+funciona en local vía ADC sin necesitar `FIREBASE_ADMIN_SDK_KEY_JSON`
+(verificado con una llamada real de sólo lectura a Identity Toolkit). En
+producción, Cloud Run resuelve ADC a la cuenta de servicio de la instancia
+(`dpages-backend@...`), que todavía no tiene ese rol otorgado — hasta que se
+confirme, `FIREBASE_ADMIN_SDK_KEY_JSON` sigue siendo necesaria ahí (ver
+`.env.example` y `docs/integracion-frontend-shared-firebase.md`).
 
 ### 4. Aplicar migraciones
 
