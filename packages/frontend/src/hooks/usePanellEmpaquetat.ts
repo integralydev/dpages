@@ -24,7 +24,8 @@ export type PackagingPanelFilters = {
   clientId?: number;
   dataLliuramentDes?: string;
   dataLliuramentFins?: string;
-  producte?: string;
+  /** Un o més productes (descripció exacta); el backend en fa un OR. */
+  producte?: string[];
   categoriaId?: number;
   /** Sense valor = totes les línies. */
   confirmacio?: 'pendents' | 'confirmades';

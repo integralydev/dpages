@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { AsyncCombobox, type ComboboxOption } from '@/components/ui/AsyncCombobox';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ClearFiltersButton, FilterBar } from '@/components/ui/FilterBar';
+import { MultiCombobox } from '@/components/ui/MultiCombobox';
 import { DataCard, DataCardActions, DataCardField, DataCardGrid } from '@/components/ui/DataCard';
 import { DateInput } from '@/components/ui/DateInput';
 import { DecimalInput } from '@/components/ui/DecimalInput';
@@ -344,15 +345,15 @@ export default function PackagingPage() {
   // Es guarda l'opció sencera (id+label): no hi ha cap array complet
   // d'on resoldre l'etiqueta a mostrar després.
   const [selectedClient, setSelectedClient] = useState<ComboboxOption | null>(null);
-  // dataLliuramentDes/Fins (rang) i producte (exacte, case-insensitive) ja
-  // tenen suport real al backend. Mateix patró que
+  // dataLliuramentDes/Fins (rang) i producte (exacte, case-insensitive; un
+  // o més, mateix patró que Obrador) ja tenen suport real al backend. Mateix patró que
   // "Data d'expedició" (un sol camp, enviat com Des=Fins=mateix valor).
   // Producte segueix en mode LOCAL (filtrant `catalog` ja carregat, mateix
   // criteri que Producte a OrderForm.tsx): GET /productes?cerca= fa
   // coincidència EXACTA a propòsit (regla 3.1), no serveix per a cerca
   // incremental — veure lib/productSearch.ts.
   const [deliveryDateFilter, setDeliveryDateFilter] = useState('');
-  const [productFilter, setProductFilter] = useState(ALL);
+  const [selectedProducts, setSelectedProducts] = useState<ComboboxOption[]>([]);
   const [categoryFilter, setCategoryFilter] = useState(ALL_FEM);
   const [confirmacioFilter, setConfirmacioFilter] = useState(ALL_FEM);
 
@@ -370,18 +371,6 @@ export default function PackagingPage() {
     () =>
       carrierFilter !== ALL ? carriers.find((item) => item.nom === carrierFilter)?.id : undefined,
     [carrierFilter, carriers],
-  );
-  // L'input de producte necessita un id numèric per a `value` (contracte
-  // d'AsyncCombobox), però el filtre real que viatja al backend és la
-  // descripció (string, ver `filters` més avall) — es resol el primer
-  // producte que la comparteixi, igual que abans es resolia `clientId`/
-  // `carrierId` a partir d'una etiqueta.
-  const productId = useMemo(
-    () =>
-      productFilter !== ALL
-        ? (catalog.find((product) => product.descripcio === productFilter)?.id ?? null)
-        : null,
-    [productFilter, catalog],
   );
   const loadProductOptions = useMemo(
     () => (query: string) =>
@@ -404,7 +393,9 @@ export default function PackagingPage() {
       ...(deliveryDateFilter
         ? { dataLliuramentDes: deliveryDateFilter, dataLliuramentFins: deliveryDateFilter }
         : {}),
-      ...(productFilter !== ALL ? { producte: productFilter } : {}),
+      ...(selectedProducts.length > 0
+        ? { producte: selectedProducts.map((product) => product.label) }
+        : {}),
       ...(categoriaId !== undefined ? { categoriaId } : {}),
       ...(confirmacio !== undefined ? { confirmacio } : {}),
     }),
@@ -413,7 +404,7 @@ export default function PackagingPage() {
       carrierId,
       selectedClient,
       deliveryDateFilter,
-      productFilter,
+      selectedProducts,
       categoriaId,
       confirmacio,
     ],
@@ -472,7 +463,7 @@ export default function PackagingPage() {
     setCarrierFilter(ALL);
     setSelectedClient(null);
     setDeliveryDateFilter('');
-    setProductFilter(ALL);
+    setSelectedProducts([]);
     setCategoryFilter(ALL_FEM);
     setConfirmacioFilter(ALL_FEM);
   }
@@ -538,14 +529,14 @@ export default function PackagingPage() {
           onChange={setCarrierFilter}
           allLabel={ALL}
         />
-        <AsyncCombobox
-          label="Producte"
-          value={productId}
-          displayValue={productFilter !== ALL ? productFilter : ''}
+        <MultiCombobox
+          label="Productes"
+          selected={selectedProducts}
+          onChange={setSelectedProducts}
           placeholder="Cercar producte..."
+          addMorePlaceholder="Afegir un altre producte..."
           debounceMs={0}
           loadOptions={loadProductOptions}
-          onChange={(option) => setProductFilter(option?.label ?? ALL)}
         />
         <AsyncCombobox
           label="Client"
