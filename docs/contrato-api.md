@@ -1153,6 +1153,12 @@ líneas individuales visibles.
 
 Filtros: `?dataProduccioDes=&dataProduccioFins=&categoriaId=&tipus=&producte=&format=&envasat=`
 
+> **`producte` repetible (petición del cliente, 29/09/2026):**
+> `?producte=Llom%20fresc&producte=Botifarra` devuelve las líneas de
+> **cualquiera** de los productos indicados (OR). Cada valor sigue siendo
+> coincidencia exacta, case-insensitive, contra `producte.descripcio`. Un
+> solo `?producte=` funciona igual que antes.
+
 > `dataProduccioFins` incluye el día completo — ver "Filtros de rango de
 > fecha" en la sección 2 (capa 36).
 

@@ -1003,8 +1003,11 @@ paths:
           description: >-
             Filtra por producte.descripcio — coincidencia EXACTA,
             case-insensitive (no substring). Capa 20, mismo criterio que
-            GET /rendiments-porcs y GET /panells/produccio.
-          schema: { type: string }
+            GET /rendiments-porcs y GET /panells/produccio. Repetible
+            (29/09/2026): varios valores = líneas de cualquiera de ellos.
+          style: form
+          explode: true
+          schema: { type: array, items: { type: string } }
         - name: format
           in: query
           description: Filtra por producte.format — coincidencia exacta. Capa 20.

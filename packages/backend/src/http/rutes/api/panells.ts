@@ -288,12 +288,17 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       condicions.push(`p.tipus = $${valors.length + 1}`);
       valors.push(query.tipus);
     }
-    if (typeof query.producte === 'string' && query.producte.trim() !== '') {
-      // Coincidencia EXACTA por descripción, case-insensitive — mismo
-      // criterio que /panells/produccio y /rendiments-porcs (regla 3.1
-      // transversal), no substring.
-      condicions.push(`LOWER(p.descripcio) = LOWER($${valors.length + 1})`);
-      valors.push(query.producte.trim());
+    // Coincidencia EXACTA por descripción, case-insensitive — mismo
+    // criterio que /panells/produccio y /rendiments-porcs (regla 3.1
+    // transversal), no substring. Repetible (petición del cliente,
+    // 29/09/2026): `?producte=A&producte=B` = líneas de A o de B. Fastify ya
+    // entrega un array cuando la clave se repite.
+    const productes = (Array.isArray(query.producte) ? query.producte : [query.producte])
+      .filter((valor): valor is string => typeof valor === 'string' && valor.trim() !== '')
+      .map((valor) => valor.trim().toLowerCase());
+    if (productes.length > 0) {
+      condicions.push(`LOWER(p.descripcio) = ANY($${valors.length + 1}::text[])`);
+      valors.push(productes);
     }
     if (typeof query.format === 'string' && query.format.trim() !== '') {
       condicions.push(`p.format = $${valors.length + 1}`);

@@ -217,6 +217,25 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
     );
     expect(perProducteParcial.dades).toHaveLength(0); // substring no matchea
 
+    // producte repetible (petició del client, 29/09/2026): OR entre valors.
+    const perLlom = cuerpoJson<PanellObradorApi>(
+      await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/obrador?producte=Llom%20fresc%20de%20porc',
+      }),
+    );
+    expect(perLlom.totals.linies).toBeGreaterThan(0);
+    const perTots2 = cuerpoJson<PanellObradorApi>(
+      await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/obrador?producte=Llom%20fresc%20de%20porc&producte=botifarra%20crua&mida=200',
+      }),
+    );
+    expect(perTots2.totals.linies).toBe(perLlom.totals.linies + 1);
+    expect(new Set(perTots2.dades.map((f) => f.producte.descripcio))).toEqual(
+      new Set(['Llom fresc de porc', 'Botifarra crua']),
+    );
+
     const perProducteSenseMatch = cuerpoJson<PanellObradorApi>(
       await fastify.inject({
         method: 'GET',
