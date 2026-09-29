@@ -18,7 +18,8 @@ import { usePageClamp } from './usePageClamp';
  * formen part del disseny d'aquesta pantalla, no es passen mai acá.
  */
 export type WorkshopPanelFilters = {
-  producte?: string;
+  /** Un o més productes (descripció exacta); el backend en fa un OR. */
+  producte?: string[];
   format?: string;
   envasat?: string;
   dataProduccioDes?: string;
