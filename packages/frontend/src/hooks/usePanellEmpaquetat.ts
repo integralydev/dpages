@@ -13,9 +13,9 @@ import {
 import { usePageClamp } from './usePageClamp';
 
 /**
- * Els 5 filtres reals de GET /panells/empaquetat (confirmat contra
+ * Els filtres reals de GET /panells/empaquetat (confirmat contra
  * panells.ts) — dataLliuramentDes/Fins i producte abans no tenien suport
- * al backend.
+ * al backend. categoriaId i confirmacio: peticions d'Ari (29/09/2026).
  */
 export type PackagingPanelFilters = {
   dataExpedicioDes?: string;
@@ -25,6 +25,9 @@ export type PackagingPanelFilters = {
   dataLliuramentDes?: string;
   dataLliuramentFins?: string;
   producte?: string;
+  categoriaId?: number;
+  /** Sense valor = totes les línies. */
+  confirmacio?: 'pendents' | 'confirmades';
 };
 
 /**

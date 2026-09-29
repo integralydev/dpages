@@ -13,6 +13,7 @@ import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { StatCard } from '@/components/ui/StatCard';
 import { useCarriers } from '@/hooks/useCarriers';
 import { useCatalog } from '@/hooks/useCatalog';
+import { useCategories } from '@/hooks/useCategories';
 import { useEditableRow } from '@/hooks/useEditableRow';
 import { type LliuramentSaveResult, usePanellEmpaquetat } from '@/hooks/usePanellEmpaquetat';
 import {
@@ -26,6 +27,15 @@ import { formatDecimal, parseDecimalInput } from '@/lib/decimals';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
 
 const ALL = 'Tots';
+const ALL_FEM = 'Totes';
+
+// Petició d'Ari (29/09/2026): una línia és "enviada" quan s'hi han desat
+// unitats i quilos enviats (confirmatA no null). Etiqueta → valor de
+// `?confirmacio=` al backend; "Totes" = sense filtre.
+const CONFIRMACIO_OPTIONS = {
+  Pendents: 'pendents',
+  Enviades: 'confirmades',
+} as const satisfies Record<string, 'pendents' | 'confirmades'>;
 
 function clientLabel(client: ClientApi) {
   return `${client.codi ?? client.id} · ${client.nom ?? ''}`;
@@ -83,18 +93,6 @@ function leftBorderClass(confirmatA: string | null) {
   return confirmatA !== null ? 'border-l-4 border-l-green-500' : 'border-l-4 border-l-gray-200';
 }
 
-// La cel·la de "Treballada" (amb leftBorderClass) queda hidden xl:table-cell
-// en tablet — sense això, l'indicador de color desapareix del tot en aquest
-// rang, no només el checkbox. `max-xl:` (variant natiu de Tailwind, sense
-// plugin) reprodueix la mateixa franja a la primera cel·la visible en
-// tablet (Producte) i es retira sola en desktop complet, on ja hi és a
-// Treballada — mai les dues alhora.
-function leftBorderClassTablet(confirmatA: string | null) {
-  return confirmatA !== null
-    ? 'max-xl:border-l-4 max-xl:border-l-green-500'
-    : 'max-xl:border-l-4 max-xl:border-l-gray-200';
-}
-
 type Draft = { unitatsLliurades: string; kgLliurats: string };
 
 function PackagingRow({
@@ -141,9 +139,12 @@ function PackagingRow({
 
   return (
     <tr className="border-b border-gray-100 last:border-0">
-      <td
-        className={`${leftBorderClass(line.confirmatA)} hidden px-3 py-3 text-center xl:table-cell`}
-      >
+      {/* Primera columna (petició d'Ari) i sempre visible: porta la franja
+          de color pendent/enviada en tots els tamanys de pantalla. */}
+      <td className={`${leftBorderClass(line.confirmatA)} px-3 py-3 break-words text-gray-700`}>
+        {line.categoria ?? '—'}
+      </td>
+      <td className="hidden px-3 py-3 text-center xl:table-cell">
         <WorkedCheckbox
           confirmatA={line.confirmatA}
           onRequestUndo={line.confirmatA !== null ? () => onRequestUndo(line) : undefined}
@@ -158,7 +159,7 @@ function PackagingRow({
       <td className="hidden px-3 py-3 break-words text-gray-900 xl:table-cell">
         {line.transportista ?? '—'}
       </td>
-      <td className={`${leftBorderClassTablet(line.confirmatA)} px-3 py-3 break-words`}>
+      <td className="px-3 py-3 break-words">
         <span className="font-semibold text-gray-900">{line.producte}</span>
       </td>
       <td className="hidden px-3 py-3 break-words text-gray-900 xl:table-cell">
@@ -254,6 +255,9 @@ function PackagingCard({
       <DataCard>
         <div className="flex items-start justify-between gap-2">
           <div>
+            <p className="text-xs font-medium tracking-wide text-gray-500 uppercase">
+              {line.categoria ?? '—'}
+            </p>
             <p className="font-semibold text-gray-900">{line.producte}</p>
             <p className="text-sm text-gray-500">{line.client ?? '—'}</p>
           </div>
@@ -329,6 +333,7 @@ function PackagingCard({
 export default function PackagingPage() {
   const { data: carriers } = useCarriers();
   const { data: catalog } = useCatalog();
+  const { data: categories } = useCategories();
 
   const [shippingDateFilter, setShippingDateFilter] = useState('');
   const [carrierFilter, setCarrierFilter] = useState(ALL);
@@ -348,6 +353,18 @@ export default function PackagingPage() {
   // incremental — veure lib/productSearch.ts.
   const [deliveryDateFilter, setDeliveryDateFilter] = useState('');
   const [productFilter, setProductFilter] = useState(ALL);
+  const [categoryFilter, setCategoryFilter] = useState(ALL_FEM);
+  const [confirmacioFilter, setConfirmacioFilter] = useState(ALL_FEM);
+
+  const categoriaId = useMemo(
+    () =>
+      categoryFilter !== ALL_FEM
+        ? categories.find((item) => item.nom === categoryFilter)?.id
+        : undefined,
+    [categoryFilter, categories],
+  );
+  const confirmacio =
+    CONFIRMACIO_OPTIONS[confirmacioFilter as keyof typeof CONFIRMACIO_OPTIONS] ?? undefined;
 
   const carrierId = useMemo(
     () =>
@@ -388,8 +405,18 @@ export default function PackagingPage() {
         ? { dataLliuramentDes: deliveryDateFilter, dataLliuramentFins: deliveryDateFilter }
         : {}),
       ...(productFilter !== ALL ? { producte: productFilter } : {}),
+      ...(categoriaId !== undefined ? { categoriaId } : {}),
+      ...(confirmacio !== undefined ? { confirmacio } : {}),
     }),
-    [shippingDateFilter, carrierId, selectedClient, deliveryDateFilter, productFilter],
+    [
+      shippingDateFilter,
+      carrierId,
+      selectedClient,
+      deliveryDateFilter,
+      productFilter,
+      categoriaId,
+      confirmacio,
+    ],
   );
 
   // "pendents primer" ja ve per defecte des del backend (GET
@@ -446,6 +473,8 @@ export default function PackagingPage() {
     setSelectedClient(null);
     setDeliveryDateFilter('');
     setProductFilter(ALL);
+    setCategoryFilter(ALL_FEM);
+    setConfirmacioFilter(ALL_FEM);
   }
 
   async function handleSave(
@@ -478,6 +507,20 @@ export default function PackagingPage() {
       />
 
       <FilterBar>
+        <SimpleDropdown
+          label="Enviament"
+          options={Object.keys(CONFIRMACIO_OPTIONS)}
+          value={confirmacioFilter}
+          onChange={setConfirmacioFilter}
+          allLabel={ALL_FEM}
+        />
+        <SimpleDropdown
+          label="Categoria"
+          options={categories.map((item) => item.nom)}
+          value={categoryFilter}
+          onChange={setCategoryFilter}
+          allLabel={ALL_FEM}
+        />
         <DateInput
           label="Data d'expedició"
           value={shippingDateFilter}
@@ -548,25 +591,28 @@ export default function PackagingPage() {
             <table className="w-full table-fixed text-sm">
               <thead className="border-b border-gray-200">
                 <tr>
-                  <th className="hidden w-[5%] px-3 py-2 text-center font-medium text-gray-500 break-words xl:table-cell">
+                  <th className="w-[8%] px-3 py-2 text-left font-medium text-gray-500 break-words">
+                    Categoria
+                  </th>
+                  <th className="hidden w-[4%] px-3 py-2 text-center font-medium text-gray-500 break-words xl:table-cell">
                     <span className="sr-only">Treballada</span>
                   </th>
-                  <th className="hidden w-[10%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
+                  <th className="hidden w-[9%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
                     Data d&apos;expedició
                   </th>
                   <th className="hidden w-[8%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
                     Data de lliurament
                   </th>
-                  <th className="hidden w-[12%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
+                  <th className="hidden w-[9%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
                     Transportista
                   </th>
                   <th className="w-[12%] px-3 py-2 text-left font-medium text-gray-500 break-words">
                     Producte
                   </th>
-                  <th className="hidden w-[9%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
+                  <th className="hidden w-[8%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
                     Client
                   </th>
-                  <th className="w-[10%] px-3 py-2 text-right font-medium text-gray-500 break-words">
+                  <th className="w-[9%] px-3 py-2 text-right font-medium text-gray-500 break-words">
                     Unitats demanades
                   </th>
                   <th className="w-[8%] px-3 py-2 text-right font-medium text-gray-500 break-words">
@@ -578,7 +624,7 @@ export default function PackagingPage() {
                   <th className="w-[8%] px-3 py-2 text-right font-medium text-gray-500 break-words">
                     Kilos lliurats
                   </th>
-                  <th className="w-[10%] px-3 py-2 text-center font-medium text-gray-500 break-words">
+                  <th className="w-[9%] px-3 py-2 text-center font-medium text-gray-500 break-words">
                     Desar
                   </th>
                 </tr>
