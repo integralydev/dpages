@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 export function DateInput({
   label,
@@ -16,7 +16,7 @@ export function DateInput({
         type="date"
         value={value}
         onChange={(event) => onChange?.(event.target.value)}
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-gray-400 focus:outline-none"
+        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-brand focus:outline-none"
       />
     </label>
   );

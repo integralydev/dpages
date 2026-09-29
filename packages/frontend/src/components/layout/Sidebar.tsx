@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ComponentType } from 'react';
 import {
@@ -108,7 +109,7 @@ function NavLink({
       onClick={onNavigate}
       title={collapsed ? item.label : undefined}
       className={`flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] leading-tight font-medium transition-colors ${
-        active ? 'bg-ink text-white' : 'text-gray-700 hover:bg-gray-100'
+        active ? 'bg-brand font-semibold text-carbon' : 'text-gray-200 hover:bg-white/10'
       } ${collapsed ? 'justify-center' : ''}`}
     >
       <Icon className="h-4 w-4 shrink-0" />
@@ -196,15 +197,15 @@ function UserMenu({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: 
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className={`flex w-full items-center gap-2.5 rounded-lg px-1 py-1.5 hover:bg-gray-100 ${collapsed ? 'justify-center' : ''}`}
+        className={`flex w-full items-center gap-2.5 rounded-lg px-1 py-1.5 hover:bg-white/10 ${collapsed ? 'justify-center' : ''}`}
       >
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-sm font-semibold text-white">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-light text-sm font-semibold text-carbon">
           {initial}
         </span>
         {!collapsed && (
           <span
             title={user.nom}
-            className="min-w-0 flex-1 truncate text-left text-sm font-medium text-gray-900"
+            className="min-w-0 flex-1 truncate text-left text-sm font-medium text-white"
           >
             {user.nom}
           </span>
@@ -238,11 +239,22 @@ function SidebarContent({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center justify-between px-5 pt-6 pb-5">
+      {/* Franja grafit com la capçalera de dpages.cat: el logotip és rosa
+          clar i sobre fons blanc o carbó no es llegiria prou. */}
+      <div
+        className={`mb-4 flex shrink-0 items-center bg-graphite px-5 pt-6 pb-5 ${collapsed ? 'justify-center' : 'justify-between'}`}
+      >
         {!collapsed && (
           <div>
-            <p className="text-base font-bold text-gray-900">Gestió de Comandes</p>
-            <p className="text-sm text-gray-400">Panell operatiu</p>
+            <Image
+              src="/brand/dpages-logotip.png"
+              alt="dpagès"
+              width={313}
+              height={112}
+              priority
+              className="h-9 w-auto"
+            />
+            <p className="mt-1.5 text-xs tracking-wide text-gray-200">Gestió de comandes</p>
           </div>
         )}
         {onToggleCollapse && (
@@ -250,7 +262,7 @@ function SidebarContent({
             type="button"
             onClick={onToggleCollapse}
             aria-label={collapsed ? 'Expandir menú' : 'Col·lapsar menú'}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-gray-200 text-gray-400 hover:bg-gray-50"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/20 text-gray-200 hover:bg-white/10"
           >
             {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
           </button>
@@ -260,7 +272,7 @@ function SidebarContent({
             type="button"
             onClick={onClose}
             aria-label="Tancar menú"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-gray-200 text-gray-400 hover:bg-gray-50"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/20 text-gray-200 hover:bg-white/10"
           >
             <X className="h-4 w-4" />
           </button>
@@ -285,7 +297,7 @@ function SidebarContent({
           return (
             <div key={group.label} className="flex flex-col gap-1">
               {collapsed ? (
-                somethingBefore && <div className="my-2 border-t border-gray-100" />
+                somethingBefore && <div className="my-2 border-t border-white/10" />
               ) : (
                 <NavGroupHeader label={group.label} spaced={somethingBefore} />
               )}
@@ -303,7 +315,7 @@ function SidebarContent({
         })}
       </nav>
 
-      <div className="shrink-0 border-t border-gray-100 px-3 pt-3 pb-4">
+      <div className="shrink-0 border-t border-white/10 px-3 pt-3 pb-4">
         <UserMenu collapsed={collapsed} onNavigate={onNavigate} />
       </div>
     </div>
@@ -316,13 +328,20 @@ export function Sidebar() {
 
   return (
     <>
-      <header className="fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between border-b border-gray-200 bg-white px-4 lg:hidden">
-        <span className="text-sm font-bold text-gray-900">Gestió de Comandes</span>
+      <header className="fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between bg-graphite px-4 lg:hidden">
+        <Image
+          src="/brand/dpages-logotip.png"
+          alt="dpagès · Gestió de comandes"
+          width={313}
+          height={112}
+          priority
+          className="h-7 w-auto"
+        />
         <button
           type="button"
           onClick={() => setMobileOpen(true)}
           aria-label="Obrir menú"
-          className="flex h-9 w-9 items-center justify-center rounded-md border border-gray-200 text-gray-500"
+          className="flex h-9 w-9 items-center justify-center rounded-md border border-white/20 text-gray-200"
         >
           <Menu className="h-5 w-5" />
         </button>
@@ -336,7 +355,7 @@ export function Sidebar() {
         />
       )}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-72 transform border-r border-gray-200 bg-white transition-transform duration-200 lg:hidden ${
+        className={`fixed inset-y-0 left-0 z-50 w-72 transform bg-carbon transition-transform duration-200 lg:hidden ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -348,7 +367,7 @@ export function Sidebar() {
       </aside>
 
       <aside
-        className={`sticky top-0 hidden h-screen shrink-0 border-r border-gray-200 bg-white transition-all duration-200 lg:block ${
+        className={`sticky top-0 hidden h-screen shrink-0 bg-carbon transition-all duration-200 lg:block ${
           collapsed ? 'w-20' : 'w-72'
         }`}
       >

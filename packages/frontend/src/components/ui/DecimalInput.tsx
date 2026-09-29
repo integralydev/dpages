@@ -23,7 +23,7 @@ type DecimalInputProps = {
 };
 
 const DEFAULT_CLASSNAME =
-  'w-full rounded-md border px-3 py-2 text-sm text-gray-900 focus:outline-none border-gray-300 focus:border-gray-400 disabled:bg-gray-50 disabled:text-gray-400';
+  'w-full rounded-md border px-3 py-2 text-sm text-gray-900 focus:outline-none border-gray-300 focus:border-brand disabled:bg-gray-50 disabled:text-gray-400';
 
 export const DecimalInput = forwardRef<HTMLInputElement, DecimalInputProps>(function DecimalInput(
   { label, value, onChange, onBlur, error, disabled, className },

@@ -410,7 +410,7 @@ function LineFormCard({
                 dataProduccio: event.target.value ? `${event.target.value}T00:00:00Z` : null,
               })
             }
-            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-gray-400 focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
           />
           {dateError && <span className="text-xs text-red-600">{dateError}</span>}
           {/* Issue #21 — indicador informatiu, no una incidència: dataProduccio
@@ -438,7 +438,7 @@ function LineFormCard({
                     : line.kgDemanats,
               });
             }}
-            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-right text-sm text-gray-900 focus:border-gray-400 focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-right text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
           />
         </label>
         {/* Unitats/pes lliurats: sólo lectura acá — únicamente el Panell
@@ -469,7 +469,7 @@ function LineFormCard({
               value={line.kgDemanats}
               onChange={(value) => onUpdate({ kgDemanats: value })}
               onBlur={() => onUpdate({ kgDemanats: parseDecimalInput(line.kgDemanats, 3) })}
-              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-right text-sm text-gray-900 focus:border-gray-400 focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-right text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
             />
           )}
         </label>
@@ -488,7 +488,7 @@ function LineFormCard({
           disabled={disabled}
           onChange={(event) => onUpdate({ obsProduccio: event.target.value })}
           rows={2}
-          className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-gray-400 focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+          className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
         />
       </label>
     </DataCard>
@@ -1084,7 +1084,7 @@ export const OrderForm = forwardRef<
                 setObsProduccio(event.target.value);
               }}
               rows={2}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-gray-400 focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
             />
           </label>
           <label className="flex flex-col gap-1.5 text-sm">
@@ -1097,7 +1097,7 @@ export const OrderForm = forwardRef<
                 setObsLliurament(event.target.value);
               }}
               rows={2}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-gray-400 focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
             />
           </label>
         </div>
@@ -1226,7 +1226,7 @@ export const OrderForm = forwardRef<
                               : null,
                           })
                         }
-                        className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-sm text-gray-900 focus:border-gray-400 focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+                        className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
                       />
                       {lineDateError && (
                         <p className="mt-1 text-xs text-red-600">{lineDateError}</p>
@@ -1254,7 +1254,7 @@ export const OrderForm = forwardRef<
                                 : line.kgDemanats,
                           });
                         }}
-                        className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-right text-sm text-gray-900 focus:border-gray-400 focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+                        className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-right text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
                       />
                     </td>
                     {/* Sólo lectura: ver nota de Unitats/Pes lliurades en LineFormCard. */}
@@ -1279,7 +1279,7 @@ export const OrderForm = forwardRef<
                               kgDemanats: parseDecimalInput(line.kgDemanats, 3),
                             })
                           }
-                          className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-right text-sm text-gray-900 focus:border-gray-400 focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+                          className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-right text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
                         />
                       )}
                     </td>
@@ -1292,7 +1292,7 @@ export const OrderForm = forwardRef<
                           updateLine(line.id, { obsProduccio: event.target.value })
                         }
                         rows={1}
-                        className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-sm text-gray-900 focus:border-gray-400 focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+                        className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
                       />
                     </td>
                     <td className="px-1.5 py-2">

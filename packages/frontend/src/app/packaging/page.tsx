@@ -171,7 +171,7 @@ function PackagingRow({
         <DecimalInput
           value={draft.unitatsLliurades}
           onChange={(value) => setField('unitatsLliurades', value)}
-          className="w-full rounded-md border border-gray-300 px-2 py-1 text-right text-sm text-gray-900 focus:border-gray-400 focus:outline-none"
+          className="w-full rounded-md border border-gray-300 px-2 py-1 text-right text-sm text-gray-900 focus:border-brand focus:outline-none"
         />
         {fieldErrors.unitatsLliurades && (
           <p className="mt-1 text-xs text-red-600">{fieldErrors.unitatsLliurades}</p>
@@ -182,7 +182,7 @@ function PackagingRow({
         <DecimalInput
           value={draft.kgLliurats}
           onChange={(value) => setField('kgLliurats', value)}
-          className="w-full rounded-md border border-gray-300 px-2 py-1 text-right text-sm text-gray-900 focus:border-gray-400 focus:outline-none"
+          className="w-full rounded-md border border-gray-300 px-2 py-1 text-right text-sm text-gray-900 focus:border-brand focus:outline-none"
         />
         {fieldErrors.kgLliurats && (
           <p className="mt-1 text-xs text-red-600">{fieldErrors.kgLliurats}</p>
@@ -287,7 +287,7 @@ function PackagingCard({
             <DecimalInput
               value={draft.unitatsLliurades}
               onChange={(value) => setField('unitatsLliurades', value)}
-              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-gray-400 focus:outline-none"
+              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-brand focus:outline-none"
             />
             {fieldErrors.unitatsLliurades && (
               <p className="text-xs text-red-600">{fieldErrors.unitatsLliurades}</p>
@@ -298,7 +298,7 @@ function PackagingCard({
             <DecimalInput
               value={draft.kgLliurats}
               onChange={(value) => setField('kgLliurats', value)}
-              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-gray-400 focus:outline-none"
+              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-brand focus:outline-none"
             />
             {fieldErrors.kgLliurats && (
               <p className="text-xs text-red-600">{fieldErrors.kgLliurats}</p>

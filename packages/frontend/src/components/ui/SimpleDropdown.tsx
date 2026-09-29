@@ -164,7 +164,7 @@ export function SimpleDropdown(props: SimpleDropdownProps) {
             // deixaria el cas més comú (click) sense cap senyal. Mateix
             // gray-400 que ja fa servir el focus de TextField/SelectFilter,
             // no un color nou.
-            isOpen ? 'border-gray-400' : 'border-gray-300 focus:border-gray-400'
+            isOpen ? 'border-brand' : 'border-gray-300 focus:border-brand'
           }`}
         >
           {/* truncate: el botó tancat és d'una sola línia — el text llarg

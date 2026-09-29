@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import { useState } from "react";
+import { useState } from 'react';
 
 function defaultFormat(value: number) {
-  return `${value.toFixed(2).replace(".", ",")} €`;
+  return `${value.toFixed(2).replace('.', ',')} €`;
 }
 
 export function EditableCell({
@@ -24,8 +24,8 @@ export function EditableCell({
   }
 
   function handleChange(raw: string) {
-    const trimmed = raw.trim().replace(",", ".");
-    if (trimmed === "") {
+    const trimmed = raw.trim().replace(',', '.');
+    if (trimmed === '') {
       onChange(null);
       return;
     }
@@ -43,17 +43,17 @@ export function EditableCell({
         type="text"
         inputMode="decimal"
         autoFocus
-        defaultValue={value !== null ? String(value).replace(".", ",") : ""}
+        defaultValue={value !== null ? String(value).replace('.', ',') : ''}
         onChange={(event) => handleChange(event.target.value)}
         onBlur={handleBlur}
         onKeyDown={(event) => {
-          if (event.key === "Enter") event.currentTarget.blur();
-          if (event.key === "Escape") {
+          if (event.key === 'Enter') event.currentTarget.blur();
+          if (event.key === 'Escape') {
             onChange(valueAtEditStart);
             setIsEditing(false);
           }
         }}
-        className="w-24 rounded-md border border-gray-300 px-2 py-1 text-right text-sm text-gray-900 focus:border-gray-400 focus:outline-none"
+        className="w-24 rounded-md border border-gray-300 px-2 py-1 text-right text-sm text-gray-900 focus:border-brand focus:outline-none"
       />
     );
   }
@@ -64,7 +64,7 @@ export function EditableCell({
       onClick={startEditing}
       className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-right text-sm text-gray-900 hover:border-gray-400 hover:bg-gray-50"
     >
-      {value === null ? "—" : formatValue(value)}
+      {value === null ? '—' : formatValue(value)}
     </button>
   );
 }

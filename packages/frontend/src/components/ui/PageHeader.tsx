@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import type { ReactNode } from "react";
+import type { ReactNode } from 'react';
 
 type PageHeaderAction = {
   label: string;
@@ -22,7 +22,7 @@ export function PageHeader({
   return (
     <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 lg:text-3xl">{title}</h1>
+        <h1 className="font-display text-2xl text-gray-900 italic lg:text-3xl">{title}</h1>
         {subtitle && <p className="mt-1 text-sm text-gray-500">{subtitle}</p>}
       </div>
       {right}

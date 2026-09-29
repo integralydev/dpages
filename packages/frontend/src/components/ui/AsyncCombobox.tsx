@@ -173,7 +173,7 @@ export function AsyncCombobox({
           placeholder={placeholder}
           onFocus={() => setIsEditing(true)}
           onChange={(event) => setQuery(event.target.value)}
-          className={`w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-gray-400 focus:outline-none disabled:bg-gray-50 disabled:text-gray-400 ${
+          className={`w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400 ${
             showClearButton ? 'pr-8' : ''
           }`}
         />

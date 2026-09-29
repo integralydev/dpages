@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import { Search } from "lucide-react";
+import { Search } from 'lucide-react';
 
 export function SearchInput({
   label,
@@ -23,7 +23,7 @@ export function SearchInput({
           placeholder={placeholder}
           value={value}
           onChange={(event) => onChange?.(event.target.value)}
-          className="w-full rounded-md border border-gray-300 py-2 pr-3 pl-9 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-400 focus:outline-none"
+          className="w-full rounded-md border border-gray-300 py-2 pr-3 pl-9 text-sm text-gray-900 placeholder:text-gray-400 focus:border-brand focus:outline-none"
         />
       </span>
     </label>
