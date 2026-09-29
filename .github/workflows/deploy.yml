@@ -1,0 +1,110 @@
+name: Deploy a producción
+
+# Disparo MANUAL únicamente — decisión consciente del equipo, no automático
+# en cada push. Ver acta de entrega: el catálogo/reglas de negocio del
+# cliente siguen en ajuste activo, un deploy automático en cada commit
+# expondría cambios no validados en producción.
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_backend:
+        description: '¿Desplegar backend?'
+        type: boolean
+        default: true
+      deploy_frontend:
+        description: '¿Desplegar frontend?'
+        type: boolean
+        default: true
+
+env:
+  PROJECT_ID: dpages
+  REGION: europe-west1
+
+jobs:
+  # El CI normal (ci.yml) ya corrió lint/typecheck/test/build en el push
+  # que originó este commit — acá NO se repiten, sólo se construye y
+  # despliega la imagen del commit ya validado.
+
+  deploy-backend:
+    if: ${{ inputs.deploy_backend }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Autenticar contra GCP
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GCP_DEPLOY_KEY }}
+
+      - name: Configurar gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configurar Docker para Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+      - name: Generar tag de versión
+        id: version
+        run: echo "tag=v$(date +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      - name: Build imagen backend
+        run: |
+          docker build -f packages/backend/Dockerfile \
+            -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/dpages-backend/backend:${{ steps.version.outputs.tag }} .
+
+      - name: Push imagen backend
+        run: docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/dpages-backend/backend:${{ steps.version.outputs.tag }}
+
+      - name: Deploy a Cloud Run
+        run: |
+          gcloud run deploy dpages-backend \
+            --image=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/dpages-backend/backend:${{ steps.version.outputs.tag }} \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }}
+
+      - name: Verificar salud
+        run: |
+          sleep 10
+          curl -sf https://dpages-backend-493716972967.europe-west1.run.app/salut
+
+  deploy-frontend:
+    if: ${{ inputs.deploy_frontend }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Autenticar contra GCP
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GCP_DEPLOY_KEY }}
+
+      - name: Configurar gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configurar Docker para Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+      - name: Generar tag de versión
+        id: version
+        run: echo "tag=v$(date +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      - name: Build imagen frontend
+        run: |
+          docker build -f packages/frontend/Dockerfile \
+            --build-arg NEXT_PUBLIC_API_URL=https://dpages-backend-493716972967.europe-west1.run.app \
+            --build-arg NEXT_PUBLIC_FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }} \
+            --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=dpages-be46b.firebaseapp.com \
+            --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID=dpages-be46b \
+            --build-arg NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=dpages-be46b.firebasestorage.app \
+            --build-arg NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=368112493582 \
+            --build-arg NEXT_PUBLIC_FIREBASE_APP_ID=${{ secrets.FIREBASE_APP_ID }} \
+            -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/dpages-frontend/frontend:${{ steps.version.outputs.tag }} .
+
+      - name: Push imagen frontend
+        run: docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/dpages-frontend/frontend:${{ steps.version.outputs.tag }}
+
+      - name: Deploy a Cloud Run
+        run: |
+          gcloud run deploy dpages-frontend \
+            --image=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/dpages-frontend/frontend:${{ steps.version.outputs.tag }} \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }}
