@@ -45,6 +45,8 @@ infra/gcp/    notas de infraestructura de Google Cloud
   y **Libre Baskerville** cursiva (títulos). Logo en `public/brand/`.
 - **Firebase** JS SDK 12 (sólo Authentication).
 - **lucide-react** (iconos).
+- **jsPDF** 4 + **jspdf-autotable** 5 — listado de pedidos en PDF generado en el
+  navegador (`src/lib/ordersPdf.ts`, carga diferida al pulsar el botón).
 - `@tanstack/react-query` 5 (declarado en el `package.json` raíz).
 
 ## Base de datos
