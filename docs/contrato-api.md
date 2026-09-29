@@ -1295,6 +1295,8 @@ Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramen
 > - `categoriaId`: categoría del artículo de la línea, mismo criterio que
 >   `?categoriaId=` en `/panells/obrador`. Cada fila trae además
 >   `categoria` (nombre, `null` si el artículo no tiene categoría).
+> - `producte` repetible, igual que en `/panells/obrador` (sección 4.7):
+>   varios valores = líneas de cualquiera de esos productos.
 > - `confirmacio`: `pendents` (líneas sin confirmar, `confirmatA` null) o
 >   `confirmades` (ya enviadas: se guardaron unidades y kilos
 >   enviados). Sin el parámetro, todas. Cualquier otro valor es

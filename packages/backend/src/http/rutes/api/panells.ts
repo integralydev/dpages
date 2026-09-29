@@ -35,6 +35,23 @@ async function resolverFiltreEntitat(
   return uuid ?? '00000000-0000-0000-0000-000000000000';
 }
 
+/**
+ * `?producte=` repetible (petició del client, 29/09/2026): `?producte=A&
+ * producte=B` = línies de A o de B. Fastify ja lliura un array quan la clau
+ * es repeteix; un sol valor funciona igual que sempre. Coincidència EXACTA
+ * per descripció, case-insensitive (regla 3.1 transversal), mai substring.
+ * Afegeix la condició a `condicions`/`valors` si hi ha cap producte.
+ */
+function afegirFiltreProductes(valor: unknown, condicions: string[], valors: unknown[]): void {
+  const productes = (Array.isArray(valor) ? valor : [valor])
+    .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    .map((item) => item.trim().toLowerCase());
+  if (productes.length > 0) {
+    condicions.push(`LOWER(p.descripcio) = ANY($${valors.length + 1}::text[])`);
+    valors.push(productes);
+  }
+}
+
 type AgrupacioRendiment = 'KG' | 'MAGRE' | 'PAQ';
 const AGRUPACIONS_RENDIMENT: readonly AgrupacioRendiment[] = ['KG', 'MAGRE', 'PAQ'];
 
@@ -288,18 +305,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       condicions.push(`p.tipus = $${valors.length + 1}`);
       valors.push(query.tipus);
     }
-    // Coincidencia EXACTA por descripción, case-insensitive — mismo
-    // criterio que /panells/produccio y /rendiments-porcs (regla 3.1
-    // transversal), no substring. Repetible (petición del cliente,
-    // 29/09/2026): `?producte=A&producte=B` = líneas de A o de B. Fastify ya
-    // entrega un array cuando la clave se repite.
-    const productes = (Array.isArray(query.producte) ? query.producte : [query.producte])
-      .filter((valor): valor is string => typeof valor === 'string' && valor.trim() !== '')
-      .map((valor) => valor.trim().toLowerCase());
-    if (productes.length > 0) {
-      condicions.push(`LOWER(p.descripcio) = ANY($${valors.length + 1}::text[])`);
-      valors.push(productes);
-    }
+    afegirFiltreProductes(query.producte, condicions, valors);
     if (typeof query.format === 'string' && query.format.trim() !== '') {
       condicions.push(`p.format = $${valors.length + 1}`);
       valors.push(query.format.trim());
@@ -454,13 +460,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       condicions.push(`c.client_id = $${valors.length + 1}`);
       valors.push(clientUuid);
     }
-    // Coincidencia EXACTA, case-insensitive — regla 3.1 transversal (mismo
-    // criterio que ?producte= en /panells/obrador, /panells/produccio y
-    // /rendiments-porcs), no substring.
-    if (typeof query.producte === 'string' && query.producte.trim() !== '') {
-      condicions.push(`LOWER(p.descripcio) = LOWER($${valors.length + 1})`);
-      valors.push(query.producte.trim());
-    }
+    afegirFiltreProductes(query.producte, condicions, valors);
     // Peticions d'Ari (29/09/2026): categoria de l'article (mateix criteri
     // que a /panells/obrador) i línies pendents / ja enviades.
     const categoriaUuid = await resolverFiltreEntitat(

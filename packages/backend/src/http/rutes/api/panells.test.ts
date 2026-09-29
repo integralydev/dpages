@@ -913,6 +913,24 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
       );
       expect(senseFiltre.dades.some((f) => f.categoria === null)).toBe(true);
 
+      // producte repetible, com a /panells/obrador: OR entre valors.
+      const perLlom = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: '/api/v1/panells/empaquetat?producte=Llom%20fresc%20de%20porc',
+        }),
+      );
+      const dosProductes = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: '/api/v1/panells/empaquetat?producte=Llom%20fresc%20de%20porc&producte=xai%20en%20canal&mida=200',
+        }),
+      );
+      expect(dosProductes.totals.linies).toBe(perLlom.totals.linies + 2);
+      expect(new Set(dosProductes.dades.map((f) => f.producte))).toEqual(
+        new Set(['Llom fresc de porc', 'Xai en canal']),
+      );
+
       const invalid = await fastify.inject({
         method: 'GET',
         url: '/api/v1/panells/empaquetat?confirmacio=totes',

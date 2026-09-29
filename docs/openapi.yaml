@@ -1127,8 +1127,11 @@ paths:
             Capa 37. Filtra por producte.descripcio — coincidencia EXACTA,
             case-insensitive (no substring), regla 3.1 transversal — mismo
             criterio que GET /panells/obrador, GET /panells/produccio y
-            GET /rendiments-porcs.
-          schema: { type: string }
+            GET /rendiments-porcs. Repetible (29/09/2026), igual que en
+            GET /panells/obrador: varios valores = líneas de cualquiera.
+          style: form
+          explode: true
+          schema: { type: array, items: { type: string } }
         - name: categoriaId
           in: query
           description: >-
