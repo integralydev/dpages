@@ -817,4 +817,63 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
       await fastify.close();
     });
   });
+
+  // Petició d'Ari (29/09/2026). Al final del fitxer a propòsit: el pedido
+  // cancel·lat no altera els totals que comproven els tests d'abans.
+  describe('estat cancellada — fora de tots els panells', () => {
+    it('no surt a Oficina (ni als totals), Obrador ni Empaquetat; a Oficina sí amb ?estat=cancellada', async () => {
+      const fastify = construirServidor();
+
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [{ dataProduccio: '2026-08-01T00:00:00Z', producteId, unitatsDemanades: 1 }],
+        },
+      });
+      const comandaId = cuerpoJson<{ id: number }>(creada).id;
+
+      const oficinaAbans = cuerpoJson<PanellOficinaApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/oficina?mida=200' }),
+      );
+      expect(oficinaAbans.dades.some((f) => f.comandaId === comandaId)).toBe(true);
+
+      const cancel = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comandaId}`,
+        payload: { estat: 'cancellada' },
+      });
+      expect(cancel.statusCode).toBe(200);
+      expect(cuerpoJson<ComandaDetallApi>(cancel).estat).toBe('cancellada');
+
+      const oficina = cuerpoJson<PanellOficinaApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/oficina?mida=200' }),
+      );
+      expect(oficina.dades.some((f) => f.comandaId === comandaId)).toBe(false);
+      expect(oficina.totals.comandes).toBe(oficinaAbans.totals.comandes - 1);
+
+      const nomesCancellades = cuerpoJson<PanellOficinaApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: '/api/v1/panells/oficina?estat=cancellada&mida=200',
+        }),
+      );
+      expect(nomesCancellades.dades.map((f) => f.comandaId)).toEqual([comandaId]);
+
+      const obrador = cuerpoJson<PanellObradorApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/obrador?mida=200' }),
+      );
+      expect(obrador.dades.some((f) => f.comandaId === comandaId)).toBe(false);
+
+      const empaquetat = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/empaquetat?mida=200' }),
+      );
+      expect(empaquetat.dades.some((f) => f.comandaId === comandaId)).toBe(false);
+
+      await fastify.close();
+    });
+  });
 });

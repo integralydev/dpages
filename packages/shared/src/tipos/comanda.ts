@@ -1,8 +1,15 @@
 /**
- * Los cuatro estados de pedido, cerrados con el cliente. No renombrar sin
- * actualizar también las cuatro pantallas que los muestran.
+ * Los cinco estados de pedido, cerrados con el cliente. No renombrar sin
+ * actualizar también las pantallas que los muestran. `cancellada` (petición
+ * de Ari, 29/09/2026) saca el pedido de todos los paneles.
  */
-export const ESTATS_COMANDA = ['oberta', 'en_proces', 'tancada', 'amb_incidencia'] as const;
+export const ESTATS_COMANDA = [
+  'oberta',
+  'en_proces',
+  'tancada',
+  'amb_incidencia',
+  'cancellada',
+] as const;
 export type EstatComanda = (typeof ESTATS_COMANDA)[number];
 
 /**

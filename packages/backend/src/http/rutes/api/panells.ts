@@ -100,9 +100,14 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       condicions.push(condicioDataFinsInclusiva('c.data_lliurament', valors.length + 1));
       valors.push(query.dataLliuramentFins);
     }
+    // Els pedidos 'cancellada' no compten a cap panell (petició d'Ari,
+    // 29/09/2026). Única excepció: aquí, si es filtra explícitament per
+    // aquest estat — mai amb "Tots" (sense `estat`).
     if (typeof query.estat === 'string' && query.estat !== '') {
       condicions.push(`c.estat = $${valors.length + 1}`);
       valors.push(query.estat);
+    } else {
+      condicions.push(`c.estat <> 'cancellada'`);
     }
     const transportistaUuid = await resolverFiltreEntitat(
       reply,
@@ -252,7 +257,8 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
     const query = req.query as Record<string, unknown>;
     const { pagina, mida, offset } = parsearPaginacio(query);
 
-    const condicions: string[] = ['NOT cl.esborrat'];
+    // Pedidos cancelados fuera (ver /panells/oficina).
+    const condicions: string[] = ['NOT cl.esborrat', `c.estat <> 'cancellada'`];
     const valors: unknown[] = [];
 
     // dataProduccio filtra por la fecha de la LÍNEA (cl.data_produccio), no
@@ -402,7 +408,8 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
     const query = req.query as Record<string, unknown>;
     const { pagina, mida, offset } = parsearPaginacio(query);
 
-    const condicions: string[] = ['NOT cl.esborrat'];
+    // Pedidos cancelados fuera (ver /panells/oficina).
+    const condicions: string[] = ['NOT cl.esborrat', `c.estat <> 'cancellada'`];
     const valors: unknown[] = [];
 
     if (typeof query.dataExpedicioDes === 'string' && query.dataExpedicioDes !== '') {
@@ -579,6 +586,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
     }
 
     const condicions: string[] = [
+      // Ya deja fuera los pedidos 'cancellada' (y cualquier otro estado).
       `c.estat = 'oberta'`,
       'cat.elaborat_porc = true',
       'NOT cl.esborrat',

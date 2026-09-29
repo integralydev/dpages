@@ -99,7 +99,12 @@ están documentadas ahí mismo y en el agente `woocommerce-integration`.
   campos SÍ pueden guardarse en 0 (rotura total, artículo agotado): la
   restricción de "mayor que cero" que tenían se sacó a propósito, reabriendo
   y reemplazando una decisión anterior.
-- Cuatro estados de pedido: `oberta`, `en_proces`, `tancada`, `amb_incidencia`.
+- Cinco estados de pedido: `oberta`, `en_proces`, `tancada`, `amb_incidencia`,
+  `cancellada`. Petición de Ari (29/09/2026): un pedido `cancellada` no cuenta
+  en **ninguno** de los cuatro paneles (ni en filas ni en totales), pero sigue
+  visible en la pantalla de pedidos (filtro de estado incluido). Única
+  excepción: en el Panel Oficina aparece si se filtra explícitamente por
+  `estat=cancellada` (nunca con "Tots").
 - Cuatro paneles: oficina, obrador, empaquetado, producció/planificació. **Sólo
   empaquetado edita**; los otros tres son de sólo lectura con filtros y
   subtotales.
