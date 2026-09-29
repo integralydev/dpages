@@ -101,13 +101,48 @@ export function enviarSensePermis(reply: FastifyReply, missatge: string): void {
 }
 
 /**
- * Primer endpoint que restringe por módulo (`POST /usuaris`) — hasta ahora
+ * Els 5 mòduls "operatius" — les 4 pantalles de panell més "comandes" — que
+ * ja depenen avui, confirmat de debò contra el codi real de cada pantalla
+ * (no suposat), de dades d'altres endpoints com a simple referència/consulta
+ * (transportistes, tarifes, productes, clients): `office`/`packaging`
+ * (transportistes+tarifes+clients), `workshop`/`production` (productes),
+ * `orders` (clients+tarifes). Qualsevol rol amb AL MENYS UN d'aquests 5
+ * mòduls pot LLEGIR (mai escriure) aquests recursos de referència — sense
+ * això, per exemple Obrador (només `panell-obrador`) no podria carregar el
+ * desplegable de productes de la seva pròpia pantalla.
+ *
+ * Marge conegut, verificat i no bloquejant amb els rols reals d'avui: dues
+ * pantalles que NO tenen cap d'aquests 5 mòduls igualment depenen d'algun
+ * d'aquests endpoints de referència (`pig-yields`, mòdul `rendiments-porcs`,
+ * crida GET /categories; `client-tariffs`, mòdul `tarifes-clients`, crida
+ * GET /tarifes/matriu) — als 6 rols reals d'avui això mai falla perquè cap
+ * dels dos mòduls apareix mai TOT SOL sense algun dels 5 operatius. Si algun
+ * dia es crea un rol nou amb NOMÉS `rendiments-porcs` o NOMÉS
+ * `tarifes-clients` (la reconfiguració en viu ho permetria), aquesta
+ * pantalla perdria la lectura de referència — documentat a propòsit, no és
+ * un cas cobert avui.
+ */
+export const MODULS_OPERATIUS_APOYO = [
+  'comandes',
+  'panell-oficina',
+  'panell-obrador',
+  'panell-empaquetat',
+  'panell-produccio',
+] as const;
+
+/**
+ * Primer endpoint que restringió por módulo (`POST /usuaris`) — hasta ahora
  * ningún endpoint de negocio lo hacía (ADR-021: el cliente pidió que nadie
- * quedara bloqueado por rol). `req.usuariResolt` ya está seteado acá porque
- * `crearMiddlewareResoldreUsuari()` corre antes en el mismo scope de plugin
- * (ver servidor.ts) — se usa como `preHandler` de ruta (tercer argumento de
- * `fastify.post/get/...`), no como hook global, para que sólo bloquee los
- * endpoints que explícitamente lo pidan.
+ * quedara bloqueado por rol; superado ahora por el hallazgo de seguridad de
+ * autorización real por módulo, aplicado a los 37 endpoints que faltaban).
+ * `req.usuariResolt` ya está seteado acá porque `crearMiddlewareResoldreUsuari()`
+ * corre antes en el mismo scope de plugin (ver servidor.ts) — se usa como
+ * `preHandler` de ruta (tercer argumento de `fastify.post/get/...`), no como
+ * hook global, para que sólo bloquee los endpoints que explícitamente lo pidan.
+ *
+ * Acepta un módulo único (caso normal: escritura restringida al módulo
+ * dueño) o una lista (caso "endpoint de apoyo": basta con tener AL MENOS UNO
+ * de los módulos listados, nunca todos — ver MODULS_OPERATIUS_APOYO arriba).
  *
  * Callback-style explícito (tercer parámetro `done`), no async/Promise:
  * Fastify siempre invoca un preHandler como `fn(req, reply, done)` — si el
@@ -117,15 +152,25 @@ export function enviarSensePermis(reply: FastifyReply, missatge: string): void {
  * ya deja `reply.sent = true` — NO llamar a `done()` también ahí (sería un
  * doble envío de respuesta).
  */
-export function crearGuardaModul(modul: string) {
+export function crearGuardaModul(moduls: string | readonly string[]) {
+  // `typeof` en vez de `Array.isArray` a propósito: la firma de lib.es5.d.ts
+  // para `Array.isArray` es `(arg: any) => arg is any[]` — como type guard
+  // narrowea a `any[]`, perdiendo el tipo `readonly string[]` y filtrando
+  // `any` al resto de la función (detectado por el lint real, no una
+  // preferencia de estilo).
+  const modulsRequerits: readonly string[] = typeof moduls === 'string' ? [moduls] : moduls;
+  const missatge =
+    modulsRequerits.length === 1
+      ? `Calen permisos del mòdul "${modulsRequerits[0]}" per a aquesta acció`
+      : `Calen permisos d'algun d'aquests mòduls per a aquesta acció: ${modulsRequerits.join(', ')}`;
   return function guardaModul(
     req: FastifyRequest,
     reply: FastifyReply,
     done: (err?: Error) => void,
   ): void {
     const usuari = req.usuariResolt;
-    if (!usuari || !usuari.rol.modulsPermesos.includes(modul)) {
-      enviarSensePermis(reply, `Calen permisos del mòdul "${modul}" per a aquesta acció`);
+    if (!usuari || !modulsRequerits.some((modul) => usuari.rol.modulsPermesos.includes(modul))) {
+      enviarSensePermis(reply, missatge);
       return;
     }
     done();

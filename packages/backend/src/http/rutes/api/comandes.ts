@@ -10,6 +10,7 @@ import { pool } from '../../../db/pool.js';
 import {
   condicioDataFinsInclusiva,
   construirPaginacio,
+  crearGuardaModul,
   enviarConflicte,
   enviarNoTrobat,
   enviarValidacio,
@@ -22,6 +23,28 @@ import {
   resolverTarifaUuid,
   resolverTransportistaUuid,
 } from './comu.js';
+
+// Guard de módulo (B1): a diferencia de la mayoría de las rutas de negocio,
+// "comandes" es el único rol operativo real que lo consume directo (Oficina
+// lo tiene junto a panell-oficina) — no necesita la regla de "apoyo" de
+// MODULS_OPERATIUS_APOYO (comu.ts), estricto alcanza para los 6 roles
+// reales de producción.
+const GUARD_COMANDES = crearGuardaModul('comandes');
+
+// Investigación post-B1 (hallazgo de Michelle): Panell Oficina
+// (office/[id]/page.tsx) lee GET /comandes/:id en modo estricto de sólo
+// lectura, compartiendo la misma ruta que orders/[id]/page.tsx (gestión
+// completa, con escritura). Contra los 6 roles reales de hoy esto no
+// abre ningún hueco (Oficina ya tiene el módulo 'comandes' además de
+// 'panell-oficina'), pero es una red de seguridad para roles futuros:
+// un Administrador podría crear en vivo (RoleFormModal) un rol de
+// "oficina, sólo lectura" con únicamente panell-oficina, y ese rol debe
+// poder ver el detalle sin heredar permisos de escritura sobre pedidos.
+// A propósito NO se usa MODULS_OPERATIUS_APOYO (comu.ts): la
+// investigación confirmó que sólo panell-oficina consume GET /comandes
+// en la práctica, ningún otro panell — una lista de 5 módulos sería de
+// más.
+const GUARD_COMANDES_LECTURA = crearGuardaModul(['comandes', 'panell-oficina']);
 
 // Únics 4 valors admesos per comanda.estat (mateixa llista que el CHECK
 // constraint de la taula, migració 0003).
@@ -447,7 +470,7 @@ async function resolverComandaOResponder(
 }
 
 export function registrarRutesComandes(fastify: FastifyInstance): void {
-  fastify.get('/comandes', async (req, reply) => {
+  fastify.get('/comandes', { preHandler: GUARD_COMANDES_LECTURA }, async (req, reply) => {
     const query = req.query as Record<string, unknown>;
     const { pagina, mida, offset } = parsearPaginacio(query);
 
@@ -549,13 +572,13 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
     };
   });
 
-  fastify.get('/comandes/:id', async (req, reply) => {
+  fastify.get('/comandes/:id', { preHandler: GUARD_COMANDES_LECTURA }, async (req, reply) => {
     const comandaUuid = await resolverComandaOResponder(reply, (req.params as { id: string }).id);
     if (comandaUuid === null) return;
     return carregarDetallPerUuid(comandaUuid);
   });
 
-  fastify.post('/comandes', async (req, reply) => {
+  fastify.post('/comandes', { preHandler: GUARD_COMANDES }, async (req, reply) => {
     const cos = req.body as Partial<{
       origen: string;
       clientId: number;
@@ -828,7 +851,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
     return carregarDetallPerUuid(comandaUuid);
   });
 
-  fastify.patch('/comandes/:id', async (req, reply) => {
+  fastify.patch('/comandes/:id', { preHandler: GUARD_COMANDES }, async (req, reply) => {
     const comandaUuid = await resolverComandaOResponder(reply, (req.params as { id: string }).id);
     if (comandaUuid === null) return;
 
@@ -1101,167 +1124,171 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
    * Issue #21 — dataProduccio deja de ser obligatoria acá (revierte la
    * decisión de issue #16, que la había igualado a `POST /comandes`).
    */
-  fastify.post('/comandes/:comandaId/linies', async (req, reply) => {
-    const comandaUuid = await resolverComandaOResponder(
-      reply,
-      (req.params as { comandaId: string }).comandaId,
-    );
-    if (comandaUuid === null) return;
+  fastify.post(
+    '/comandes/:comandaId/linies',
+    { preHandler: GUARD_COMANDES },
+    async (req, reply) => {
+      const comandaUuid = await resolverComandaOResponder(
+        reply,
+        (req.params as { comandaId: string }).comandaId,
+      );
+      if (comandaUuid === null) return;
 
-    if (await estaCongelada(pool, comandaUuid)) {
-      return enviarConflicte(reply, 'La comanda està congelada i ja no admet canvis');
-    }
+      if (await estaCongelada(pool, comandaUuid)) {
+        return enviarConflicte(reply, 'La comanda està congelada i ja no admet canvis');
+      }
 
-    const cos = req.body as Partial<{
-      producteId: number;
-      unitatsDemanades: number;
-      kgDemanats: string;
-      dataProduccio: string | null;
-    }>;
+      const cos = req.body as Partial<{
+        producteId: number;
+        unitatsDemanades: number;
+        kgDemanats: string;
+        dataProduccio: string | null;
+      }>;
 
-    if (cos.producteId === undefined) {
-      return enviarValidacio(reply, 'producteId és obligatori', [
-        { camp: 'producteId', missatge: 'és obligatori' },
-      ]);
-    }
-    // Ver nota equivalente en POST /comandes.
-    if (!esUnitatsValides(cos.unitatsDemanades)) {
-      return enviarValidacio(reply, 'Les unitats demanades no poden ser zero', [
-        {
-          camp: 'unitatsDemanades',
-          missatge: 'ha de ser més gran que zero, com a màxim 2 decimals',
-        },
-      ]);
-    }
-
-    const producte = await pool.query<{
-      id: string;
-      pes_kg: string | null;
-      preu_venda: string | null;
-    }>('SELECT id, pes_kg, preu_venda FROM producte WHERE id_seq = $1', [cos.producteId]);
-    if (!producte.rows[0]) {
-      return enviarValidacio(reply, 'El producte indicat no existeix', [
-        { camp: 'producteId', missatge: 'no existeix' },
-      ]);
-    }
-    const { id: producteUuid, pes_kg: pesFitxaKg, preu_venda: preuVenda } = producte.rows[0];
-
-    let pesCalculatKg: string;
-    let pesEditable: boolean;
-    if (pesFitxaKg !== null) {
-      pesCalculatKg = (cos.unitatsDemanades * Number(pesFitxaKg)).toFixed(3);
-      pesEditable = false;
-    } else {
-      const kgDemanats = cos.kgDemanats !== undefined ? Number(cos.kgDemanats) : NaN;
-      if (!Number.isFinite(kgDemanats) || kgDemanats <= 0) {
-        return enviarValidacio(reply, 'Els kg demanats no poden ser zero', [
-          { camp: 'kgDemanats', missatge: 'ha de ser més gran que zero (article a mida)' },
+      if (cos.producteId === undefined) {
+        return enviarValidacio(reply, 'producteId és obligatori', [
+          { camp: 'producteId', missatge: 'és obligatori' },
         ]);
       }
-      pesCalculatKg = kgDemanats.toFixed(3);
-      pesEditable = true;
-    }
-
-    // Validar la dataProduccio de la línia nova contra les dates de
-    // capçalera JA GUARDADES d'aquest pedido, abans d'inserir res.
-    // Issue #21 — dataProduccio ja no és obligatòria: si no ve
-    // (undefined/null), validarCoherenciaDatesComanda la salta sola (ja
-    // tolera aquest cas, ver comu de les 6 regles).
-    {
-      const capcalera = await pool.query<{
-        data_produccio: Date | null;
-        data_expedicio: Date | null;
-        data_lliurament: Date | null;
-      }>('SELECT data_produccio, data_expedicio, data_lliurament FROM comanda WHERE id = $1', [
-        comandaUuid,
-      ]);
-      const fila = capcalera.rows[0]!;
-      const violacio = validarCoherenciaDatesComanda(
-        {
-          dataProduccio: fila.data_produccio,
-          dataExpedicio: fila.data_expedicio,
-          dataLliurament: fila.data_lliurament,
-        },
-        [{ etiqueta: 'línia nova', dataProduccio: cos.dataProduccio }],
-      );
-      if (violacio) {
-        return enviarValidacio(reply, 'Les dates no són coherents', [violacio]);
+      // Ver nota equivalente en POST /comandes.
+      if (!esUnitatsValides(cos.unitatsDemanades)) {
+        return enviarValidacio(reply, 'Les unitats demanades no poden ser zero', [
+          {
+            camp: 'unitatsDemanades',
+            missatge: 'ha de ser més gran que zero, com a màxim 2 decimals',
+          },
+        ]);
       }
-    }
 
-    const clientTarifaFila = await pool.query<{ tarifa_id: string | null }>(
-      `SELECT cl.tarifa_id FROM comanda c LEFT JOIN client cl ON cl.id = c.client_id WHERE c.id = $1`,
-      [comandaUuid],
-    );
-    const clientTarifaId = clientTarifaFila.rows[0]?.tarifa_id ?? null;
+      const producte = await pool.query<{
+        id: string;
+        pes_kg: string | null;
+        preu_venda: string | null;
+      }>('SELECT id, pes_kg, preu_venda FROM producte WHERE id_seq = $1', [cos.producteId]);
+      if (!producte.rows[0]) {
+        return enviarValidacio(reply, 'El producte indicat no existeix', [
+          { camp: 'producteId', missatge: 'no existeix' },
+        ]);
+      }
+      const { id: producteUuid, pes_kg: pesFitxaKg, preu_venda: preuVenda } = producte.rows[0];
 
-    const { preuUnitari, sensePreu } = await resolverPreuLinia(
-      pool,
-      clientTarifaId,
-      producteUuid,
-      preuVenda,
-    );
+      let pesCalculatKg: string;
+      let pesEditable: boolean;
+      if (pesFitxaKg !== null) {
+        pesCalculatKg = (cos.unitatsDemanades * Number(pesFitxaKg)).toFixed(3);
+        pesEditable = false;
+      } else {
+        const kgDemanats = cos.kgDemanats !== undefined ? Number(cos.kgDemanats) : NaN;
+        if (!Number.isFinite(kgDemanats) || kgDemanats <= 0) {
+          return enviarValidacio(reply, 'Els kg demanats no poden ser zero', [
+            { camp: 'kgDemanats', missatge: 'ha de ser més gran que zero (article a mida)' },
+          ]);
+        }
+        pesCalculatKg = kgDemanats.toFixed(3);
+        pesEditable = true;
+      }
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+      // Validar la dataProduccio de la línia nova contra les dates de
+      // capçalera JA GUARDADES d'aquest pedido, abans d'inserir res.
+      // Issue #21 — dataProduccio ja no és obligatòria: si no ve
+      // (undefined/null), validarCoherenciaDatesComanda la salta sola (ja
+      // tolera aquest cas, ver comu de les 6 regles).
+      {
+        const capcalera = await pool.query<{
+          data_produccio: Date | null;
+          data_expedicio: Date | null;
+          data_lliurament: Date | null;
+        }>('SELECT data_produccio, data_expedicio, data_lliurament FROM comanda WHERE id = $1', [
+          comandaUuid,
+        ]);
+        const fila = capcalera.rows[0]!;
+        const violacio = validarCoherenciaDatesComanda(
+          {
+            dataProduccio: fila.data_produccio,
+            dataExpedicio: fila.data_expedicio,
+            dataLliurament: fila.data_lliurament,
+          },
+          [{ etiqueta: 'línia nova', dataProduccio: cos.dataProduccio }],
+        );
+        if (violacio) {
+          return enviarValidacio(reply, 'Les dates no són coherents', [violacio]);
+        }
+      }
 
-      const ordinalFila = await client.query<{ seguent: number }>(
-        `SELECT COALESCE(max(ordinal), -1) + 1 AS seguent FROM comanda_linia WHERE comanda_id = $1`,
+      const clientTarifaFila = await pool.query<{ tarifa_id: string | null }>(
+        `SELECT cl.tarifa_id FROM comanda c LEFT JOIN client cl ON cl.id = c.client_id WHERE c.id = $1`,
         [comandaUuid],
       );
-      const ordinal = ordinalFila.rows[0]!.seguent;
+      const clientTarifaId = clientTarifaFila.rows[0]?.tarifa_id ?? null;
 
-      await client.query(
-        `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
+      const { preuUnitari, sensePreu } = await resolverPreuLinia(
+        pool,
+        clientTarifaId,
+        producteUuid,
+        preuVenda,
+      );
+
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        const ordinalFila = await client.query<{ seguent: number }>(
+          `SELECT COALESCE(max(ordinal), -1) + 1 AS seguent FROM comanda_linia WHERE comanda_id = $1`,
+          [comandaUuid],
+        );
+        const ordinal = ordinalFila.rows[0]!.seguent;
+
+        await client.query(
+          `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                      preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
                                      data_produccio)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [
-          comandaUuid,
-          ordinal,
-          producteUuid,
-          cos.unitatsDemanades,
-          preuUnitari,
-          pesFitxaKg,
-          pesCalculatKg,
-          pesEditable,
-          // Issue #21 — normalizada a null, mismo patrón que la línea 776
-          // (cos.obsLliurament ?? null): dataProduccio ya no es obligatoria,
-          // pero el parámetro no debe recibir `undefined` crudo.
-          cos.dataProduccio ?? null,
-        ],
-      );
-
-      // Decisión de negocio confirmada — mismo criterio que POST
-      // /comandes: una línea sin precio resuelto nunca queda
-      // silenciosa (se registra igual en incidencia_comanda), pero ya no
-      // fuerza el pedido a amb_incidencia — se queda en el estat que ya
-      // tenía (oberta, en_proces, tancada...), el precio pendiente se
-      // completa después sin bloquear el flujo normal.
-      if (sensePreu) {
-        await client.query(
-          `INSERT INTO incidencia_comanda (comanda_id, tipus, detall) VALUES ($1, 'sense_preu', $2)`,
           [
             comandaUuid,
-            `Línia afegida (producte ${cos.producteId}): no té preu resolt (sense tarifa amb preu ni preu base) — preuUnitari es va deixar en 0.00.`,
+            ordinal,
+            producteUuid,
+            cos.unitatsDemanades,
+            preuUnitari,
+            pesFitxaKg,
+            pesCalculatKg,
+            pesEditable,
+            // Issue #21 — normalizada a null, mismo patrón que la línea 776
+            // (cos.obsLliurament ?? null): dataProduccio ya no es obligatoria,
+            // pero el parámetro no debe recibir `undefined` crudo.
+            cos.dataProduccio ?? null,
           ],
         );
+
+        // Decisión de negocio confirmada — mismo criterio que POST
+        // /comandes: una línea sin precio resuelto nunca queda
+        // silenciosa (se registra igual en incidencia_comanda), pero ya no
+        // fuerza el pedido a amb_incidencia — se queda en el estat que ya
+        // tenía (oberta, en_proces, tancada...), el precio pendiente se
+        // completa después sin bloquear el flujo normal.
+        if (sensePreu) {
+          await client.query(
+            `INSERT INTO incidencia_comanda (comanda_id, tipus, detall) VALUES ($1, 'sense_preu', $2)`,
+            [
+              comandaUuid,
+              `Línia afegida (producte ${cos.producteId}): no té preu resolt (sense tarifa amb preu ni preu base) — preuUnitari es va deixar en 0.00.`,
+            ],
+          );
+        }
+
+        await recalcularTotalComanda(client, comandaUuid);
+
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
       }
 
-      await recalcularTotalComanda(client, comandaUuid);
-
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
-
-    reply.code(201);
-    return carregarDetallPerUuid(comandaUuid);
-  });
+      reply.code(201);
+      return carregarDetallPerUuid(comandaUuid);
+    },
+  );
 
   /**
    * Editar una línea existente (unitats/kg/dataProduccio/obsProduccio).
@@ -1275,159 +1302,167 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
    * cabecera YA GUARDADAS del pedido (reglas 4/5/6 de
    * `validarCoherenciaDatesComanda`) antes de escribir nada.
    */
-  fastify.patch('/comandes/:comandaId/linies/:liniaId', async (req, reply) => {
-    const params = req.params as { comandaId: string; liniaId: string };
-    const comandaUuid = await resolverComandaOResponder(reply, params.comandaId);
-    if (comandaUuid === null) return;
+  fastify.patch(
+    '/comandes/:comandaId/linies/:liniaId',
+    { preHandler: GUARD_COMANDES },
+    async (req, reply) => {
+      const params = req.params as { comandaId: string; liniaId: string };
+      const comandaUuid = await resolverComandaOResponder(reply, params.comandaId);
+      if (comandaUuid === null) return;
 
-    if (await estaCongelada(pool, comandaUuid)) {
-      return enviarConflicte(reply, 'La comanda està congelada i ja no admet canvis');
-    }
+      if (await estaCongelada(pool, comandaUuid)) {
+        return enviarConflicte(reply, 'La comanda està congelada i ja no admet canvis');
+      }
 
-    const liniaIdPublic = parsearIdPublic(params.liniaId);
-    if (liniaIdPublic === null) return enviarNoTrobat(reply, 'Línia no trobada');
+      const liniaIdPublic = parsearIdPublic(params.liniaId);
+      if (liniaIdPublic === null) return enviarNoTrobat(reply, 'Línia no trobada');
 
-    const cos = req.body as Partial<{
-      unitatsDemanades: number;
-      kgDemanats: string;
-      dataProduccio: string | null;
-      obsProduccio: string | null;
-    }>;
+      const cos = req.body as Partial<{
+        unitatsDemanades: number;
+        kgDemanats: string;
+        dataProduccio: string | null;
+        obsProduccio: string | null;
+      }>;
 
-    // Ver nota equivalente en POST /comandes.
-    if (cos.unitatsDemanades !== undefined && !esUnitatsValides(cos.unitatsDemanades)) {
-      return enviarValidacio(reply, 'Les unitats demanades no poden ser zero', [
-        {
-          camp: 'unitatsDemanades',
-          missatge: 'ha de ser més gran que zero, com a màxim 2 decimals',
-        },
-      ]);
-    }
-    if (cos.kgDemanats !== undefined) {
-      const kgNum = Number(cos.kgDemanats);
-      if (!Number.isFinite(kgNum) || kgNum <= 0) {
-        return enviarValidacio(reply, 'Els kg demanats no poden ser zero', [
-          { camp: 'kgDemanats', missatge: 'ha de ser més gran que zero' },
+      // Ver nota equivalente en POST /comandes.
+      if (cos.unitatsDemanades !== undefined && !esUnitatsValides(cos.unitatsDemanades)) {
+        return enviarValidacio(reply, 'Les unitats demanades no poden ser zero', [
+          {
+            camp: 'unitatsDemanades',
+            missatge: 'ha de ser més gran que zero, com a màxim 2 decimals',
+          },
         ]);
       }
-    }
-
-    const liniaActual = await pool.query<{
-      pes_editable: boolean;
-      pes_fitxa_kg: string | null;
-    }>(
-      `SELECT pes_editable, pes_fitxa_kg FROM comanda_linia WHERE id_seq = $1 AND comanda_id = $2`,
-      [liniaIdPublic, comandaUuid],
-    );
-    if (!liniaActual.rows[0]) return enviarNoTrobat(reply, 'Línia no trobada');
-    const { pes_editable: pesEditable, pes_fitxa_kg: pesFitxaKg } = liniaActual.rows[0];
-
-    if (cos.kgDemanats !== undefined && !pesEditable) {
-      return enviarValidacio(reply, "El pes d'aquest article no és editable (té fitxa)", [
-        { camp: 'kgDemanats', missatge: 'no editable — es calcula des de unitatsDemanades' },
-      ]);
-    }
-
-    // Si cambian las unidades de un artículo CON fitxa, el peso se
-    // recalcula solo (mismo criterio que POST /comandes) — kgDemanats no
-    // se acepta en ese caso (ya rechazado arriba). Para un artículo "a
-    // medida", el peso es lo que venga en kgDemanats, sin relación con
-    // unitatsDemanades.
-    let pesCalculatKgNou: string | undefined;
-    if (cos.unitatsDemanades !== undefined && pesFitxaKg !== null) {
-      pesCalculatKgNou = (cos.unitatsDemanades * Number(pesFitxaKg)).toFixed(3);
-    } else if (cos.kgDemanats !== undefined) {
-      pesCalculatKgNou = Number(cos.kgDemanats).toFixed(3);
-    }
-
-    // Si aquest PATCH canvia dataProduccio de la línia, validar-la contra
-    // les dates de capçalera JA GUARDADES d'aquest pedido, abans
-    // d'escriure res. Si dataProduccio NO ve al body, no hi ha res nou a
-    // validar (ni la línia ni la capçalera van a canviar de valor per això).
-    if (cos.dataProduccio !== undefined) {
-      const capcalera = await pool.query<{
-        data_produccio: Date | null;
-        data_expedicio: Date | null;
-        data_lliurament: Date | null;
-      }>('SELECT data_produccio, data_expedicio, data_lliurament FROM comanda WHERE id = $1', [
-        comandaUuid,
-      ]);
-      const fila = capcalera.rows[0]!;
-      const violacio = validarCoherenciaDatesComanda(
-        {
-          dataProduccio: fila.data_produccio,
-          dataExpedicio: fila.data_expedicio,
-          dataLliurament: fila.data_lliurament,
-        },
-        [{ etiqueta: `línia ${liniaIdPublic}`, dataProduccio: cos.dataProduccio }],
-      );
-      if (violacio) {
-        return enviarValidacio(reply, 'Les dates no són coherents', [violacio]);
+      if (cos.kgDemanats !== undefined) {
+        const kgNum = Number(cos.kgDemanats);
+        if (!Number.isFinite(kgNum) || kgNum <= 0) {
+          return enviarValidacio(reply, 'Els kg demanats no poden ser zero', [
+            { camp: 'kgDemanats', missatge: 'ha de ser més gran que zero' },
+          ]);
+        }
       }
-    }
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+      const liniaActual = await pool.query<{
+        pes_editable: boolean;
+        pes_fitxa_kg: string | null;
+      }>(
+        `SELECT pes_editable, pes_fitxa_kg FROM comanda_linia WHERE id_seq = $1 AND comanda_id = $2`,
+        [liniaIdPublic, comandaUuid],
+      );
+      if (!liniaActual.rows[0]) return enviarNoTrobat(reply, 'Línia no trobada');
+      const { pes_editable: pesEditable, pes_fitxa_kg: pesFitxaKg } = liniaActual.rows[0];
 
-      const resultat = await client.query<{ id: string }>(
-        `UPDATE comanda_linia SET
+      if (cos.kgDemanats !== undefined && !pesEditable) {
+        return enviarValidacio(reply, "El pes d'aquest article no és editable (té fitxa)", [
+          { camp: 'kgDemanats', missatge: 'no editable — es calcula des de unitatsDemanades' },
+        ]);
+      }
+
+      // Si cambian las unidades de un artículo CON fitxa, el peso se
+      // recalcula solo (mismo criterio que POST /comandes) — kgDemanats no
+      // se acepta en ese caso (ya rechazado arriba). Para un artículo "a
+      // medida", el peso es lo que venga en kgDemanats, sin relación con
+      // unitatsDemanades.
+      let pesCalculatKgNou: string | undefined;
+      if (cos.unitatsDemanades !== undefined && pesFitxaKg !== null) {
+        pesCalculatKgNou = (cos.unitatsDemanades * Number(pesFitxaKg)).toFixed(3);
+      } else if (cos.kgDemanats !== undefined) {
+        pesCalculatKgNou = Number(cos.kgDemanats).toFixed(3);
+      }
+
+      // Si aquest PATCH canvia dataProduccio de la línia, validar-la contra
+      // les dates de capçalera JA GUARDADES d'aquest pedido, abans
+      // d'escriure res. Si dataProduccio NO ve al body, no hi ha res nou a
+      // validar (ni la línia ni la capçalera van a canviar de valor per això).
+      if (cos.dataProduccio !== undefined) {
+        const capcalera = await pool.query<{
+          data_produccio: Date | null;
+          data_expedicio: Date | null;
+          data_lliurament: Date | null;
+        }>('SELECT data_produccio, data_expedicio, data_lliurament FROM comanda WHERE id = $1', [
+          comandaUuid,
+        ]);
+        const fila = capcalera.rows[0]!;
+        const violacio = validarCoherenciaDatesComanda(
+          {
+            dataProduccio: fila.data_produccio,
+            dataExpedicio: fila.data_expedicio,
+            dataLliurament: fila.data_lliurament,
+          },
+          [{ etiqueta: `línia ${liniaIdPublic}`, dataProduccio: cos.dataProduccio }],
+        );
+        if (violacio) {
+          return enviarValidacio(reply, 'Les dates no són coherents', [violacio]);
+        }
+      }
+
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        const resultat = await client.query<{ id: string }>(
+          `UPDATE comanda_linia SET
            unitats_demanades = CASE WHEN $3 THEN $4 ELSE unitats_demanades END,
            pes_calculat_kg = CASE WHEN $5 THEN $6 ELSE pes_calculat_kg END,
            data_produccio = CASE WHEN $7 THEN $8 ELSE data_produccio END,
            obs_produccio = CASE WHEN $9 THEN $10 ELSE obs_produccio END
          WHERE id_seq = $1 AND comanda_id = $2
          RETURNING id`,
-        [
-          liniaIdPublic,
-          comandaUuid,
-          cos.unitatsDemanades !== undefined,
-          cos.unitatsDemanades ?? null,
-          pesCalculatKgNou !== undefined,
-          pesCalculatKgNou ?? null,
-          cos.dataProduccio !== undefined,
-          cos.dataProduccio ?? null,
-          cos.obsProduccio !== undefined,
-          cos.obsProduccio ?? null,
-        ],
-      );
-      if (!resultat.rows[0]) {
+          [
+            liniaIdPublic,
+            comandaUuid,
+            cos.unitatsDemanades !== undefined,
+            cos.unitatsDemanades ?? null,
+            pesCalculatKgNou !== undefined,
+            pesCalculatKgNou ?? null,
+            cos.dataProduccio !== undefined,
+            cos.dataProduccio ?? null,
+            cos.obsProduccio !== undefined,
+            cos.obsProduccio ?? null,
+          ],
+        );
+        if (!resultat.rows[0]) {
+          await client.query('ROLLBACK');
+          return enviarNoTrobat(reply, 'Línia no trobada');
+        }
+
+        await recalcularTotalComanda(client, comandaUuid);
+
+        await client.query('COMMIT');
+      } catch (err) {
         await client.query('ROLLBACK');
-        return enviarNoTrobat(reply, 'Línia no trobada');
+        throw err;
+      } finally {
+        client.release();
       }
 
-      await recalcularTotalComanda(client, comandaUuid);
+      return carregarDetallPerUuid(comandaUuid);
+    },
+  );
 
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+  fastify.delete(
+    '/comandes/:comandaId/linies/:liniaId',
+    { preHandler: GUARD_COMANDES },
+    async (req, reply) => {
+      const params = req.params as { comandaId: string; liniaId: string };
+      const comandaUuid = await resolverComandaOResponder(reply, params.comandaId);
+      if (comandaUuid === null) return;
 
-    return carregarDetallPerUuid(comandaUuid);
-  });
+      if (await estaCongelada(pool, comandaUuid)) {
+        return enviarConflicte(reply, 'La comanda està congelada i ja no admet canvis');
+      }
 
-  fastify.delete('/comandes/:comandaId/linies/:liniaId', async (req, reply) => {
-    const params = req.params as { comandaId: string; liniaId: string };
-    const comandaUuid = await resolverComandaOResponder(reply, params.comandaId);
-    if (comandaUuid === null) return;
+      const liniaIdPublic = parsearIdPublic(params.liniaId);
+      if (liniaIdPublic === null) return enviarNoTrobat(reply, 'Línia no trobada');
 
-    if (await estaCongelada(pool, comandaUuid)) {
-      return enviarConflicte(reply, 'La comanda està congelada i ja no admet canvis');
-    }
-
-    const liniaIdPublic = parsearIdPublic(params.liniaId);
-    if (liniaIdPublic === null) return enviarNoTrobat(reply, 'Línia no trobada');
-
-    const resultat = await pool.query(
-      `UPDATE comanda_linia SET esborrat = true
+      const resultat = await pool.query(
+        `UPDATE comanda_linia SET esborrat = true
        WHERE id_seq = $1 AND comanda_id = $2 RETURNING id`,
-      [liniaIdPublic, comandaUuid],
-    );
-    if (resultat.rowCount === 0) return enviarNoTrobat(reply, 'Línia no trobada');
+        [liniaIdPublic, comandaUuid],
+      );
+      if (resultat.rowCount === 0) return enviarNoTrobat(reply, 'Línia no trobada');
 
-    reply.code(204);
-  });
+      reply.code(204);
+    },
+  );
 }

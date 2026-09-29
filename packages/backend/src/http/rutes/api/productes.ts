@@ -3,10 +3,12 @@ import type { FastifyInstance } from 'fastify';
 import { pool } from '../../../db/pool.js';
 import {
   construirPaginacio,
+  crearGuardaModul,
   enviarConflicte,
   enviarNoTrobat,
   enviarValidacio,
   esViolacioCodiUnic,
+  MODULS_OPERATIUS_APOYO,
   parsearIdPublic,
   parsearPaginacio,
   resolverCategoriaUuid,
@@ -69,91 +71,99 @@ const SELECT_PRODUCTE = `
 `;
 
 export function registrarRutesProductes(fastify: FastifyInstance): void {
-  fastify.get('/productes', async (req, reply) => {
-    const query = req.query as Record<string, unknown>;
-    const { pagina, mida, offset } = parsearPaginacio(query);
+  fastify.get(
+    '/productes',
+    { preHandler: crearGuardaModul(MODULS_OPERATIUS_APOYO) },
+    async (req, reply) => {
+      const query = req.query as Record<string, unknown>;
+      const { pagina, mida, offset } = parsearPaginacio(query);
 
-    const condicions: string[] = [];
-    const valors: unknown[] = [];
+      const condicions: string[] = [];
+      const valors: unknown[] = [];
 
-    if (typeof query.categoriaId === 'string') {
-      const categoriaIdPublic = parsearIdPublic(query.categoriaId);
-      if (categoriaIdPublic === null) {
-        return enviarValidacio(reply, 'categoriaId ha de ser un enter');
+      if (typeof query.categoriaId === 'string') {
+        const categoriaIdPublic = parsearIdPublic(query.categoriaId);
+        if (categoriaIdPublic === null) {
+          return enviarValidacio(reply, 'categoriaId ha de ser un enter');
+        }
+        const categoriaUuid = await resolverCategoriaUuid(pool, categoriaIdPublic);
+        // Categoría inexistente: 0 resultados, no un error — es un filtro válido que no matchea nada.
+        condicions.push(`p.categoria_id = $${valors.length + 1}`);
+        valors.push(categoriaUuid ?? '00000000-0000-0000-0000-000000000000');
       }
-      const categoriaUuid = await resolverCategoriaUuid(pool, categoriaIdPublic);
-      // Categoría inexistente: 0 resultados, no un error — es un filtro válido que no matchea nada.
-      condicions.push(`p.categoria_id = $${valors.length + 1}`);
-      valors.push(categoriaUuid ?? '00000000-0000-0000-0000-000000000000');
-    }
-    if (query.tipus === 'simple' || query.tipus === 'variable') {
-      condicions.push(`p.tipus = $${valors.length + 1}`);
-      valors.push(query.tipus);
-    }
-    if (query.actiu === 'true' || query.actiu === 'false') {
-      condicions.push(`p.actiu = $${valors.length + 1}`);
-      valors.push(query.actiu === 'true');
-    }
-    if (typeof query.format === 'string' && query.format !== '') {
-      if (!esFormatValid(query.format)) {
-        return enviarValidacio(reply, `format ha de ser: ${FORMATS.join(', ')}`);
+      if (query.tipus === 'simple' || query.tipus === 'variable') {
+        condicions.push(`p.tipus = $${valors.length + 1}`);
+        valors.push(query.tipus);
       }
-      condicions.push(`p.format = $${valors.length + 1}`);
-      valors.push(query.format);
-    }
-    if (typeof query.envasat === 'string' && query.envasat !== '') {
-      if (!esEnvasatValid(query.envasat)) {
-        return enviarValidacio(reply, `envasat ha de ser: ${ENVASATS.join(', ')}`);
+      if (query.actiu === 'true' || query.actiu === 'false') {
+        condicions.push(`p.actiu = $${valors.length + 1}`);
+        valors.push(query.actiu === 'true');
       }
-      condicions.push(`p.envasat = $${valors.length + 1}`);
-      valors.push(query.envasat);
-    }
-    if (typeof query.agrupacioProduccio === 'string' && query.agrupacioProduccio.trim() !== '') {
-      // Mismo criterio que rendiments-porcs.ts — regla 3.1 transversal:
-      // coincidencia EXACTA, case-insensitive.
-      condicions.push(`LOWER(p.agrupacio_produccio) = LOWER($${valors.length + 1})`);
-      valors.push(query.agrupacioProduccio.trim());
-    }
-    if (typeof query.cerca === 'string' && query.cerca.trim() !== '') {
-      // Coincidencia EXACTA, no substring (regla 3.1 transversal —
-      // docs/especificacion-funcional-dpages.md): "lomo" no debe traer
-      // "cabeza de lomo". Case-insensitive, por eso LOWER() en vez de ILIKE
-      // — mismo criterio ya aplicado arriba a agrupacioProduccio.
-      condicions.push(
-        `(LOWER(p.descripcio) = LOWER($${valors.length + 1}) OR LOWER(p.descripcio_venda) = LOWER($${valors.length + 1}) OR LOWER(p.codi) = LOWER($${valors.length + 1}))`,
+      if (typeof query.format === 'string' && query.format !== '') {
+        if (!esFormatValid(query.format)) {
+          return enviarValidacio(reply, `format ha de ser: ${FORMATS.join(', ')}`);
+        }
+        condicions.push(`p.format = $${valors.length + 1}`);
+        valors.push(query.format);
+      }
+      if (typeof query.envasat === 'string' && query.envasat !== '') {
+        if (!esEnvasatValid(query.envasat)) {
+          return enviarValidacio(reply, `envasat ha de ser: ${ENVASATS.join(', ')}`);
+        }
+        condicions.push(`p.envasat = $${valors.length + 1}`);
+        valors.push(query.envasat);
+      }
+      if (typeof query.agrupacioProduccio === 'string' && query.agrupacioProduccio.trim() !== '') {
+        // Mismo criterio que rendiments-porcs.ts — regla 3.1 transversal:
+        // coincidencia EXACTA, case-insensitive.
+        condicions.push(`LOWER(p.agrupacio_produccio) = LOWER($${valors.length + 1})`);
+        valors.push(query.agrupacioProduccio.trim());
+      }
+      if (typeof query.cerca === 'string' && query.cerca.trim() !== '') {
+        // Coincidencia EXACTA, no substring (regla 3.1 transversal —
+        // docs/especificacion-funcional-dpages.md): "lomo" no debe traer
+        // "cabeza de lomo". Case-insensitive, por eso LOWER() en vez de ILIKE
+        // — mismo criterio ya aplicado arriba a agrupacioProduccio.
+        condicions.push(
+          `(LOWER(p.descripcio) = LOWER($${valors.length + 1}) OR LOWER(p.descripcio_venda) = LOWER($${valors.length + 1}) OR LOWER(p.codi) = LOWER($${valors.length + 1}))`,
+        );
+        valors.push(query.cerca.trim());
+      }
+
+      const where = condicions.length > 0 ? `WHERE ${condicions.join(' AND ')}` : '';
+
+      const total = await pool.query<{ count: string }>(
+        `SELECT count(*) FROM producte p ${where}`,
+        valors,
       );
-      valors.push(query.cerca.trim());
-    }
+      const files = await pool.query<FilaProducte>(
+        `${SELECT_PRODUCTE} ${where} ORDER BY p.descripcio ASC, p.id_seq ASC LIMIT $${valors.length + 1} OFFSET $${valors.length + 2}`,
+        [...valors, mida, offset],
+      );
 
-    const where = condicions.length > 0 ? `WHERE ${condicions.join(' AND ')}` : '';
+      return {
+        dades: files.rows.map(aApi),
+        paginacio: construirPaginacio(pagina, mida, Number(total.rows[0]?.count ?? 0)),
+      };
+    },
+  );
 
-    const total = await pool.query<{ count: string }>(
-      `SELECT count(*) FROM producte p ${where}`,
-      valors,
-    );
-    const files = await pool.query<FilaProducte>(
-      `${SELECT_PRODUCTE} ${where} ORDER BY p.descripcio ASC, p.id_seq ASC LIMIT $${valors.length + 1} OFFSET $${valors.length + 2}`,
-      [...valors, mida, offset],
-    );
+  fastify.get(
+    '/productes/:id',
+    { preHandler: crearGuardaModul(MODULS_OPERATIUS_APOYO) },
+    async (req, reply) => {
+      const idPublic = parsearIdPublic((req.params as { id: string }).id);
+      if (idPublic === null) return enviarNoTrobat(reply);
 
-    return {
-      dades: files.rows.map(aApi),
-      paginacio: construirPaginacio(pagina, mida, Number(total.rows[0]?.count ?? 0)),
-    };
-  });
+      const resultat = await pool.query<FilaProducte>(`${SELECT_PRODUCTE} WHERE p.id_seq = $1`, [
+        idPublic,
+      ]);
+      if (!resultat.rows[0]) return enviarNoTrobat(reply, 'Producte no trobat');
+      return aApi(resultat.rows[0]);
+    },
+  );
 
-  fastify.get('/productes/:id', async (req, reply) => {
-    const idPublic = parsearIdPublic((req.params as { id: string }).id);
-    if (idPublic === null) return enviarNoTrobat(reply);
-
-    const resultat = await pool.query<FilaProducte>(`${SELECT_PRODUCTE} WHERE p.id_seq = $1`, [
-      idPublic,
-    ]);
-    if (!resultat.rows[0]) return enviarNoTrobat(reply, 'Producte no trobat');
-    return aApi(resultat.rows[0]);
-  });
-
-  fastify.post('/productes', async (req, reply) => {
+  fastify.post('/productes', { preHandler: crearGuardaModul('catalog') }, async (req, reply) => {
     const cos = req.body as Partial<{
       codi: string | null;
       descripcio: string;
@@ -236,65 +246,68 @@ export function registrarRutesProductes(fastify: FastifyInstance): void {
     }
   });
 
-  fastify.patch('/productes/:id', async (req, reply) => {
-    const idPublic = parsearIdPublic((req.params as { id: string }).id);
-    if (idPublic === null) return enviarNoTrobat(reply);
+  fastify.patch(
+    '/productes/:id',
+    { preHandler: crearGuardaModul('catalog') },
+    async (req, reply) => {
+      const idPublic = parsearIdPublic((req.params as { id: string }).id);
+      if (idPublic === null) return enviarNoTrobat(reply);
 
-    // codi és immutable un cop creat el producte (decisió de negoci
-    // confirmada: es carrega manualment NOMÉS en crear-lo). No es llegeix
-    // del cos encara que vingui, no hi ha camp
-    // per a ell acá — mateix criteri exacte que client.codi a
-    // PATCH /clients/:id i usuari.firebaseUid a PATCH /usuaris/:id.
-    const cos = req.body as Partial<{
-      descripcio: string;
-      descripcioVenda: string | null;
-      tipus: 'simple' | 'variable';
-      pesKg: string | null;
-      preuVenda: string | null;
-      actiu: boolean;
-      categoriaId: number | null;
-      agrupacioProduccio: string | null;
-      format: Format | null;
-      envasat: Envasat | null;
-    }>;
+      // codi és immutable un cop creat el producte (decisió de negoci
+      // confirmada: es carrega manualment NOMÉS en crear-lo). No es llegeix
+      // del cos encara que vingui, no hi ha camp
+      // per a ell acá — mateix criteri exacte que client.codi a
+      // PATCH /clients/:id i usuari.firebaseUid a PATCH /usuaris/:id.
+      const cos = req.body as Partial<{
+        descripcio: string;
+        descripcioVenda: string | null;
+        tipus: 'simple' | 'variable';
+        pesKg: string | null;
+        preuVenda: string | null;
+        actiu: boolean;
+        categoriaId: number | null;
+        agrupacioProduccio: string | null;
+        format: Format | null;
+        envasat: Envasat | null;
+      }>;
 
-    if (cos.descripcio !== undefined && cos.descripcio.trim() === '') {
-      return enviarValidacio(reply, 'La descripció no pot estar buida', [
-        { camp: 'descripcio', missatge: 'no pot estar buida' },
-      ]);
-    }
-    if (cos.tipus !== undefined && cos.tipus !== 'simple' && cos.tipus !== 'variable') {
-      return enviarValidacio(reply, 'tipus ha de ser "simple" o "variable"', [
-        { camp: 'tipus', missatge: 'ha de ser "simple" o "variable"' },
-      ]);
-    }
-    if (cos.format !== undefined && cos.format !== null && !esFormatValid(cos.format)) {
-      return enviarValidacio(reply, `format ha de ser ${FORMATS.join(', ')} o null`, [
-        { camp: 'format', missatge: `ha de ser ${FORMATS.join(', ')} o null` },
-      ]);
-    }
-    if (cos.envasat !== undefined && cos.envasat !== null && !esEnvasatValid(cos.envasat)) {
-      return enviarValidacio(reply, `envasat ha de ser ${ENVASATS.join(', ')} o null`, [
-        { camp: 'envasat', missatge: `ha de ser ${ENVASATS.join(', ')} o null` },
-      ]);
-    }
+      if (cos.descripcio !== undefined && cos.descripcio.trim() === '') {
+        return enviarValidacio(reply, 'La descripció no pot estar buida', [
+          { camp: 'descripcio', missatge: 'no pot estar buida' },
+        ]);
+      }
+      if (cos.tipus !== undefined && cos.tipus !== 'simple' && cos.tipus !== 'variable') {
+        return enviarValidacio(reply, 'tipus ha de ser "simple" o "variable"', [
+          { camp: 'tipus', missatge: 'ha de ser "simple" o "variable"' },
+        ]);
+      }
+      if (cos.format !== undefined && cos.format !== null && !esFormatValid(cos.format)) {
+        return enviarValidacio(reply, `format ha de ser ${FORMATS.join(', ')} o null`, [
+          { camp: 'format', missatge: `ha de ser ${FORMATS.join(', ')} o null` },
+        ]);
+      }
+      if (cos.envasat !== undefined && cos.envasat !== null && !esEnvasatValid(cos.envasat)) {
+        return enviarValidacio(reply, `envasat ha de ser ${ENVASATS.join(', ')} o null`, [
+          { camp: 'envasat', missatge: `ha de ser ${ENVASATS.join(', ')} o null` },
+        ]);
+      }
 
-    let categoriaUuid: string | null | undefined;
-    if (cos.categoriaId !== undefined) {
-      if (cos.categoriaId === null) {
-        categoriaUuid = null;
-      } else {
-        categoriaUuid = await resolverCategoriaUuid(pool, cos.categoriaId);
-        if (categoriaUuid === null) {
-          return enviarValidacio(reply, 'La categoria indicada no existeix', [
-            { camp: 'categoriaId', missatge: 'no existeix' },
-          ]);
+      let categoriaUuid: string | null | undefined;
+      if (cos.categoriaId !== undefined) {
+        if (cos.categoriaId === null) {
+          categoriaUuid = null;
+        } else {
+          categoriaUuid = await resolverCategoriaUuid(pool, cos.categoriaId);
+          if (categoriaUuid === null) {
+            return enviarValidacio(reply, 'La categoria indicada no existeix', [
+              { camp: 'categoriaId', missatge: 'no existeix' },
+            ]);
+          }
         }
       }
-    }
 
-    const resultat = await pool.query<{ id: string }>(
-      `UPDATE producte SET
+      const resultat = await pool.query<{ id: string }>(
+        `UPDATE producte SET
          descripcio = COALESCE($2, descripcio),
          descripcio_venda = CASE WHEN $3 THEN $4 ELSE descripcio_venda END,
          tipus = COALESCE($5, tipus),
@@ -307,33 +320,34 @@ export function registrarRutesProductes(fastify: FastifyInstance): void {
          envasat = CASE WHEN $17 THEN $18 ELSE envasat END
        WHERE id_seq = $1
        RETURNING id`,
-      [
+        [
+          idPublic,
+          cos.descripcio?.trim() ?? null,
+          cos.descripcioVenda !== undefined,
+          cos.descripcioVenda ?? null,
+          cos.tipus ?? null,
+          cos.pesKg !== undefined,
+          cos.pesKg ?? null,
+          cos.preuVenda !== undefined,
+          cos.preuVenda ?? null,
+          cos.actiu ?? null,
+          categoriaUuid !== undefined,
+          categoriaUuid ?? null,
+          cos.agrupacioProduccio !== undefined,
+          cos.agrupacioProduccio ?? null,
+          cos.format !== undefined,
+          cos.format ?? null,
+          cos.envasat !== undefined,
+          cos.envasat ?? null,
+        ],
+      );
+
+      if (!resultat.rows[0]) return enviarNoTrobat(reply, 'Producte no trobat');
+
+      const actualitzat = await pool.query<FilaProducte>(`${SELECT_PRODUCTE} WHERE p.id_seq = $1`, [
         idPublic,
-        cos.descripcio?.trim() ?? null,
-        cos.descripcioVenda !== undefined,
-        cos.descripcioVenda ?? null,
-        cos.tipus ?? null,
-        cos.pesKg !== undefined,
-        cos.pesKg ?? null,
-        cos.preuVenda !== undefined,
-        cos.preuVenda ?? null,
-        cos.actiu ?? null,
-        categoriaUuid !== undefined,
-        categoriaUuid ?? null,
-        cos.agrupacioProduccio !== undefined,
-        cos.agrupacioProduccio ?? null,
-        cos.format !== undefined,
-        cos.format ?? null,
-        cos.envasat !== undefined,
-        cos.envasat ?? null,
-      ],
-    );
-
-    if (!resultat.rows[0]) return enviarNoTrobat(reply, 'Producte no trobat');
-
-    const actualitzat = await pool.query<FilaProducte>(`${SELECT_PRODUCTE} WHERE p.id_seq = $1`, [
-      idPublic,
-    ]);
-    return aApi(actualitzat.rows[0]!);
-  });
+      ]);
+      return aApi(actualitzat.rows[0]!);
+    },
+  );
 }

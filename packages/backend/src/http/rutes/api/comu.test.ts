@@ -76,4 +76,32 @@ describe('crearGuardaModul — contrato de preHandler de Fastify', () => {
     expect(code).toHaveBeenCalledWith(403);
     expect(done).not.toHaveBeenCalled();
   });
+
+  // B1 (endpoints de "apoyo"): crearGuardaModul acepta una lista de módulos
+  // — basta con tener UNO CUALQUIERA de ellos, no todos.
+  it('con una lista de módulos: basta con tener UNO CUALQUIERA para llamar a done()', () => {
+    const guarda = crearGuardaModul(['comandes', 'panell-oficina', 'panell-obrador']);
+    const req = { usuariResolt: usuariAmb(['panell-obrador']) } as unknown as FastifyRequest;
+    const { reply, code, send } = mockReply();
+    const done = vi.fn();
+
+    guarda(req, reply, done);
+
+    expect(done).toHaveBeenCalledTimes(1);
+    expect(code).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('con una lista de módulos: sin NINGUNO de ellos, envía 403 y no llama a done()', () => {
+    const guarda = crearGuardaModul(['comandes', 'panell-oficina', 'panell-obrador']);
+    const req = { usuariResolt: usuariAmb(['usuaris']) } as unknown as FastifyRequest;
+    const { reply, code, send } = mockReply();
+    const done = vi.fn();
+
+    guarda(req, reply, done);
+
+    expect(code).toHaveBeenCalledWith(403);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(done).not.toHaveBeenCalled();
+  });
 });
