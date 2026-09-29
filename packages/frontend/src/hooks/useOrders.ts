@@ -75,7 +75,7 @@ export type OrderFormValues = {
   adrecaLliurament: string | null;
   /**
    * `PATCH /comandes/:id` acepta `estat`, con transición libre
-   * entre `oberta`/`en_proces`/`tancada`. El único camino hacia
+   * entre `oberta`/`en_proces`/`tancada`/`cancellada`. El único camino hacia
    * `amb_incidencia` es `markIncidence` (más abajo, exige `detall`) — este
    * valor nunca se manda como `"amb_incidencia"` desde `editOrder` (ver
    * OrderForm.tsx: el selector de capçalera no ofrece esa opción).
@@ -313,7 +313,7 @@ export function useOrders(filters: OrderListFilters = {}): UseOrdersResult {
         adrecaLliurament: values.adrecaLliurament,
       };
       // El selector de capçalera (OrderForm.tsx) només ofereix
-      // oberta/en_proces/tancada, mai amb_incidencia: si l'estat carregat
+      // oberta/en_proces/tancada/cancellada, mai amb_incidencia: si l'estat carregat
       // ja era amb_incidencia i l'usuari no l'ha tocat, NO es reenvia (el
       // backend exigeix `detall` sempre que `estat` sigui amb_incidencia
       // al body, encara que sigui el mateix valor que ja tenia). La única

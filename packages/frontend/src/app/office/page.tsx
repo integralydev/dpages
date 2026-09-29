@@ -14,19 +14,13 @@ import { StatCard } from '@/components/ui/StatCard';
 import { useCarriers } from '@/hooks/useCarriers';
 import { usePanellOficina } from '@/hooks/usePanellOficina';
 import { useRates } from '@/hooks/useRates';
+import { ESTAT_LABELS, estatBadgeVariant } from '@/lib/comandaEstat';
 import { api, type ClientApi, type FilaPanellOficinaApi, type RespostaPaginada } from '@/lib/api';
 import { formatData } from '@/lib/dates';
 import { formatDecimal } from '@/lib/decimals';
 
 const ALL = 'Tots';
 const ALL_FEM = 'Totes';
-
-const ESTAT_LABELS: Record<string, string> = {
-  oberta: 'Oberta',
-  en_proces: 'En procés',
-  tancada: 'Tancada',
-  amb_incidencia: 'Amb incidència',
-};
 
 function clientLabel(client: ClientApi) {
   return `${client.codi ?? client.id} · ${client.nom ?? ''}`;
@@ -40,7 +34,7 @@ function OfficeOrderCard({ order, onClick }: { order: FilaPanellOficinaApi; onCl
           <p className="font-semibold text-gray-900">{order.num}</p>
           <p className="text-sm text-gray-500">{order.client ?? '—'}</p>
         </div>
-        <Badge variant={order.estat === 'amb_incidencia' ? 'negative' : 'info'}>
+        <Badge variant={estatBadgeVariant(order.estat)}>
           {ESTAT_LABELS[order.estat] ?? order.estat}
         </Badge>
       </div>
@@ -358,7 +352,7 @@ export default function OfficePage() {
                       {order.transportista ?? '—'}
                     </td>
                     <td className="px-2 py-3">
-                      <Badge variant={order.estat === 'amb_incidencia' ? 'negative' : 'info'}>
+                      <Badge variant={estatBadgeVariant(order.estat)}>
                         {ESTAT_LABELS[order.estat] ?? order.estat}
                       </Badge>
                     </td>

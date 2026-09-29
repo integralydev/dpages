@@ -25,6 +25,7 @@ import {
   type TarifaResumApi,
   type TransportistaApi,
 } from '@/lib/api';
+import { ESTAT_LABELS } from '@/lib/comandaEstat';
 import { formatDecimal, parseDecimalInput } from '@/lib/decimals';
 import { calculateOrderedWeightKg } from '@/lib/orderCalculations';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
@@ -57,13 +58,9 @@ const CODIS_ORIGEN_ELEGIBLES = ['whatsapp', 'telefon', 'correu', 'woocommerce'];
 // el formulari, es reafegeix dinàmicament a les opcions (ver estatOptions
 // més avall) només perquè el <select> mostri l'estat real — mai perquè es
 // pugui triar cap a ella des d'acá.
-const ESTAT_OPTIONS_SELECCIONABLES: string[] = ['oberta', 'en_proces', 'tancada'];
-const ESTAT_LABELS: Record<string, string> = {
-  oberta: 'Oberta',
-  en_proces: 'En procés',
-  tancada: 'Tancada',
-  amb_incidencia: 'Amb incidència',
-};
+// cancellada (petició d'Ari, 29/09/2026) sí és triable aquí: no demana
+// motiu, i treu la comanda de tots els panells.
+const ESTAT_OPTIONS_SELECCIONABLES: string[] = ['oberta', 'en_proces', 'tancada', 'cancellada'];
 
 function clientLabel(client: ClientApi) {
   return `${client.codi ?? client.id} · ${client.nom ?? ''}`;

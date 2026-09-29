@@ -208,19 +208,21 @@ export default function OrderDetailPage() {
         </div>
         {order && (
           <div className="flex items-center gap-3">
-            {order.estat !== 'amb_incidencia' && !order.congelada && (
-              <button
-                type="button"
-                onClick={() => {
-                  setIncidenceError(null);
-                  setIncidenceDetall('');
-                  setConfirmOpen(true);
-                }}
-                className="rounded-full border border-red-300 px-5 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50"
-              >
-                Marcar com a incidència
-              </button>
-            )}
+            {order.estat !== 'amb_incidencia' &&
+              order.estat !== 'cancellada' &&
+              !order.congelada && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIncidenceError(null);
+                    setIncidenceDetall('');
+                    setConfirmOpen(true);
+                  }}
+                  className="rounded-full border border-red-300 px-5 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50"
+                >
+                  Marcar com a incidència
+                </button>
+              )}
             <button
               type="button"
               onClick={() => formRef.current?.submit()}
