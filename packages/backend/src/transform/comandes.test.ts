@@ -275,6 +275,31 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
     expect(incidencies.rows.map((r) => r.tipus)).toContain('actualitzacio_sobre_congelada');
   });
 
+  it('una comanda cancellada sigue cancellada: la incidencia se registra pero no la reabre', async () => {
+    // Id propio: no comparte fila con los demás tests que usan comandaSimple.
+    const wooOrder: WooOrder = { ...comandaSimple, id: comandaSimple.id + 900000 };
+    const primeraVez = await conClient((client) => transformarComanda(client, wooOrder));
+    await poolTest.query(
+      `UPDATE comanda SET estat = 'cancellada', congelat_a = now() WHERE id = $1`,
+      [primeraVez.comandaId],
+    );
+
+    await conClient((client) =>
+      transformarComanda(client, { ...wooOrder, date_modified_gmt: '2026-09-01T00:00:00' }),
+    );
+
+    const despues = await poolTest.query<{ estat: string }>(
+      `SELECT estat FROM comanda WHERE id = $1`,
+      [primeraVez.comandaId],
+    );
+    expect(despues.rows[0]?.estat).toBe('cancellada');
+    const incidencies = await poolTest.query<{ tipus: string }>(
+      `SELECT tipus FROM incidencia_comanda WHERE comanda_id = $1`,
+      [primeraVez.comandaId],
+    );
+    expect(incidencies.rows.map((r) => r.tipus)).toContain('actualitzacio_sobre_congelada');
+  });
+
   it('emparejamiento por (producte, ordinal) cuando woo_line_item_id cambió, y esborrat para las que ya no vienen', async () => {
     const wooOrderId = 777002;
     const v1: WooOrder = {

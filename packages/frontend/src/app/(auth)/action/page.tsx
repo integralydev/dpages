@@ -9,6 +9,7 @@ import {
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
+import { AuthLayout } from '@/components/auth/AuthLayout';
 import { TextField } from '@/components/ui/TextField';
 import { auth } from '@/lib/firebase';
 
@@ -125,59 +126,55 @@ function ResetPasswordForm() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
-        <h1 className="text-xl font-bold text-gray-900">Gestió de Comandes</h1>
+    <AuthLayout title="Nova contrasenya">
+      {state.status === 'verifying' && <p className="mt-4 text-sm text-gray-500">Carregant...</p>}
 
-        {state.status === 'verifying' && <p className="mt-4 text-sm text-gray-500">Carregant...</p>}
+      {state.status === 'invalid' && (
+        <>
+          <p className="mt-4 text-sm text-red-600">{state.message}</p>
+          <Link
+            href="/login"
+            className="mt-4 inline-block text-sm font-medium text-ink hover:underline"
+          >
+            Tornar a l&apos;inici de sessió
+          </Link>
+        </>
+      )}
 
-        {state.status === 'invalid' && (
-          <>
-            <p className="mt-4 text-sm text-red-600">{state.message}</p>
-            <Link
-              href="/login"
-              className="mt-4 inline-block text-sm font-medium text-gray-500 hover:text-gray-700"
+      {state.status === 'ready' && (
+        <>
+          <p className="mt-1 text-sm text-gray-500">
+            Estableix una nova contrasenya per a {state.email}.
+          </p>
+          <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
+            <TextField
+              label="Contrasenya nova"
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
+            <TextField
+              label="Confirma la contrasenya"
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              required
+            />
+            {fieldError && <p className="text-sm text-red-600">{fieldError}</p>}
+            {submitError && <p className="text-sm text-red-600">{submitError}</p>}
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="mt-2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Tornar a l&apos;inici de sessió
-            </Link>
-          </>
-        )}
-
-        {state.status === 'ready' && (
-          <>
-            <p className="mt-1 text-sm text-gray-500">
-              Estableix una nova contrasenya per a {state.email}.
-            </p>
-            <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
-              <TextField
-                label="Contrasenya nova"
-                type="password"
-                autoComplete="new-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-              />
-              <TextField
-                label="Confirma la contrasenya"
-                type="password"
-                autoComplete="new-password"
-                value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-                required
-              />
-              {fieldError && <p className="text-sm text-red-600">{fieldError}</p>}
-              {submitError && <p className="text-sm text-red-600">{submitError}</p>}
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="mt-2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isSubmitting ? 'Desant...' : 'Desar contrasenya'}
-              </button>
-            </form>
-          </>
-        )}
-      </div>
-    </div>
+              {isSubmitting ? 'Desant...' : 'Desar contrasenya'}
+            </button>
+          </form>
+        </>
+      )}
+    </AuthLayout>
   );
 }

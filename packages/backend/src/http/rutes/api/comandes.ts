@@ -46,9 +46,15 @@ const GUARD_COMANDES = crearGuardaModul('comandes');
 // más.
 const GUARD_COMANDES_LECTURA = crearGuardaModul(['comandes', 'panell-oficina']);
 
-// Únics 4 valors admesos per comanda.estat (mateixa llista que el CHECK
-// constraint de la taula, migració 0003).
-const ESTATS_COMANDA_VALIDS = ['oberta', 'en_proces', 'tancada', 'amb_incidencia'] as const;
+// Únics 5 valors admesos per comanda.estat (mateixa llista que el CHECK
+// constraint de la taula, migracions 0003 i 0021).
+const ESTATS_COMANDA_VALIDS = [
+  'oberta',
+  'en_proces',
+  'tancada',
+  'amb_incidencia',
+  'cancellada',
+] as const;
 
 // Mateix criteri que CODIS_ORIGEN_ELEGIBLES al frontend (OrderForm.tsx):
 // "manual" (valor històric) és l'únic codi que mai es pot triar a mà, ni en
@@ -895,7 +901,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           { camp: 'estat', missatge: `ha de ser un de: ${ESTATS_COMANDA_VALIDS.join(', ')}` },
         ]);
       }
-      // Decisión de negocio: transiciones libres entre los 4 estados, sin
+      // Decisión de negocio: transiciones libres entre los 5 estados, sin
       // máquina de estados. Única excepción: pasar a
       // amb_incidencia manualmente exige un motivo (detall), porque a
       // diferencia de las incidencias automáticas (sense_preu, etc.) acá no

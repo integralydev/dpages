@@ -604,6 +604,8 @@ export interface FilaPanellEmpaquetatApi {
   dataLliurament: string | null;
   transportista: string | null;
   client: string | null;
+  /** Nombre de la categoría del artículo; `null` si no tiene (petición de Ari, 29/09/2026). */
+  categoria: string | null;
   codi: string | null;
   producte: string;
   /** BREAKING: pasó de `number` a `string` (ver ComandaLiniaApi.unitatsDemanades). */

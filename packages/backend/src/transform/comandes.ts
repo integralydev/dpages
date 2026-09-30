@@ -46,7 +46,9 @@ async function obtenirComandaExistent(
  * "Se registra como incidencia" (ADR-007 y resolución de artículo): queda
  * un registro consultable, no sólo la marca en `estat`. `estat` se pisa a
  * 'amb_incidencia' aunque la comanda ya estuviera en otro estado — es la
- * señal para oficina de que hay algo que mirar.
+ * señal para oficina de que hay algo que mirar. Excepción: una comanda
+ * 'cancellada' sigue cancelada (la incidencia se registra igual), si no el
+ * sync la volvería a meter en los paneles.
  */
 async function registrarIncidencia(
   client: PoolClient,
@@ -58,7 +60,10 @@ async function registrarIncidencia(
     `INSERT INTO incidencia_comanda (comanda_id, tipus, detall) VALUES ($1, $2, $3)`,
     [comandaId, tipus, detall],
   );
-  await client.query(`UPDATE comanda SET estat = 'amb_incidencia' WHERE id = $1`, [comandaId]);
+  await client.query(
+    `UPDATE comanda SET estat = 'amb_incidencia' WHERE id = $1 AND estat <> 'cancellada'`,
+    [comandaId],
+  );
 }
 
 /**

@@ -1,9 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { AsyncCombobox } from '@/components/ui/AsyncCombobox';
+import type { ComboboxOption } from '@/components/ui/AsyncCombobox';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ClearFiltersButton, FilterBar } from '@/components/ui/FilterBar';
+import { MultiCombobox } from '@/components/ui/MultiCombobox';
 import { DataCard, DataCardField, DataCardGrid } from '@/components/ui/DataCard';
 import { DateInput } from '@/components/ui/DateInput';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -200,7 +201,9 @@ function WorkshopRow({
 export default function WorkshopPage() {
   const { data: catalog } = useCatalog();
 
-  const [productFilter, setProductFilter] = useState(ALL);
+  // Un o més productes (petició del client, 29/09/2026) — es guarda
+  // l'opció sencera (id+label) per poder pintar l'etiqueta de cadascun.
+  const [selectedProducts, setSelectedProducts] = useState<ComboboxOption[]>([]);
   const [envasatFilter, setEnvasatFilter] = useState(ALL);
   const [formatFilter, setFormatFilter] = useState(ALL);
   const [productionDateFilter, setProductionDateFilter] = useState('');
@@ -209,13 +212,6 @@ export default function WorkshopPage() {
   // Producte a OrderForm.tsx: GET /productes?cerca= fa coincidència EXACTA
   // a propòsit (regla 3.1 — "lomo" no ha de portar "cabeza de lomo"), no
   // serveix per a cerca incremental — ver lib/productSearch.ts.
-  const productId = useMemo(
-    () =>
-      productFilter !== ALL
-        ? (catalog.find((product) => product.descripcio === productFilter)?.id ?? null)
-        : null,
-    [productFilter, catalog],
-  );
   const loadProductOptions = useMemo(
     () => (query: string) =>
       Promise.resolve(
@@ -229,14 +225,16 @@ export default function WorkshopPage() {
 
   const filters = useMemo(
     () => ({
-      ...(productFilter !== ALL ? { producte: productFilter } : {}),
+      ...(selectedProducts.length > 0
+        ? { producte: selectedProducts.map((product) => product.label) }
+        : {}),
       ...(envasatFilter !== ALL ? { envasat: envasatFilter } : {}),
       ...(formatFilter !== ALL ? { format: formatFilter } : {}),
       ...(productionDateFilter
         ? { dataProduccioDes: productionDateFilter, dataProduccioFins: productionDateFilter }
         : {}),
     }),
-    [productFilter, envasatFilter, formatFilter, productionDateFilter],
+    [selectedProducts, envasatFilter, formatFilter, productionDateFilter],
   );
 
   // "pendents primer" ja ve per defecte des del backend (GET
@@ -277,7 +275,7 @@ export default function WorkshopPage() {
   }
 
   function clearFilters() {
-    setProductFilter(ALL);
+    setSelectedProducts([]);
     setEnvasatFilter(ALL);
     setFormatFilter(ALL);
     setProductionDateFilter('');
@@ -301,14 +299,14 @@ export default function WorkshopPage() {
       />
 
       <FilterBar>
-        <AsyncCombobox
-          label="Producte"
-          value={productId}
-          displayValue={productFilter !== ALL ? productFilter : ''}
+        <MultiCombobox
+          label="Productes"
+          selected={selectedProducts}
+          onChange={setSelectedProducts}
           placeholder="Cercar producte..."
+          addMorePlaceholder="Afegir un altre producte..."
           debounceMs={0}
           loadOptions={loadProductOptions}
-          onChange={(option) => setProductFilter(option?.label ?? ALL)}
         />
         <SimpleDropdown
           label="Envasat"

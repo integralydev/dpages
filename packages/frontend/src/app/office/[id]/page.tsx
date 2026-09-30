@@ -7,16 +7,10 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { DataCard, DataCardField, DataCardGrid } from '@/components/ui/DataCard';
+import { ESTAT_LABELS, estatBadgeVariant } from '@/lib/comandaEstat';
 import { api, ApiError, type ComandaDetallApi, type ComandaLiniaApi } from '@/lib/api';
 import { formatData } from '@/lib/dates';
 import { formatDecimal } from '@/lib/decimals';
-
-const ESTAT_LABELS: Record<string, string> = {
-  oberta: 'Oberta',
-  en_proces: 'En procés',
-  tancada: 'Tancada',
-  amb_incidencia: 'Amb incidència',
-};
 
 function formatPrice(value: string) {
   return `${formatDecimal(value, 2)} €`;
@@ -159,7 +153,7 @@ export default function OfficeOrderDetailPage() {
               <Field
                 label="Estat"
                 value={
-                  <Badge variant={order.estat === 'amb_incidencia' ? 'negative' : 'info'}>
+                  <Badge variant={estatBadgeVariant(order.estat)}>
                     {ESTAT_LABELS[order.estat] ?? order.estat}
                   </Badge>
                 }

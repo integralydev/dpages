@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 export function DateRangeInput({
   label,
@@ -22,7 +22,7 @@ export function DateRangeInput({
           type="date"
           value={from}
           onChange={(event) => onFromChange?.(event.target.value)}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-gray-400 focus:outline-none"
+          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-brand focus:outline-none"
         />
       </div>
       <div className="flex flex-col gap-1">
@@ -31,7 +31,7 @@ export function DateRangeInput({
           type="date"
           value={to}
           onChange={(event) => onToChange?.(event.target.value)}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-gray-400 focus:outline-none"
+          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-brand focus:outline-none"
         />
       </div>
     </div>

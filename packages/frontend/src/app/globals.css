@@ -1,15 +1,42 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
+/* Identitat visual de dpages.cat (web del client): rosa de marca, grafit de
+   la capçalera, carbó del peu, Montserrat + Libre Baskerville cursiva. */
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  --background: #f8f8f8;
+  --foreground: #333333;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-ink: #111827;
-  --font-sans: var(--font-inter);
+  /* `ink` és el color d'acció primària (botons, checkboxes, pestanyes
+     actives) a tota l'app. Rosa fosc i no el #dd6e9e de la web: amb text
+     blanc a sobre el de la web només dona 3,1:1, aquest 4,9:1 (WCAG AA). */
+  --color-ink: #b8497a;
+  --color-brand: #dd6e9e;
+  --color-brand-light: #f7bcd6;
+  --color-brand-tint: #fceef4;
+  --color-graphite: #4f4f4f;
+  --color-carbon: #292a30;
+  --font-sans: var(--font-montserrat);
+  --font-display: var(--font-libre-baskerville);
+}
+
+/* Grisos neutres en lloc dels grisos blavosos de Tailwind, com la web del
+   client. Mateixos valors que l'escala `neutral` de Tailwind v4. */
+@theme {
+  --color-gray-50: oklch(98.5% 0 0);
+  --color-gray-100: oklch(97% 0 0);
+  --color-gray-200: oklch(92.2% 0 0);
+  --color-gray-300: oklch(87% 0 0);
+  --color-gray-400: oklch(70.8% 0 0);
+  --color-gray-500: oklch(55.6% 0 0);
+  --color-gray-600: oklch(43.9% 0 0);
+  --color-gray-700: oklch(37.1% 0 0);
+  --color-gray-800: oklch(26.9% 0 0);
+  --color-gray-900: oklch(20.5% 0 0);
+  --color-gray-950: oklch(14.5% 0 0);
 }
 
 body {
@@ -18,14 +45,13 @@ body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
 
-/* Scrollbar fina i subtil per al <nav> del Sidebar (mateixos tons gris que
-   ja s'usen per a text/icones secundàries del propi sidebar, no un gris
-   genèric del SO) — Tailwind v4 no té cap utilitat de scrollbar instal·lada
-   ni cap plugin, així que va amb CSS pla per no sumar una dependència nova
-   només per això. */
+/* Scrollbar fina i subtil per al <nav> del Sidebar (blanc translúcid sobre
+   el fons carbó del propi sidebar, no un gris genèric del SO) — Tailwind v4
+   no té cap utilitat de scrollbar instal·lada ni cap plugin, així que va amb
+   CSS pla per no sumar una dependència nova només per això. */
 .sidebar-nav-scroll {
   scrollbar-width: thin;
-  scrollbar-color: #d1d5db transparent;
+  scrollbar-color: rgb(255 255 255 / 0.2) transparent;
 }
 
 .sidebar-nav-scroll::-webkit-scrollbar {
@@ -37,12 +63,12 @@ body {
 }
 
 .sidebar-nav-scroll::-webkit-scrollbar-thumb {
-  background-color: #d1d5db;
+  background-color: rgb(255 255 255 / 0.2);
   border-radius: 9999px;
 }
 
 .sidebar-nav-scroll::-webkit-scrollbar-thumb:hover {
-  background-color: #9ca3af;
+  background-color: rgb(255 255 255 / 0.35);
 }
 
 /* Panell d'opcions de SimpleDropdown (i AsyncCombobox): la barra de scroll

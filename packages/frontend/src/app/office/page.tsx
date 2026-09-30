@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Printer } from 'lucide-react';
 import { AsyncCombobox, type ComboboxOption } from '@/components/ui/AsyncCombobox';
 import { Badge } from '@/components/ui/Badge';
 import { DataCard, DataCardField, DataCardGrid } from '@/components/ui/DataCard';
@@ -14,19 +15,30 @@ import { StatCard } from '@/components/ui/StatCard';
 import { useCarriers } from '@/hooks/useCarriers';
 import { usePanellOficina } from '@/hooks/usePanellOficina';
 import { useRates } from '@/hooks/useRates';
-import { api, type ClientApi, type FilaPanellOficinaApi, type RespostaPaginada } from '@/lib/api';
+import { ESTAT_LABELS, estatBadgeVariant } from '@/lib/comandaEstat';
+import {
+  api,
+  ApiError,
+  obtenirTotesLesPagines,
+  type ClientApi,
+  type FilaPanellOficinaApi,
+  type PanellOficinaApi,
+  type RespostaPaginada,
+} from '@/lib/api';
 import { formatData } from '@/lib/dates';
 import { formatDecimal } from '@/lib/decimals';
+import { descarregarPdfPanellOficina } from '@/lib/ordersPdf';
 
 const ALL = 'Tots';
 const ALL_FEM = 'Totes';
 
-const ESTAT_LABELS: Record<string, string> = {
-  oberta: 'Oberta',
-  en_proces: 'En procés',
-  tancada: 'Tancada',
-  amb_incidencia: 'Amb incidència',
-};
+// "Data comanda: 01/09/2026 - 30/09/2026" per al resum de filtres del PDF;
+// null si no hi ha cap dels dos extrems.
+function rangLabel(label: string, des: string, fins: string): string | null {
+  if (!des && !fins) return null;
+  const format = (data: string) => (data ? formatData(data, false) : '...');
+  return `${label}: ${format(des)} - ${format(fins)}`;
+}
 
 function clientLabel(client: ClientApi) {
   return `${client.codi ?? client.id} · ${client.nom ?? ''}`;
@@ -40,7 +52,7 @@ function OfficeOrderCard({ order, onClick }: { order: FilaPanellOficinaApi; onCl
           <p className="font-semibold text-gray-900">{order.num}</p>
           <p className="text-sm text-gray-500">{order.client ?? '—'}</p>
         </div>
-        <Badge variant={order.estat === 'amb_incidencia' ? 'negative' : 'info'}>
+        <Badge variant={estatBadgeVariant(order.estat)}>
           {ESTAT_LABELS[order.estat] ?? order.estat}
         </Badge>
       </div>
@@ -161,6 +173,45 @@ export default function OfficePage() {
   const { data, totals, paginacio, setPagina, isLoading, error, refetch } =
     usePanellOficina(filters);
 
+  // Llistat en PDF (petició del client, 29/09/2026), mateix generador que
+  // Comandes: TOTES les comandes que compleixen els filtres actius, no
+  // només la pàgina visible.
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
+
+  async function handlePrint() {
+    setIsPrinting(true);
+    setPrintError(null);
+    const filtresActius = [
+      selectedClient && `Client: ${selectedClient.label}`,
+      statusFilter !== ALL && `Estat: ${statusFilter}`,
+      carrierFilter !== ALL && `Transportista: ${carrierFilter}`,
+      tariffFilter !== ALL_FEM && `Tarifa: ${tariffFilter}`,
+      destinationFilter !== ALL_FEM && `Població de destí: ${destinationFilter}`,
+      rangLabel('Data comanda', orderDateFrom, orderDateTo),
+      rangLabel('Data expedició', shippingDateFrom, shippingDateTo),
+      rangLabel('Data lliurament', deliveryDateFrom, deliveryDateTo),
+    ].filter((label): label is string => Boolean(label));
+    try {
+      const comandes = await obtenirTotesLesPagines<FilaPanellOficinaApi>((pagina) =>
+        api.get<PanellOficinaApi>('/panells/oficina', { ...filters, mida: 200, pagina }),
+      );
+      await descarregarPdfPanellOficina({
+        comandes,
+        totalKg: totals?.totalKg ?? null,
+        filtres: filtresActius,
+      });
+    } catch (caught) {
+      setPrintError(
+        caught instanceof ApiError
+          ? `No s'ha pogut generar el llistat: ${caught.message}`
+          : "No s'ha pogut generar el llistat.",
+      );
+    } finally {
+      setIsPrinting(false);
+    }
+  }
+
   // Població de destí no té cap catàleg propi (és text lliure a
   // `comanda.poblacio_desti`, no una entitat com client/tarifa/
   // transportista) — les opcions es deriven de `data`, l'únic univers
@@ -187,8 +238,22 @@ export default function OfficePage() {
       <PageHeader
         title="Panell d'Oficina"
         subtitle="Vista tabular de totes les comandes. Fes clic en una fila per veure'n les línies."
-        right={<StatCard label="COMANDES VISIBLES" value={totals?.comandes ?? 0} />}
+        right={
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={isPrinting || isLoading || !totals || totals.comandes === 0}
+              className="flex items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Printer className="h-4 w-4" />
+              {isPrinting ? 'Generant PDF...' : 'Imprimir llista de comandes'}
+            </button>
+            <StatCard label="COMANDES VISIBLES" value={totals?.comandes ?? 0} />
+          </div>
+        }
       />
+      {printError && <p className="-mt-6 mb-6 text-sm text-red-600">{printError}</p>}
 
       {error && (
         <div className="mb-4 flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
@@ -358,7 +423,7 @@ export default function OfficePage() {
                       {order.transportista ?? '—'}
                     </td>
                     <td className="px-2 py-3">
-                      <Badge variant={order.estat === 'amb_incidencia' ? 'negative' : 'info'}>
+                      <Badge variant={estatBadgeVariant(order.estat)}>
                         {ESTAT_LABELS[order.estat] ?? order.estat}
                       </Badge>
                     </td>

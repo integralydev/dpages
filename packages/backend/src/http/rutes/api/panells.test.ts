@@ -217,6 +217,25 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
     );
     expect(perProducteParcial.dades).toHaveLength(0); // substring no matchea
 
+    // producte repetible (petició del client, 29/09/2026): OR entre valors.
+    const perLlom = cuerpoJson<PanellObradorApi>(
+      await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/obrador?producte=Llom%20fresc%20de%20porc',
+      }),
+    );
+    expect(perLlom.totals.linies).toBeGreaterThan(0);
+    const perTots2 = cuerpoJson<PanellObradorApi>(
+      await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/obrador?producte=Llom%20fresc%20de%20porc&producte=botifarra%20crua&mida=200',
+      }),
+    );
+    expect(perTots2.totals.linies).toBe(perLlom.totals.linies + 1);
+    expect(new Set(perTots2.dades.map((f) => f.producte.descripcio))).toEqual(
+      new Set(['Llom fresc de porc', 'Botifarra crua']),
+    );
+
     const perProducteSenseMatch = cuerpoJson<PanellObradorApi>(
       await fastify.inject({
         method: 'GET',
@@ -813,6 +832,169 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
         }),
       );
       expect(senseMatch.dades).toEqual([]);
+
+      await fastify.close();
+    });
+  });
+
+  describe("peticions d'Ari — categoria i confirmacio a GET /panells/empaquetat", () => {
+    it('categoria a cada fila, filtre categoriaId i filtre confirmacio (pendents/confirmades/totes)', async () => {
+      const fastify = construirServidor();
+
+      const categoria = await entorn.poolTest.query<{ id: string; id_seq: string }>(
+        `INSERT INTO categoria_producte (nom) VALUES ('XAI') RETURNING id, id_seq`,
+      );
+      const categoriaId = Number(categoria.rows[0]!.id_seq);
+      const producte = await entorn.poolTest.query<{ id_seq: string }>(
+        `INSERT INTO producte (codi, descripcio, pes_kg, preu_venda, tipus, categoria_id)
+         VALUES ('XAI01', 'Xai en canal', '10.000', '12.00', 'simple', $1) RETURNING id_seq`,
+        [categoria.rows[0]!.id],
+      );
+      const producteXaiId = Number(producte.rows[0]!.id_seq);
+      await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [
+            {
+              dataProduccio: '2026-08-01T00:00:00Z',
+              producteId: producteXaiId,
+              unitatsDemanades: 1,
+            },
+            {
+              dataProduccio: '2026-08-01T00:00:00Z',
+              producteId: producteXaiId,
+              unitatsDemanades: 2,
+            },
+          ],
+        },
+      });
+
+      const perCategoria = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: `/api/v1/panells/empaquetat?categoriaId=${categoriaId}`,
+        }),
+      );
+      expect(perCategoria.totals.linies).toBe(2);
+      expect(perCategoria.dades.every((f) => f.categoria === 'XAI')).toBe(true);
+
+      // Una de les dues passa a enviada.
+      const primera = perCategoria.dades[0]!;
+      await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${primera.comandaId}/linies/${primera.liniaId}/lliurament`,
+        payload: { unitatsLliurades: 1, kgLliurats: '10.000' },
+      });
+
+      const url = `/api/v1/panells/empaquetat?categoriaId=${categoriaId}`;
+      const pendents = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({ method: 'GET', url: `${url}&confirmacio=pendents` }),
+      );
+      expect(pendents.dades.map((f) => f.liniaId)).not.toContain(primera.liniaId);
+      expect(pendents.totals.linies).toBe(1);
+      expect(pendents.totals.liniesConfirmades).toBe(0);
+
+      const confirmades = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({ method: 'GET', url: `${url}&confirmacio=confirmades` }),
+      );
+      expect(confirmades.dades.map((f) => f.liniaId)).toEqual([primera.liniaId]);
+      expect(confirmades.totals.liniesPendents).toBe(0);
+
+      const totes = cuerpoJson<PanellEmpaquetatApi>(await fastify.inject({ method: 'GET', url }));
+      expect(totes.totals.linies).toBe(2);
+
+      // Línies sense categoria (Llom de dalt): categoria null, no trenca res.
+      const senseFiltre = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/empaquetat?mida=200' }),
+      );
+      expect(senseFiltre.dades.some((f) => f.categoria === null)).toBe(true);
+
+      // producte repetible, com a /panells/obrador: OR entre valors.
+      const perLlom = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: '/api/v1/panells/empaquetat?producte=Llom%20fresc%20de%20porc',
+        }),
+      );
+      const dosProductes = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: '/api/v1/panells/empaquetat?producte=Llom%20fresc%20de%20porc&producte=xai%20en%20canal&mida=200',
+        }),
+      );
+      expect(dosProductes.totals.linies).toBe(perLlom.totals.linies + 2);
+      expect(new Set(dosProductes.dades.map((f) => f.producte))).toEqual(
+        new Set(['Llom fresc de porc', 'Xai en canal']),
+      );
+
+      const invalid = await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/empaquetat?confirmacio=totes',
+      });
+      expect(invalid.statusCode).toBe(400);
+
+      await fastify.close();
+    });
+  });
+
+  // Petició d'Ari (29/09/2026). Al final del fitxer a propòsit: el pedido
+  // cancel·lat no altera els totals que comproven els tests d'abans.
+  describe('estat cancellada — fora de tots els panells', () => {
+    it('no surt a Oficina (ni als totals), Obrador ni Empaquetat; a Oficina sí amb ?estat=cancellada', async () => {
+      const fastify = construirServidor();
+
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [{ dataProduccio: '2026-08-01T00:00:00Z', producteId, unitatsDemanades: 1 }],
+        },
+      });
+      const comandaId = cuerpoJson<{ id: number }>(creada).id;
+
+      const oficinaAbans = cuerpoJson<PanellOficinaApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/oficina?mida=200' }),
+      );
+      expect(oficinaAbans.dades.some((f) => f.comandaId === comandaId)).toBe(true);
+
+      const cancel = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comandaId}`,
+        payload: { estat: 'cancellada' },
+      });
+      expect(cancel.statusCode).toBe(200);
+      expect(cuerpoJson<ComandaDetallApi>(cancel).estat).toBe('cancellada');
+
+      const oficina = cuerpoJson<PanellOficinaApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/oficina?mida=200' }),
+      );
+      expect(oficina.dades.some((f) => f.comandaId === comandaId)).toBe(false);
+      expect(oficina.totals.comandes).toBe(oficinaAbans.totals.comandes - 1);
+
+      const nomesCancellades = cuerpoJson<PanellOficinaApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: '/api/v1/panells/oficina?estat=cancellada&mida=200',
+        }),
+      );
+      expect(nomesCancellades.dades.map((f) => f.comandaId)).toEqual([comandaId]);
+
+      const obrador = cuerpoJson<PanellObradorApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/obrador?mida=200' }),
+      );
+      expect(obrador.dades.some((f) => f.comandaId === comandaId)).toBe(false);
+
+      const empaquetat = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/empaquetat?mida=200' }),
+      );
+      expect(empaquetat.dades.some((f) => f.comandaId === comandaId)).toBe(false);
 
       await fastify.close();
     });

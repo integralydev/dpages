@@ -36,6 +36,23 @@ async function resolverFiltreEntitat(
   return uuid ?? '00000000-0000-0000-0000-000000000000';
 }
 
+/**
+ * `?producte=` repetible (petició del client, 29/09/2026): `?producte=A&
+ * producte=B` = línies de A o de B. Fastify ja lliura un array quan la clau
+ * es repeteix; un sol valor funciona igual que sempre. Coincidència EXACTA
+ * per descripció, case-insensitive (regla 3.1 transversal), mai substring.
+ * Afegeix la condició a `condicions`/`valors` si hi ha cap producte.
+ */
+function afegirFiltreProductes(valor: unknown, condicions: string[], valors: unknown[]): void {
+  const productes = (Array.isArray(valor) ? valor : [valor])
+    .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    .map((item) => item.trim().toLowerCase());
+  if (productes.length > 0) {
+    condicions.push(`LOWER(p.descripcio) = ANY($${valors.length + 1}::text[])`);
+    valors.push(productes);
+  }
+}
+
 type AgrupacioRendiment = 'KG' | 'MAGRE' | 'PAQ';
 const AGRUPACIONS_RENDIMENT: readonly AgrupacioRendiment[] = ['KG', 'MAGRE', 'PAQ'];
 
@@ -104,9 +121,14 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         condicions.push(condicioDataFinsInclusiva('c.data_lliurament', valors.length + 1));
         valors.push(query.dataLliuramentFins);
       }
+      // Els pedidos 'cancellada' no compten a cap panell (petició d'Ari,
+      // 29/09/2026). Única excepció: aquí, si es filtra explícitament per
+      // aquest estat — mai amb "Tots" (sense `estat`).
       if (typeof query.estat === 'string' && query.estat !== '') {
         condicions.push(`c.estat = $${valors.length + 1}`);
         valors.push(query.estat);
+      } else {
+        condicions.push(`c.estat <> 'cancellada'`);
       }
       const transportistaUuid = await resolverFiltreEntitat(
         reply,
@@ -260,7 +282,8 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       const query = req.query as Record<string, unknown>;
       const { pagina, mida, offset } = parsearPaginacio(query);
 
-      const condicions: string[] = ['NOT cl.esborrat'];
+      // Pedidos cancelados fuera (ver /panells/oficina).
+      const condicions: string[] = ['NOT cl.esborrat', `c.estat <> 'cancellada'`];
       const valors: unknown[] = [];
 
       // dataProduccio filtra por la fecha de la LÍNEA (cl.data_produccio), no
@@ -290,13 +313,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         condicions.push(`p.tipus = $${valors.length + 1}`);
         valors.push(query.tipus);
       }
-      if (typeof query.producte === 'string' && query.producte.trim() !== '') {
-        // Coincidencia EXACTA por descripción, case-insensitive — mismo
-        // criterio que /panells/produccio y /rendiments-porcs (regla 3.1
-        // transversal), no substring.
-        condicions.push(`LOWER(p.descripcio) = LOWER($${valors.length + 1})`);
-        valors.push(query.producte.trim());
-      }
+      afegirFiltreProductes(query.producte, condicions, valors);
       if (typeof query.format === 'string' && query.format.trim() !== '') {
         condicions.push(`p.format = $${valors.length + 1}`);
         valors.push(query.format.trim());
@@ -414,7 +431,8 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       const query = req.query as Record<string, unknown>;
       const { pagina, mida, offset } = parsearPaginacio(query);
 
-      const condicions: string[] = ['NOT cl.esborrat'];
+      // Pedidos cancelados fuera (ver /panells/oficina).
+      const condicions: string[] = ['NOT cl.esborrat', `c.estat <> 'cancellada'`];
       const valors: unknown[] = [];
 
       if (typeof query.dataExpedicioDes === 'string' && query.dataExpedicioDes !== '') {
@@ -454,12 +472,30 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         condicions.push(`c.client_id = $${valors.length + 1}`);
         valors.push(clientUuid);
       }
-      // Coincidencia EXACTA, case-insensitive — regla 3.1 transversal (mismo
-      // criterio que ?producte= en /panells/obrador, /panells/produccio y
-      // /rendiments-porcs), no substring.
-      if (typeof query.producte === 'string' && query.producte.trim() !== '') {
-        condicions.push(`LOWER(p.descripcio) = LOWER($${valors.length + 1})`);
-        valors.push(query.producte.trim());
+      afegirFiltreProductes(query.producte, condicions, valors);
+      // Peticions d'Ari (29/09/2026): categoria de l'article (mateix criteri
+      // que a /panells/obrador) i línies pendents / ja enviades.
+      const categoriaUuid = await resolverFiltreEntitat(
+        reply,
+        query.categoriaId,
+        'categoriaId',
+        (id) => resolverCategoriaUuid(pool, id),
+      );
+      if (categoriaUuid === null) return;
+      if (categoriaUuid !== undefined) {
+        condicions.push(`p.categoria_id = $${valors.length + 1}`);
+        valors.push(categoriaUuid);
+      }
+      if (query.confirmacio !== undefined && query.confirmacio !== '') {
+        if (query.confirmacio === 'pendents') {
+          condicions.push('cl.confirmat_a IS NULL');
+        } else if (query.confirmacio === 'confirmades') {
+          condicions.push('cl.confirmat_a IS NOT NULL');
+        } else {
+          return enviarValidacio(reply, 'confirmacio ha de ser pendents o confirmades', [
+            { camp: 'confirmacio', missatge: 'ha de ser pendents o confirmades' },
+          ]);
+        }
       }
       const where = `WHERE ${condicions.join(' AND ')}`;
 
@@ -469,6 +505,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       LEFT JOIN client cli ON cli.id = c.client_id
       LEFT JOIN transportista tr ON tr.id = c.transportista_id
       LEFT JOIN producte p ON p.id = cl.producte_id
+      LEFT JOIN categoria_producte cat ON cat.id = p.categoria_id
       ${where}
     `;
 
@@ -501,6 +538,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         data_lliurament: Date | null;
         transportista_nom: string | null;
         client_nom: string | null;
+        categoria_nom: string | null;
         codi: string | null;
         descripcio: string | null;
         unitats_demanades: string;
@@ -511,7 +549,8 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         confirmat_per: string | null;
       }>(
         `SELECT cl.id_seq, c.id_seq AS comanda_id_seq, c.num, c.data_expedicio, c.data_lliurament,
-              tr.nom AS transportista_nom, cli.nom AS client_nom, p.codi, p.descripcio,
+              tr.nom AS transportista_nom, cli.nom AS client_nom, cat.nom AS categoria_nom,
+              p.codi, p.descripcio,
               cl.unitats_demanades, cl.pes_calculat_kg AS kg_demanats, cl.unitats_lliurades,
               cl.kg_lliurats, cl.confirmat_a, cl.confirmat_per
        ${base}
@@ -535,6 +574,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         dataLliurament: formatearDataApi(f.data_lliurament),
         transportista: f.transportista_nom,
         client: f.client_nom,
+        categoria: f.categoria_nom,
         codi: f.codi,
         producte: f.descripcio ?? '',
         unitatsDemanades: f.unitats_demanades,
@@ -595,6 +635,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       }
 
       const condicions: string[] = [
+        // Ya deja fuera los pedidos 'cancellada' (y cualquier otro estado).
         `c.estat = 'oberta'`,
         'cat.elaborat_porc = true',
         'NOT cl.esborrat',

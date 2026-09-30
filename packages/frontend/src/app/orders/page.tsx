@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Printer } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DataCard, DataCardActions, DataCardField, DataCardGrid } from '@/components/ui/DataCard';
@@ -14,18 +15,19 @@ import { SearchInput } from '@/components/ui/SearchInput';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { useOrders } from '@/hooks/useOrders';
 import { useOrigensComanda } from '@/hooks/useOrigensComanda';
-import { ApiError, type ComandaResumApi } from '@/lib/api';
+import { ESTAT_LABELS, estatBadgeVariant } from '@/lib/comandaEstat';
+import {
+  api,
+  ApiError,
+  obtenirTotesLesPagines,
+  type ComandaResumApi,
+  type RespostaPaginada,
+} from '@/lib/api';
 import { origenBadgeVariant } from '@/lib/comandaOrigen';
 import { formatData } from '@/lib/dates';
+import { descarregarPdfLlistatComandes } from '@/lib/ordersPdf';
 
 const ALL = 'Tots';
-
-const ESTAT_LABELS: Record<string, string> = {
-  oberta: 'Oberta',
-  en_proces: 'En procés',
-  tancada: 'Tancada',
-  amb_incidencia: 'Amb incidència',
-};
 
 function productionDates(order: ComandaResumApi): string {
   return order.datesProduccioLinies.map((data) => formatData(data, false)).join(', ');
@@ -50,7 +52,7 @@ function OrderCard({
           <p className="text-sm text-gray-500">{order.client?.nom ?? '—'}</p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <Badge variant={order.estat === 'amb_incidencia' ? 'negative' : 'info'}>
+          <Badge variant={estatBadgeVariant(order.estat)}>
             {ESTAT_LABELS[order.estat] ?? order.estat}
           </Badge>
           {order.congelada && <Badge variant="neutral">Congelada</Badge>}
@@ -81,7 +83,7 @@ function OrderCard({
         >
           Editar
         </button>
-        {order.estat !== 'amb_incidencia' && (
+        {order.estat !== 'amb_incidencia' && order.estat !== 'cancellada' && (
           <button
             type="button"
             onClick={onMarkIncidence}
@@ -151,6 +153,43 @@ export default function OrdersPage() {
     return (codi: string) => byCodi.get(codi) ?? codi;
   }, [origins]);
 
+  // Llistat en PDF (petició del client, 29/09/2026): TOTES les comandes
+  // que compleixen els filtres actius, no només la pàgina de 20 visible —
+  // es tornen a demanar totes a GET /comandes amb els mateixos filtres.
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
+
+  const activeFilterLabels = [
+    search.trim() && `Cerca: ${search.trim()}`,
+    statusFilter !== ALL && `Estat: ${statusFilter}`,
+    productionDateFilter && `Data producció: ${formatData(productionDateFilter, false)}`,
+    orderDateFilter && `Data comanda: ${formatData(orderDateFilter, false)}`,
+    deliveryDateFilter && `Data lliurament: ${formatData(deliveryDateFilter, false)}`,
+  ].filter((label): label is string => Boolean(label));
+
+  async function handlePrint() {
+    setIsPrinting(true);
+    setPrintError(null);
+    try {
+      const comandes = await obtenirTotesLesPagines((pagina) =>
+        api.get<RespostaPaginada<ComandaResumApi>>('/comandes', { ...filters, mida: 200, pagina }),
+      );
+      await descarregarPdfLlistatComandes({
+        comandes,
+        filtres: activeFilterLabels,
+        originLabel,
+      });
+    } catch (caught) {
+      setPrintError(
+        caught instanceof ApiError
+          ? `No s'ha pogut generar el llistat: ${caught.message}`
+          : "No s'ha pogut generar el llistat.",
+      );
+    } finally {
+      setIsPrinting(false);
+    }
+  }
+
   async function handleConfirmIncidence() {
     if (!incidenceTarget) return;
     setIsMarkingIncidence(true);
@@ -173,8 +212,30 @@ export default function OrdersPage() {
       <PageHeader
         title="Comandes"
         subtitle="Manteniment de comandes de venda."
-        action={{ label: 'Nova comanda', onClick: () => router.push('/orders/new') }}
+        right={
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={isPrinting || isLoading || !paginacio || paginacio.total === 0}
+              className="flex items-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Printer className="h-4 w-4" />
+              {isPrinting
+                ? 'Generant PDF...'
+                : `Imprimir llista de comandes (${paginacio?.total ?? 0})`}
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push('/orders/new')}
+              className="flex items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90"
+            >
+              Nova comanda
+            </button>
+          </div>
+        }
       />
+      {printError && <p className="-mt-6 mb-6 text-sm text-red-600">{printError}</p>}
 
       <FilterBar>
         <SearchInput label="Cerca (núm. comanda o client)" value={search} onChange={setSearch} />
@@ -309,7 +370,7 @@ export default function OrdersPage() {
                     </td>
                     <td className="px-2 py-3 break-words">
                       <div className="flex flex-col items-start gap-1">
-                        <Badge variant={order.estat === 'amb_incidencia' ? 'negative' : 'info'}>
+                        <Badge variant={estatBadgeVariant(order.estat)}>
                           {ESTAT_LABELS[order.estat] ?? order.estat}
                         </Badge>
                         {order.congelada && <Badge variant="neutral">Congelada</Badge>}
@@ -325,7 +386,7 @@ export default function OrdersPage() {
                           label="Editar comanda"
                           onClick={() => router.push(`/orders/${order.id}`)}
                         />
-                        {order.estat !== 'amb_incidencia' && (
+                        {order.estat !== 'amb_incidencia' && order.estat !== 'cancellada' && (
                           <IconButton
                             variant="warning"
                             label="Marcar com a incidència"

@@ -237,7 +237,7 @@ Siempre con esta forma, en cualquier código de estado:
 Todas están en `@dpages/shared`. Importalas, no las escribas a mano.
 
 ```typescript
-type EstatComanda = 'oberta' | 'en_proces' | 'tancada' | 'amb_incidencia';
+type EstatComanda = 'oberta' | 'en_proces' | 'tancada' | 'amb_incidencia' | 'cancellada';
 type TipusProducte = 'simple' | 'variable';
 type Idioma = 'ca' | 'es';
 ```
@@ -259,6 +259,16 @@ Etiquetas para mostrar (el backend no las envía, van en el frontend):
 | `en_proces`      | En procés      | En proceso     |
 | `tancada`        | Tancada        | Cerrada        |
 | `amb_incidencia` | Amb incidència | Con incidencia |
+| `cancellada`     | Cancel·lada    | Cancelada      |
+
+> **`cancellada`** (29/09/2026, petición de Ari): el pedido sigue existiendo
+> y se ve en `GET /comandes` (también con `?estat=cancellada`), pero **no
+> cuenta en ningún panel**: `/panells/oficina`, `/panells/obrador`,
+> `/panells/empaquetat` y `/panells/produccio` lo excluyen de filas y
+> totales. Única excepción: `/panells/oficina?estat=cancellada` sí los
+> devuelve (filtro explícito); sin `estat`, nunca. La sincronización con WooCommerce tampoco lo reabre: una
+> incidencia automática se registra igual, pero el pedido sigue
+> `cancellada`.
 
 `incidencies[].tipus` (de `GET /comandes/:id`, ver sección 4.5) **no** es un
 enum cerrado en el backend — es texto libre en base, para no exigir una
@@ -985,7 +995,7 @@ correo y WhatsApp, que son la mayoría del volumen real.
 > `409 CONFLICTE`. Mostralo visualmente.
 
 **`estat` en `PATCH /comandes/:id`** (capa 31) — permite mover el pedido a
-mano entre los 4 valores de `EstatComanda`, sin restricción de transición
+mano entre los 5 valores de `EstatComanda`, sin restricción de transición
 (cualquier estado puede pasar a cualquier otro). Pensado para los casos que
 el sistema no puede detectar solo: marcar incidencia por una queja del
 cliente o falta de stock, o volver de `amb_incidencia` a otro estado una vez
@@ -999,7 +1009,7 @@ Si `estat` es `"amb_incidencia"`, `detall` es **obligatorio en el mismo
 body** — sin eso, `400 VALIDACIO`. Al aplicar, se registra una incidencia
 nueva (`tipus: "manual"`, ver sección 3) en `incidencies[]`, igual que las
 automáticas. Para cualquier otro valor de `estat`, `detall` se ignora si
-viene. Un `estat` que no sea uno de los 4 valores válidos también es
+viene. Un `estat` que no sea uno de los 5 valores válidos también es
 `400 VALIDACIO`. Mismo `409 CONFLICTE` si el pedido está congelado.
 
 **`origen` en `PATCH /comandes/:id`** — reasigna el canal del pedido, sin
@@ -1176,6 +1186,12 @@ líneas individuales visibles.
 
 Filtros: `?dataProduccioDes=&dataProduccioFins=&categoriaId=&tipus=&producte=&format=&envasat=`
 
+> **`producte` repetible (petición del cliente, 29/09/2026):**
+> `?producte=Llom%20fresc&producte=Botifarra` devuelve las líneas de
+> **cualquiera** de los productos indicados (OR). Cada valor sigue siendo
+> coincidencia exacta, case-insensitive, contra `producte.descripcio`. Un
+> solo `?producte=` funciona igual que antes.
+
 > `dataProduccioFins` incluye el día completo — ver "Filtros de rango de
 > fecha" en la sección 2 (capa 36).
 
@@ -1305,7 +1321,19 @@ Respuesta `200`:
 
 **`GET /panells/empaquetat`**
 
-Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&producte=`
+Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&producte=&categoriaId=&confirmacio=`
+
+> **Peticiones de Ari (29/09/2026):**
+>
+> - `categoriaId`: categoría del artículo de la línea, mismo criterio que
+>   `?categoriaId=` en `/panells/obrador`. Cada fila trae además
+>   `categoria` (nombre, `null` si el artículo no tiene categoría).
+> - `producte` repetible, igual que en `/panells/obrador` (sección 4.7):
+>   varios valores = líneas de cualquiera de esos productos.
+> - `confirmacio`: `pendents` (líneas sin confirmar, `confirmatA` null) o
+>   `confirmades` (ya enviadas: se guardaron unidades y kilos
+>   enviados). Sin el parámetro, todas. Cualquier otro valor es
+>   `400 VALIDACIO`. Los `totals` respetan el filtro, como todos los demás.
 
 > `dataExpedicioFins`/`dataLliuramentFins` incluyen el día completo — ver
 > "Filtros de rango de fecha" en la sección 2 (capa 36).
@@ -1343,6 +1371,7 @@ Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramen
       "dataLliurament": "2026-08-18T00:00:00Z",
       "transportista": "DHL",
       "client": "Restaurant Example",
+      "categoria": "PECES NOBLES KG",
       "codi": "LLF01",
       "producte": "Llom fresc de porc",
       "unitatsDemanades": "10.00",

@@ -80,8 +80,11 @@ Puesta en producción objetivo: **finales de septiembre de 2026**.
   confirmación explícita aunque coincidan con lo pedido (doble confirmación
   — motivo: por mermas se puede enviar menos de lo pedido, y hay que emitir
   abono o cargo).
-- Cuatro estados de pedido: `oberta`, `en_proces`, `tancada`,
-  `amb_incidencia`.
+- Cinco estados de pedido: `oberta`, `en_proces`, `tancada`,
+  `amb_incidencia`, `cancellada` (añadido el 29/09/2026 a petición de Ari:
+  los pedidos cancelados quedan fuera de todos los paneles, pero se siguen
+  viendo en la pantalla de pedidos; en el Panel Oficina sólo aparecen si se
+  filtra explícitamente por ese estado).
 - El sistema sólo lee de WooCommerce. Nunca escribe de vuelta. La credencial
   de API es de sólo lectura.
 

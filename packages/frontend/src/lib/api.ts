@@ -161,21 +161,26 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
-function withQuery(
-  path: string,
-  params?: Record<string, string | number | boolean | undefined>,
-): string {
+type QueryValue = string | number | boolean | string[] | undefined;
+
+// Un array es manda com a paràmetre repetit (`?producte=A&producte=B`),
+// que és com el backend rep els filtres de valor múltiple.
+function withQuery(path: string, params?: Record<string, QueryValue>): string {
   if (!params) return path;
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) query.set(key, String(value));
+    if (Array.isArray(value)) {
+      for (const item of value) query.append(key, item);
+    } else if (value !== undefined) {
+      query.set(key, String(value));
+    }
   }
   const queryString = query.toString();
   return queryString ? `${path}?${queryString}` : path;
 }
 
 export const api = {
-  get: <T>(path: string, params?: Record<string, string | number | boolean | undefined>) =>
+  get: <T>(path: string, params?: Record<string, QueryValue>) =>
     request<T>('GET', withQuery(path, params)),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body ?? {}),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body ?? {}),

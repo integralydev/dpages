@@ -203,7 +203,7 @@ export default function ProductionPage() {
               value={nombrePorcsInput}
               onChange={(event) => setNombrePorcsInput(event.target.value)}
               placeholder="Introdueix un valor"
-              className="w-full max-w-[160px] rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-gray-400 focus:outline-none"
+              className="w-full max-w-[160px] rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-brand focus:outline-none"
             />
             {nombrePorcsError && <span className="text-xs text-red-600">{nombrePorcsError}</span>}
           </label>

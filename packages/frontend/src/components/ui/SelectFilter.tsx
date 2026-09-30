@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from 'lucide-react';
 
 export function SelectFilter({
   label,
@@ -20,7 +20,7 @@ export function SelectFilter({
         <select
           value={value}
           onChange={(event) => onChange?.(event.target.value)}
-          className="w-full appearance-none rounded-md border border-gray-300 bg-white py-2 pr-9 pl-3 text-sm text-gray-900 focus:border-gray-400 focus:outline-none"
+          className="w-full appearance-none rounded-md border border-gray-300 bg-white py-2 pr-9 pl-3 text-sm text-gray-900 focus:border-brand focus:outline-none"
         >
           {options.map((option) => (
             <option key={option} value={option}>
