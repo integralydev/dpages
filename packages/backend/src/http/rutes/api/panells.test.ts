@@ -1094,9 +1094,16 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
       await fastify.close();
     });
 
-    it('Empaquetat: filtre observacions (només les de la línia)', async () => {
+    it("Empaquetat: filtre observacions d'empaquetat (tasques 7 i 23) i columna", async () => {
       const fastify = construirServidor();
       const { clientId, comandes } = await preparar(fastify);
+      // La 1a té observació d'empaquetat a la línia; la 2a només de
+      // producció (preparar) i la 3a d'entrega: cap de les dues compta.
+      await entorn.poolTest.query(
+        `UPDATE comanda_linia SET obs_empaquetat = 'Unitat familiar 2'
+         WHERE comanda_id = (SELECT id FROM comanda WHERE id_seq = $1)`,
+        [comandes[0]],
+      );
       await entorn.poolTest.query(
         `UPDATE comanda SET obs_lliurament = 'Deixar a la porta' WHERE id_seq = $1`,
         [comandes[2]],
@@ -1108,8 +1115,9 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
             url: `/api/v1/panells/empaquetat?clientId=${clientId}&mida=200${q}`,
           }),
         );
-      // Només la 1a té observació a la línia; capçalera i entrega no compten.
-      expect((await get('&observacions=si')).dades.map((f) => f.comandaId)).toEqual([comandes[0]]);
+      const amb = await get('&observacions=si');
+      expect(amb.dades.map((f) => f.comandaId)).toEqual([comandes[0]]);
+      expect(amb.dades[0]?.obsEmpaquetat).toBe('Unitat familiar 2');
       expect(new Set((await get('&observacions=no')).dades.map((f) => f.comandaId))).toEqual(
         new Set([comandes[1], comandes[2]]),
       );

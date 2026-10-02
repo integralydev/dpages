@@ -1217,6 +1217,9 @@ Filtros: `?dataProduccioDes=&dataProduccioFins=&categoriaId=&tipus=&producte=&fo
 > Otro valor de `observacions`/`treball` es `400 VALIDACIO`. Los `totals`
 > traen además `liniesFetes` y `liniesPendents`.
 >
+> Cada fila trae además `agrupacioProduccio` (`producte.agrupacio_produccio`,
+> `null` si el producto no tiene), que el panel muestra antes del producto.
+>
 > **`POST /panells/obrador/marcar-fets`** (tarea 26) — acepta **los mismos
 > filtros** como query string y marca como trabajadas (`treballatA` =
 > ahora, `treballatPer` = el usuario) **todas** las líneas pendientes que
@@ -1378,8 +1381,15 @@ Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramen
 >   enviados). Sin el parámetro, todas. Cualquier otro valor es
 >   `400 VALIDACIO`. Los `totals` respetan el filtro, como todos los demás.
 > - `observacions` (tarea 23, 01/10/2026): `si` / `no` — línea con
->   observación de producción **en la propia línea** (las de cabecera del
->   pedido no cuentan: el panel muestra datos de línea).
+>   **observación de empaquetado** (`obsEmpaquetat`, ver abajo).
+>
+> **`obsEmpaquetat`** (tarea 7, 01/10/2026, migración `0022`): observación
+> de empaquetado a nivel de **línea** de pedido (por ejemplo, la unidad
+> familiar a la que va el producto). Cada fila del panel la trae (`null` si
+> no hay). Se informa al crear el pedido (`linies[].obsEmpaquetat` en
+> `POST /comandes`), al añadir una línea (`POST .../linies`) y al editarla
+> (`PATCH .../linies/:liniaId`); `GET /comandes/:id` la devuelve en
+> `linies[]`. Vacía o sólo espacios = `null`.
 
 > `dataExpedicioFins`/`dataLliuramentFins` incluyen el día completo — ver
 > "Filtros de rango de fecha" en la sección 2 (capa 36).

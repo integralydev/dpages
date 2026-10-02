@@ -199,6 +199,7 @@ interface FilaComandaLinia {
   total_linia: string;
   data_produccio: Date | null;
   obs_produccio: string | null;
+  obs_empaquetat: string | null;
   esborrat: boolean;
 }
 
@@ -227,6 +228,7 @@ function aApiLinia(fila: FilaComandaLinia): ComandaLiniaApi {
     totalLinia: fila.total_linia,
     dataProduccio: formatearDataApi(fila.data_produccio),
     obsProduccio: fila.obs_produccio,
+    obsEmpaquetat: fila.obs_empaquetat,
     esborrat: fila.esborrat,
   };
 }
@@ -237,7 +239,7 @@ const SELECT_COMANDA_LINIA = `
          cl.unitats_demanades, cl.pes_calculat_kg AS kg_demanats,
          cl.pes_editable, cl.unitats_lliurades, cl.kg_lliurats, cl.confirmat_a, cl.preu_unitari,
          (cl.unitats_demanades * cl.preu_unitari)::numeric(14,2) AS total_linia,
-         cl.data_produccio, cl.obs_produccio, cl.esborrat
+         cl.data_produccio, cl.obs_produccio, cl.obs_empaquetat, cl.esborrat
   FROM comanda_linia cl
   LEFT JOIN producte p ON p.id = cl.producte_id
   LEFT JOIN categoria_producte cat ON cat.id = p.categoria_id
@@ -599,6 +601,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         unitatsDemanades: number;
         kgDemanats?: string;
         dataProduccio?: string | null;
+        obsEmpaquetat?: string | null;
       }[];
     }>;
 
@@ -719,6 +722,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       pesCalculatKg: string;
       pesEditable: boolean;
       dataProduccio: string | null;
+      obsEmpaquetat: string | null;
     }[] = [];
 
     for (let i = 0; i < cos.linies!.length; i++) {
@@ -787,6 +791,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         // null (mateix criteri que cos.obsLliurament ?? null, més avall) en
         // comptes de deixar passar `undefined` cru al paràmetre de l'INSERT.
         dataProduccio: linia.dataProduccio ?? null,
+        // Tasca 7: buida = sense observació.
+        obsEmpaquetat: linia.obsEmpaquetat?.trim() || null,
       });
     }
 
@@ -828,8 +834,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         await client.query(
           `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                        preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-                                       data_produccio)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                                       data_produccio, obs_empaquetat)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
           [
             comandaUuid,
             i,
@@ -840,6 +846,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             l.pesCalculatKg,
             l.pesEditable,
             l.dataProduccio,
+            l.obsEmpaquetat,
           ],
         );
         if (l.sensePreu) {
@@ -1171,6 +1178,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         unitatsDemanades: number;
         kgDemanats: string;
         dataProduccio: string | null;
+        obsEmpaquetat: string | null;
       }>;
 
       if (cos.producteId === undefined) {
@@ -1269,8 +1277,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         await client.query(
           `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                      preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-                                     data_produccio)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                                     data_produccio, obs_empaquetat)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
           [
             comandaUuid,
             ordinal,
@@ -1284,6 +1292,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             // (cos.obsLliurament ?? null): dataProduccio ya no es obligatoria,
             // pero el parámetro no debe recibir `undefined` crudo.
             cos.dataProduccio ?? null,
+            // Tasca 7: buida = sense observació.
+            cos.obsEmpaquetat?.trim() || null,
           ],
         );
 
@@ -1350,6 +1360,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         kgDemanats: string;
         dataProduccio: string | null;
         obsProduccio: string | null;
+        obsEmpaquetat: string | null;
       }>;
 
       // Ver nota equivalente en POST /comandes.
@@ -1433,7 +1444,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
            unitats_demanades = CASE WHEN $3 THEN $4 ELSE unitats_demanades END,
            pes_calculat_kg = CASE WHEN $5 THEN $6 ELSE pes_calculat_kg END,
            data_produccio = CASE WHEN $7 THEN $8 ELSE data_produccio END,
-           obs_produccio = CASE WHEN $9 THEN $10 ELSE obs_produccio END
+           obs_produccio = CASE WHEN $9 THEN $10 ELSE obs_produccio END,
+           obs_empaquetat = CASE WHEN $11 THEN $12 ELSE obs_empaquetat END
          WHERE id_seq = $1 AND comanda_id = $2
          RETURNING id`,
           [
@@ -1447,6 +1459,9 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             cos.dataProduccio ?? null,
             cos.obsProduccio !== undefined,
             cos.obsProduccio ?? null,
+            // Tasca 7: buida = sense observació.
+            cos.obsEmpaquetat !== undefined,
+            cos.obsEmpaquetat?.trim() || null,
           ],
         );
         if (!resultat.rows[0]) {

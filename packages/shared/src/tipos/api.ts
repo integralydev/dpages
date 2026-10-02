@@ -308,6 +308,8 @@ export interface ComandaLiniaApi {
   /** Editable por línea (prototipo /pedidos), distinta de comanda.dataProduccio (cabecera). */
   dataProduccio: string | null;
   obsProduccio: string | null;
+  /** Tasca 7 (01/10/2026): observació d'empaquetat de la línia. */
+  obsEmpaquetat: string | null;
   esborrat: boolean;
 }
 
@@ -361,6 +363,8 @@ export interface LiniaCreacioApi {
    * opcional del contrato).
    */
   dataProduccio?: string | null;
+  /** Tasca 7 (01/10/2026): observació d'empaquetat de la línia. */
+  obsEmpaquetat?: string | null;
 }
 
 export interface ComandaCreacioApi {
@@ -428,6 +432,8 @@ export interface LiniaEdicioApi {
   kgDemanats?: string;
   dataProduccio?: string | null;
   obsProduccio?: string | null;
+  /** Tasca 7 (01/10/2026). */
+  obsEmpaquetat?: string | null;
 }
 
 // ── 5 · Empaquetado ──────────────────────────────────────────────────────
@@ -565,6 +571,8 @@ export interface FilaPanellObradorApi {
   liniaId: number;
   comandaId: number;
   producte: { id: number; codi: string | null; descripcio: string };
+  /** `producte.agrupacio_produccio` (01/10/2026); `null` si el producte no en té. */
+  agrupacioProduccio: string | null;
   categoria: string | null;
   format: string | null;
   envasat: string | null;
@@ -619,6 +627,8 @@ export interface FilaPanellEmpaquetatApi {
   kgLliurats: string;
   confirmatA: string | null;
   confirmatPer: string | null;
+  /** Tasca 7 (01/10/2026): observació d'empaquetat de la línia. */
+  obsEmpaquetat: string | null;
 }
 
 export interface PanellEmpaquetatApi {

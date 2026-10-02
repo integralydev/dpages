@@ -1112,6 +1112,53 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
 
       await fastify.close();
     });
+
+    it('tasca 7: obsEmpaquetat es desa en crear la comanda, en afegir línia i en editar-la', async () => {
+      const fastify = construirServidor();
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [
+            {
+              producteId: producteFitxaId,
+              unitatsDemanades: 1,
+              obsEmpaquetat: 'Unitat familiar 1',
+            },
+            { producteId: producteFitxaId, unitatsDemanades: 1, obsEmpaquetat: '   ' },
+          ],
+        },
+      });
+      expect(creada.statusCode).toBe(201);
+      const comanda = cuerpoJson<ComandaDetallApi>(creada);
+      expect(comanda.linies.map((l) => l.obsEmpaquetat)).toEqual(['Unitat familiar 1', null]);
+
+      const afegida = await fastify.inject({
+        method: 'POST',
+        url: `/api/v1/comandes/${comanda.id}/linies`,
+        payload: { producteId: producteFitxaId, unitatsDemanades: 1, obsEmpaquetat: 'Caixa B' },
+      });
+      expect(afegida.statusCode).toBe(201);
+      const ambTres = cuerpoJson<ComandaDetallApi>(afegida);
+      expect(ambTres.linies.map((l) => l.obsEmpaquetat)).toContain('Caixa B');
+
+      const primera = comanda.linies[0]!;
+      const editada = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comanda.id}/linies/${primera.id}`,
+        payload: { obsEmpaquetat: 'Unitat familiar 3' },
+      });
+      expect(editada.statusCode).toBe(200);
+      const despres = cuerpoJson<ComandaDetallApi>(editada);
+      expect(despres.linies.find((l) => l.id === primera.id)?.obsEmpaquetat).toBe(
+        'Unitat familiar 3',
+      );
+
+      await fastify.close();
+    });
   });
 
   describe('capa 31 — canvi manual d’estat (PATCH /comandes/:id)', () => {

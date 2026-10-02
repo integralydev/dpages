@@ -440,6 +440,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         producte_codi: string | null;
         producte_descripcio: string;
         categoria_nom: string | null;
+        agrupacio_produccio: string | null;
         format: string | null;
         envasat: string | null;
         client_nom: string | null;
@@ -453,7 +454,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       }>(
         `SELECT cl.id_seq AS linia_id_seq, c.id_seq AS comanda_id_seq,
               p.id_seq AS producte_id_seq, p.codi AS producte_codi, p.descripcio AS producte_descripcio,
-              cat.nom AS categoria_nom, p.format, p.envasat, cli.nom AS client_nom,
+              cat.nom AS categoria_nom, p.agrupacio_produccio, p.format, p.envasat, cli.nom AS client_nom,
               cl.data_produccio, cl.unitats_demanades AS unitats, cl.pes_calculat_kg AS kg,
               cl.obs_produccio, cl.treballat_a,
               tu.id_seq AS treballat_per_id_seq, tu.nom AS treballat_per_nom
@@ -479,6 +480,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
           codi: f.producte_codi,
           descripcio: f.producte_descripcio,
         },
+        agrupacioProduccio: f.agrupacio_produccio,
         categoria: f.categoria_nom,
         format: f.format,
         envasat: f.envasat,
@@ -587,9 +589,9 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
           ]);
         }
       }
-      // Tasca 23 (01/10/2026): línies amb / sense observacions DE LA LÍNIA
-      // (el panell mostra dades de línia; les de capçalera no compten).
-      const ambObservacions = `COALESCE(TRIM(cl.obs_produccio), '') <> ''`;
+      // Tasca 23 (01/10/2026): línies amb / sense observacions d'EMPAQUETAT
+      // (camp de línia de la tasca 7).
+      const ambObservacions = `COALESCE(TRIM(cl.obs_empaquetat), '') <> ''`;
       if (query.observacions === 'si') condicions.push(ambObservacions);
       else if (query.observacions === 'no') condicions.push(`NOT ${ambObservacions}`);
       else if (query.observacions !== undefined && query.observacions !== '') {
@@ -647,12 +649,13 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         kg_lliurats: string;
         confirmat_a: Date | null;
         confirmat_per: string | null;
+        obs_empaquetat: string | null;
       }>(
         `SELECT cl.id_seq, c.id_seq AS comanda_id_seq, c.num, c.data_expedicio, c.data_lliurament,
               tr.nom AS transportista_nom, cli.nom AS client_nom, cat.nom AS categoria_nom,
               p.codi, p.descripcio,
               cl.unitats_demanades, cl.pes_calculat_kg AS kg_demanats, cl.unitats_lliurades,
-              cl.kg_lliurats, cl.confirmat_a, cl.confirmat_per
+              cl.kg_lliurats, cl.confirmat_a, cl.confirmat_per, cl.obs_empaquetat
        ${base}
        -- Mismo criterio que /panells/obrador (ver comentario ahí): pendents
        -- (confirmat_a IS NULL) primer, per defecte, sense tocar la resta de
@@ -686,6 +689,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         // (o el marcador de desarrollo con AUTH_DISABLED),
         // no un nombre — no hay ningún directorio del que sacarlo.
         confirmatPer: f.confirmat_per,
+        obsEmpaquetat: f.obs_empaquetat,
       }));
 
       return {

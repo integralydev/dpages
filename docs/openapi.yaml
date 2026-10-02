@@ -1196,8 +1196,8 @@ paths:
         - name: observacions
           in: query
           description: >-
-            Tarea 23 (01/10/2026). Con / sin observaciones de la propia
-            línea (las de cabecera no cuentan).
+            Tarea 23 (01/10/2026). Con / sin observación de empaquetado de
+            la línea (obsEmpaquetat, tarea 7).
           schema: { type: string, enum: [si, 'no'] }
         - $ref: '#/components/parameters/Pagina'
         - $ref: '#/components/parameters/Mida'
