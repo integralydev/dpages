@@ -37,6 +37,15 @@ export function formatearDataApi(data: Date | string | null | undefined): string
 }
 
 /**
+ * Patró LIKE per a "comença per" (tasca 18, 01/10/2026): escapa els
+ * comodins de LIKE (`\\`, `%`, `_`) del text de l'usuari i hi afegeix `%`
+ * al final. S'ha de fer servir amb `LIKE ... ESCAPE '\\'`.
+ */
+export function patroComencaPer(text: string): string {
+  return `${text.replace(/[\\%_]/g, (caracter) => `\\${caracter}`)}%`;
+}
+
+/**
  * Fragmento SQL para el extremo superior de un filtro `...Fins` de fecha,
  * que INCLUYE el día completo. Riesgo real: `columna <= $n` con
  * `$n = "2026-08-28"` se interpreta como `2026-08-28T00:00:00Z` (medianoche

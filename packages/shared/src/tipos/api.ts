@@ -546,6 +546,9 @@ export interface PanellOficinaApi {
 
 export interface TotalsPanellObradorApi {
   linies: number;
+  /** Línies amb `treballatA` (tasca 26, 01/10/2026). */
+  liniesFetes: number;
+  liniesPendents: number;
   /** BREAKING: pasó de `number` a `string`, mismo motivo/criterio que `totalKg` (SUM de NUMERIC(10,2), ver ComandaLiniaApi.unitatsDemanades). */
   totalUnitats: string;
   totalKg: string;

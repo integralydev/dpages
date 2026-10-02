@@ -1016,6 +1016,28 @@ paths:
           in: query
           description: Filtra por producte.envasat — coincidencia exacta. Capa 20.
           schema: { type: string }
+        - name: clientId
+          in: query
+          description: Tarea 25 (01/10/2026). Cliente del pedido.
+          schema: { type: integer }
+        - name: agrupacioProduccio
+          in: query
+          description: >-
+            Tarea 28. Repetible, coincidencia exacta con
+            producte.agrupacio_produccio; varios valores = cualquiera.
+          style: form
+          explode: true
+          schema: { type: array, items: { type: string } }
+        - name: observacions
+          in: query
+          description: >-
+            Tarea 31. Con / sin observaciones de producción de la propia
+            línea (las de cabecera no cuentan).
+          schema: { type: string, enum: [si, 'no'] }
+        - name: treball
+          in: query
+          description: Tarea 26. Líneas pendientes o ya trabajadas.
+          schema: { type: string, enum: [pendents, fets] }
         - $ref: '#/components/parameters/Pagina'
         - $ref: '#/components/parameters/Mida'
       responses:
@@ -1087,6 +1109,27 @@ paths:
               schema: { $ref: '#/components/schemas/PanellProduccio' }
         '400': { $ref: '#/components/responses/Validacio' }
 
+  /api/v1/panells/obrador/marcar-fets:
+    post:
+      tags: [Panells]
+      summary: Marcar como trabajadas todas las líneas pendientes filtradas (tarea 26)
+      description: >-
+        Acepta los mismos filtros que GET /panells/obrador (query string) y
+        marca como trabajadas todas las líneas pendientes que los cumplen,
+        no sólo una página. Las líneas de pedidos congelados se dejan igual
+        y se cuentan en congeladesOmeses. Exige el mòdul panell-obrador.
+      responses:
+        '200':
+          description: Resultado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  marcades: { type: integer }
+                  congeladesOmeses: { type: integer }
+        '400': { $ref: '#/components/responses/Validacio' }
+
   /api/v1/panells/empaquetat:
     get:
       tags: [Panells]
@@ -1150,6 +1193,12 @@ paths:
             (confirmatA null); "confirmades" = ya enviadas. Sin el
             parámetro, todas. Otro valor = 400.
           schema: { type: string, enum: [pendents, confirmades] }
+        - name: observacions
+          in: query
+          description: >-
+            Tarea 23 (01/10/2026). Con / sin observaciones de la propia
+            línea (las de cabecera no cuentan).
+          schema: { type: string, enum: [si, 'no'] }
         - $ref: '#/components/parameters/Pagina'
         - $ref: '#/components/parameters/Mida'
       responses:

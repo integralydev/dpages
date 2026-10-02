@@ -380,9 +380,13 @@ Filtros: `?categoriaId=1&tipus=simple&actiu=true&cerca=llom&agrupacioProduccio=L
 
 > **`agrupacioProduccio` (capa 45, corrección de Michel)**: coincidencia
 > EXACTA, case-insensitive (`LOWER(...) = LOWER(...)`, regla 3.1
-> transversal) — hasta esta capa quedó case-sensitive por descuido. No
-> confundir con `cerca`, que sí es substring (`ILIKE`) sobre
-> descripció/descripcioVenda/codi.
+> transversal) — hasta esta capa quedó case-sensitive por descuido.
+>
+> **`cerca` (tarea 18, 01/10/2026): "empieza por"**, case-insensitive,
+> sobre descripció/descripcioVenda/codi: `cerca=llom` trae "Llom fresc" y
+> "Llom sencer" pero no "Cap de llom". Antes era coincidencia exacta y la
+> pantalla de Catàleg no filtraba mientras se escribía. Los comodines de
+> `LIKE` que escriba el usuario (`%`, `_`) se tratan como texto literal.
 
 ```json
 {
@@ -454,6 +458,9 @@ en celda.
 **`GET /tarifes/matriu`**
 
 Filtros: `?categoriaId=1&cerca=llom`
+
+> `cerca`: "empieza por" sobre descripció/codi (tarea 18), mismo criterio
+> que `GET /productes`.
 
 ```json
 {
@@ -1195,7 +1202,27 @@ líneas individuales visibles.
 
 **`GET /panells/obrador`**
 
-Filtros: `?dataProduccioDes=&dataProduccioFins=&categoriaId=&tipus=&producte=&format=&envasat=`
+Filtros: `?dataProduccioDes=&dataProduccioFins=&categoriaId=&tipus=&producte=&format=&envasat=&clientId=&agrupacioProduccio=&observacions=&treball=`
+
+> **Filtros nuevos (01/10/2026):**
+>
+> - `clientId` (tarea 25): cliente del pedido.
+> - `agrupacioProduccio` (tarea 28): repetible, coincidencia exacta con
+>   `producte.agrupacio_produccio`; varios valores = cualquiera de ellos.
+> - `observacions` (tarea 31): `si` / `no` — línea con observaciones de
+>   producción **de la propia línea** (las de cabecera no cuentan: el panel
+>   muestra datos de línea).
+> - `treball` (tarea 26): `pendents` (`treballatA` null) o `fets`.
+>
+> Otro valor de `observacions`/`treball` es `400 VALIDACIO`. Los `totals`
+> traen además `liniesFetes` y `liniesPendents`.
+>
+> **`POST /panells/obrador/marcar-fets`** (tarea 26) — acepta **los mismos
+> filtros** como query string y marca como trabajadas (`treballatA` =
+> ahora, `treballatPer` = el usuario) **todas** las líneas pendientes que
+> los cumplen, no sólo una página. Las de pedidos congelados se dejan
+> igual. Respuesta: `{ "marcades": 12, "congeladesOmeses": 1 }`. Exige el
+> mòdul `panell-obrador`.
 
 > **`producte` repetible (petición del cliente, 29/09/2026):**
 > `?producte=Llom%20fresc&producte=Botifarra` devuelve las líneas de
@@ -1350,6 +1377,9 @@ Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramen
 >   `confirmades` (ya enviadas: se guardaron unidades y kilos
 >   enviados). Sin el parámetro, todas. Cualquier otro valor es
 >   `400 VALIDACIO`. Los `totals` respetan el filtro, como todos los demás.
+> - `observacions` (tarea 23, 01/10/2026): `si` / `no` — línea con
+>   observación de producción **en la propia línea** (las de cabecera del
+>   pedido no cuentan: el panel muestra datos de línea).
 
 > `dataExpedicioFins`/`dataLliuramentFins` incluyen el día completo — ver
 > "Filtros de rango de fecha" en la sección 2 (capa 36).

@@ -9,6 +9,7 @@ import {
   formatearDataApi,
   parsearIdPublic,
 } from './comu.js';
+import { construirFiltresObrador } from './panells.js';
 
 /**
  * Panell Obrador no tenía forma de marcar una línea como "trabajada", a
@@ -109,6 +110,54 @@ export function registrarRutaTreball(fastify: FastifyInstance): void {
             : null,
       };
       return resposta;
+    },
+  );
+
+  // Tasca 26 (01/10/2026): marcar com a fetes, d'una vegada, TOTES les
+  // línies pendents que compleixen els filtres actius del Panell Obrador
+  // (els mateixos paràmetres de query que GET /panells/obrador, construïts
+  // per la mateixa funció) — no només les de la pàgina visible. Les línies
+  // de comandes congelades es deixen igual (mateix guard que el PATCH
+  // individual) i es compten a part perquè el frontend pugui avisar-ho.
+  fastify.post(
+    '/panells/obrador/marcar-fets',
+    { preHandler: crearGuardaModul('panell-obrador') },
+    async (req, reply) => {
+      const filtres = await construirFiltresObrador(reply, req.query as Record<string, unknown>);
+      if (filtres === null) return;
+      const { condicions, valors } = filtres;
+      const where = [...condicions, 'cl.treballat_a IS NULL'].join(' AND ');
+
+      // Mateix criteri que el PATCH individual: req.usuari sempre hi és i
+      // resoldre-usuari.ts ja ha creat la fila d'usuari si calia.
+      const filaUsuari = await pool.query<{ id: string }>(
+        'SELECT id FROM usuari WHERE firebase_uid = $1',
+        [req.usuari!.uid],
+      );
+      const treballatPerUuid = filaUsuari.rows[0]?.id ?? null;
+
+      const congelades = await pool.query<{ n: string }>(
+        `SELECT count(*) AS n
+         FROM comanda_linia cl
+         JOIN comanda c ON c.id = cl.comanda_id
+         JOIN producte p ON p.id = cl.producte_id
+         WHERE ${where} AND c.congelat_a IS NOT NULL`,
+        valors,
+      );
+      const marcades = await pool.query<{ id_seq: string }>(
+        `UPDATE comanda_linia AS cl
+         SET treballat_a = now(), treballat_per = $${valors.length + 1}::uuid
+         FROM comanda c, producte p
+         WHERE c.id = cl.comanda_id AND p.id = cl.producte_id
+           AND c.congelat_a IS NULL AND ${where}
+         RETURNING cl.id_seq`,
+        [...valors, treballatPerUuid],
+      );
+
+      return {
+        marcades: marcades.rowCount ?? 0,
+        congeladesOmeses: Number(congelades.rows[0]?.n ?? 0),
+      };
     },
   );
 }

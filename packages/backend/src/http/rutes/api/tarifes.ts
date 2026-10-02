@@ -11,6 +11,7 @@ import {
   MODULS_OPERATIUS_APOYO,
   parsearIdPublic,
   parsearPaginacio,
+  patroComencaPer,
   resolverCategoriaUuid,
   resolverProducteUuid,
   resolverTarifaUuid,
@@ -41,14 +42,12 @@ export function registrarRutesTarifes(fastify: FastifyInstance): void {
         valors.push(categoriaUuid ?? '00000000-0000-0000-0000-000000000000');
       }
       if (typeof query.cerca === 'string' && query.cerca.trim() !== '') {
-        // Coincidencia EXACTA, no substring (regla 3.1 transversal —
-        // docs/especificacion-funcional-dpages.md): aplica también acá, la
-        // matriz de tarifas es una pantalla de búsqueda de producto. Mismo
-        // criterio que productes.ts y rendiments-porcs.ts.
+        // Tasca 18: pel principi del text, mateix criteri que productes.ts.
+        const n = valors.length + 1;
         condicions.push(
-          `(LOWER(p.descripcio) = LOWER($${valors.length + 1}) OR LOWER(p.codi) = LOWER($${valors.length + 1}))`,
+          `(LOWER(p.descripcio) LIKE LOWER($${n}) ESCAPE '\\' OR LOWER(p.codi) LIKE LOWER($${n}) ESCAPE '\\')`,
         );
-        valors.push(query.cerca.trim());
+        valors.push(patroComencaPer(query.cerca.trim()));
       }
       const where = condicions.length > 0 ? `WHERE ${condicions.join(' AND ')}` : '';
 

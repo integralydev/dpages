@@ -48,28 +48,34 @@ describe('API negoci — /productes (Postgres real, esquema aislado)', () => {
     await fastify.close();
   });
 
-  it('GET /productes?cerca= exige coincidencia EXACTA de descripció, no substring', async () => {
-    // Regla 3.1 transversal (docs/especificacion-funcional-dpages.md):
-    // buscar "llom" no debe traer "Llom fresc de porc" ni "Llom sencer" —
-    // sólo una descripció idéntica (case-insensitive). Producto extra sólo
-    // para este test, no afecta el total=3 de más arriba (ya se verificó).
+  it('GET /productes?cerca= busca pel PRINCIPI del text (tasca 18), no substring', async () => {
+    // Tasca 18 (01/10/2026): "llom" ha de trobar tots els que comencen per
+    // "Llom", però no un text que el porti al mig ("Cap de llom") — abans
+    // era coincidència exacta. Productes extra només per a aquest test.
     await entorn.poolTest.query(
-      `INSERT INTO producte (codi, descripcio, tipus) VALUES ('LLS01', 'Llom sencer', 'simple')`,
+      `INSERT INTO producte (codi, descripcio, tipus) VALUES
+         ('LLS01', 'Llom sencer', 'simple'),
+         ('CDL01', 'Cap de llom', 'simple')`,
     );
 
     const fastify = construirServidor();
+    const cerca = async (text: string) =>
+      cuerpoJson<RespostaPaginada<ProducteApi>>(
+        await fastify.inject({
+          method: 'GET',
+          url: `/api/v1/productes?cerca=${encodeURIComponent(text)}`,
+        }),
+      ).dades.map((p) => p.codi);
 
-    const substring = await fastify.inject({ method: 'GET', url: '/api/v1/productes?cerca=llom' });
-    const cuerpoSubstring = cuerpoJson<RespostaPaginada<ProducteApi>>(substring);
-    expect(cuerpoSubstring.dades).toHaveLength(0);
-
-    const exacte = await fastify.inject({
-      method: 'GET',
-      url: '/api/v1/productes?cerca=LLOM FRESC DE PORC',
-    });
-    const cuerpoExacte = cuerpoJson<RespostaPaginada<ProducteApi>>(exacte);
-    expect(cuerpoExacte.dades).toHaveLength(1);
-    expect(cuerpoExacte.dades[0]?.codi).toBe('LLF01');
+    expect(new Set(await cerca('llom'))).toEqual(new Set(['LLF01', 'LLS01']));
+    expect(await cerca('LLOM FRESC DE PORC')).toEqual(['LLF01']);
+    // Un text del mig no troba res.
+    expect(await cerca('fresc')).toEqual([]);
+    // També pel principi del codi.
+    expect(await cerca('cdl')).toEqual(['CDL01']);
+    // Els comodins de LIKE de l'usuari es tracten com a text literal.
+    expect(await cerca('%llom')).toEqual([]);
+    expect(await cerca('Ll_m')).toEqual([]);
 
     await fastify.close();
   });

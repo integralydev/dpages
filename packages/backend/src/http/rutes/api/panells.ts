@@ -107,6 +107,96 @@ const KG_JAMON_PER_CERDO = 12;
 const KG_RECORTES_PER_CERDO = 6;
 const KG_PALETILLAS_PER_CERDO = 7;
 
+/**
+ * Condicions de GET /panells/obrador, compartides amb l'acció massiva
+ * POST /panells/obrador/marcar-fets (treball.ts, tasca 26): així "marcar
+ * totes com a fetes" afecta exactament les línies que es veuen amb els
+ * mateixos filtres, mai d'altres. Les condicions fan servir els àlies `cl`
+ * (comanda_linia), `c` (comanda) i `p` (producte). `null` = resposta 400
+ * ja enviada.
+ */
+export async function construirFiltresObrador(
+  reply: FastifyReply,
+  query: Record<string, unknown>,
+): Promise<{ condicions: string[]; valors: unknown[] } | null> {
+  // Pedidos cancelados fuera (ver /panells/oficina).
+  const condicions: string[] = ['NOT cl.esborrat', `c.estat <> 'cancellada'`];
+  const valors: unknown[] = [];
+
+  // dataProduccio filtra por la fecha de la LÍNEA (cl.data_produccio), no
+  // la de la cabecera del pedido — desde que Obrador dejó de ser agregado
+  // por producto (contrato, sección 4.7), es la línea la que tiene fecha
+  // de producción propia; la de comanda es otro campo (sección 4.5).
+  if (typeof query.dataProduccioDes === 'string' && query.dataProduccioDes !== '') {
+    condicions.push(`cl.data_produccio >= $${valors.length + 1}`);
+    valors.push(query.dataProduccioDes);
+  }
+  if (typeof query.dataProduccioFins === 'string' && query.dataProduccioFins !== '') {
+    condicions.push(condicioDataFinsInclusiva('cl.data_produccio', valors.length + 1));
+    valors.push(query.dataProduccioFins);
+  }
+  const categoriaUuid = await resolverFiltreEntitat(reply, query.categoriaId, 'categoriaId', (id) =>
+    resolverCategoriaUuid(pool, id),
+  );
+  if (categoriaUuid === null) return null;
+  if (categoriaUuid !== undefined) {
+    condicions.push(`p.categoria_id = $${valors.length + 1}`);
+    valors.push(categoriaUuid);
+  }
+  if (query.tipus === 'simple' || query.tipus === 'variable') {
+    condicions.push(`p.tipus = $${valors.length + 1}`);
+    valors.push(query.tipus);
+  }
+  afegirFiltreProductes(query.producte, condicions, valors);
+  if (typeof query.format === 'string' && query.format.trim() !== '') {
+    condicions.push(`p.format = $${valors.length + 1}`);
+    valors.push(query.format.trim());
+  }
+  if (typeof query.envasat === 'string' && query.envasat.trim() !== '') {
+    condicions.push(`p.envasat = $${valors.length + 1}`);
+    valors.push(query.envasat.trim());
+  }
+  // Tasca 25 (01/10/2026): client de la comanda.
+  const clientUuid = await resolverFiltreEntitat(reply, query.clientId, 'clientId', (id) =>
+    resolverClientUuid(pool, id),
+  );
+  if (clientUuid === null) return null;
+  if (clientUuid !== undefined) {
+    condicions.push(`c.client_id = $${valors.length + 1}`);
+    valors.push(clientUuid);
+  }
+  // Tasca 28: una o més agrupacions de producció (OR), repetible igual que
+  // ?producte=. Coincidència exacta.
+  const agrupacions = (
+    Array.isArray(query.agrupacioProduccio) ? query.agrupacioProduccio : [query.agrupacioProduccio]
+  ).filter((item): item is string => typeof item === 'string' && item.trim() !== '');
+  if (agrupacions.length > 0) {
+    condicions.push(`p.agrupacio_produccio = ANY($${valors.length + 1}::text[])`);
+    valors.push(agrupacions.map((item) => item.trim()));
+  }
+  // Tasca 31: amb / sense observacions de producció DE LA LÍNIA (el panell
+  // mostra dades de línia; les de capçalera de la comanda no compten).
+  const ambObs = `COALESCE(TRIM(cl.obs_produccio), '') <> ''`;
+  if (query.observacions === 'si') condicions.push(ambObs);
+  else if (query.observacions === 'no') condicions.push(`NOT ${ambObs}`);
+  else if (query.observacions !== undefined && query.observacions !== '') {
+    enviarValidacio(reply, 'observacions ha de ser si o no', [
+      { camp: 'observacions', missatge: 'ha de ser si o no' },
+    ]);
+    return null;
+  }
+  // Tasca 26: línies pendents (no marcades com a fetes) o ja fetes.
+  if (query.treball === 'pendents') condicions.push('cl.treballat_a IS NULL');
+  else if (query.treball === 'fets') condicions.push('cl.treballat_a IS NOT NULL');
+  else if (query.treball !== undefined && query.treball !== '') {
+    enviarValidacio(reply, 'treball ha de ser pendents o fets', [
+      { camp: 'treball', missatge: 'ha de ser pendents o fets' },
+    ]);
+    return null;
+  }
+  return { condicions, valors };
+}
+
 export function registrarRutesPanells(fastify: FastifyInstance): void {
   // ── 4.6 · Panell Oficina ─────────────────────────────────────────────
   fastify.get(
@@ -308,46 +398,9 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       const query = req.query as Record<string, unknown>;
       const { pagina, mida, offset } = parsearPaginacio(query);
 
-      // Pedidos cancelados fuera (ver /panells/oficina).
-      const condicions: string[] = ['NOT cl.esborrat', `c.estat <> 'cancellada'`];
-      const valors: unknown[] = [];
-
-      // dataProduccio filtra por la fecha de la LÍNEA (cl.data_produccio), no
-      // la de la cabecera del pedido — desde que Obrador dejó de ser agregado
-      // por producto (contrato, sección 4.7), es la línea la que tiene fecha
-      // de producción propia; la de comanda es otro campo (sección 4.5).
-      if (typeof query.dataProduccioDes === 'string' && query.dataProduccioDes !== '') {
-        condicions.push(`cl.data_produccio >= $${valors.length + 1}`);
-        valors.push(query.dataProduccioDes);
-      }
-      if (typeof query.dataProduccioFins === 'string' && query.dataProduccioFins !== '') {
-        condicions.push(condicioDataFinsInclusiva('cl.data_produccio', valors.length + 1));
-        valors.push(query.dataProduccioFins);
-      }
-      const categoriaUuid = await resolverFiltreEntitat(
-        reply,
-        query.categoriaId,
-        'categoriaId',
-        (id) => resolverCategoriaUuid(pool, id),
-      );
-      if (categoriaUuid === null) return;
-      if (categoriaUuid !== undefined) {
-        condicions.push(`p.categoria_id = $${valors.length + 1}`);
-        valors.push(categoriaUuid);
-      }
-      if (query.tipus === 'simple' || query.tipus === 'variable') {
-        condicions.push(`p.tipus = $${valors.length + 1}`);
-        valors.push(query.tipus);
-      }
-      afegirFiltreProductes(query.producte, condicions, valors);
-      if (typeof query.format === 'string' && query.format.trim() !== '') {
-        condicions.push(`p.format = $${valors.length + 1}`);
-        valors.push(query.format.trim());
-      }
-      if (typeof query.envasat === 'string' && query.envasat.trim() !== '') {
-        condicions.push(`p.envasat = $${valors.length + 1}`);
-        valors.push(query.envasat.trim());
-      }
+      const filtres = await construirFiltresObrador(reply, query);
+      if (filtres === null) return;
+      const { condicions, valors } = filtres;
       const where = `WHERE ${condicions.join(' AND ')}`;
 
       // INNER JOIN a producte: una línia sin artículo resuelto (producte_id
@@ -363,13 +416,19 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       ${where}
     `;
 
-      const totals = await pool.query<{ linies: string; total_unitats: string; total_kg: string }>(
+      const totals = await pool.query<{
+        linies: string;
+        total_unitats: string;
+        total_kg: string;
+        linies_fetes: string;
+      }>(
         // unitats_demanades ahora es NUMERIC(10,2) (antes INTEGER): el total
         // agregado gana el mismo cast explícito que totalKg (mismo criterio,
         // mismo riesgo de precisión que evitar sumar en JS).
         `SELECT count(*) AS linies,
               COALESCE(SUM(cl.unitats_demanades), 0)::numeric(10,2) AS total_unitats,
-              COALESCE(SUM(cl.pes_calculat_kg), 0)::numeric(14,3) AS total_kg
+              COALESCE(SUM(cl.pes_calculat_kg), 0)::numeric(14,3) AS total_kg,
+              count(*) FILTER (WHERE cl.treballat_a IS NOT NULL) AS linies_fetes
        ${base}`,
         valors,
       );
@@ -442,6 +501,10 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
           // String desde ahora (ver nota en el SELECT de arriba).
           totalUnitats: totals.rows[0]?.total_unitats ?? '0.00',
           totalKg: totals.rows[0]?.total_kg ?? '0.000',
+          // Tasca 26: per al botó "marcar totes com a fetes".
+          liniesFetes: Number(totals.rows[0]?.linies_fetes ?? 0),
+          liniesPendents:
+            Number(totals.rows[0]?.linies ?? 0) - Number(totals.rows[0]?.linies_fetes ?? 0),
         },
         dades,
         paginacio: construirPaginacio(pagina, mida, Number(totals.rows[0]?.linies ?? 0)),
@@ -523,6 +586,16 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
             { camp: 'confirmacio', missatge: 'ha de ser pendents o confirmades' },
           ]);
         }
+      }
+      // Tasca 23 (01/10/2026): línies amb / sense observacions DE LA LÍNIA
+      // (el panell mostra dades de línia; les de capçalera no compten).
+      const ambObservacions = `COALESCE(TRIM(cl.obs_produccio), '') <> ''`;
+      if (query.observacions === 'si') condicions.push(ambObservacions);
+      else if (query.observacions === 'no') condicions.push(`NOT ${ambObservacions}`);
+      else if (query.observacions !== undefined && query.observacions !== '') {
+        return enviarValidacio(reply, 'observacions ha de ser si o no', [
+          { camp: 'observacions', missatge: 'ha de ser si o no' },
+        ]);
       }
       const where = `WHERE ${condicions.join(' AND ')}`;
 
