@@ -31,6 +31,8 @@ export type PackagingPanelFilters = {
   categoriaId?: number;
   /** Sense valor = totes les línies. */
   confirmacio?: 'pendents' | 'confirmades';
+  /** Tasca 23: amb / sense observacions de la línia. */
+  observacions?: 'si' | 'no';
 };
 
 /**

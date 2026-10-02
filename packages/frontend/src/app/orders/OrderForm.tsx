@@ -767,10 +767,11 @@ export const OrderForm = forwardRef<
   // vigent i el producte d'una línia no té `preuVenda` de respaldo, l'únic
   // cas amb risc cert que encara falta resoldre és si aquesta tarifa
   // concreta cobreix aquest producte concret. Es resol amb GET
-  // /tarifes/matriu?cerca=<codi> (mateix endpoint que Llistat de Tarifes),
-  // amb `cerca` fent coincidència EXACTA (regla 3.1) — per això `mida` no
-  // necessita ser gran, però es deixa un marge (50) per si dos productes
-  // comparteixen descripció exacta i cal desempatar per producteId.
+  // /tarifes/matriu?cerca=<codi> (mateix endpoint que Llistat de Tarifes).
+  // Des de la tasca 18 `cerca` és "comença per", no exacta: poden venir
+  // altres productes amb el mateix principi, per això es busca per
+  // producteId dins el resultat i `mida` és el màxim (200), perquè el
+  // producte buscat no quedi fora de la pàgina.
   useEffect(() => {
     if (tarifaId === null) return;
 
@@ -791,7 +792,7 @@ export const OrderForm = forwardRef<
           try {
             const resposta = await api.get<{ dades: FilaMatriuTarifesApi[] }>('/tarifes/matriu', {
               cerca: product.codi ?? product.descripcio,
-              mida: 50,
+              mida: 200,
             });
             const fila = resposta.dades.find((d) => d.producteId === product.id);
             const preu = fila?.preus[String(tarifaId)] ?? null;

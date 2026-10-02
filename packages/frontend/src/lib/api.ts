@@ -182,7 +182,8 @@ function withQuery(path: string, params?: Record<string, QueryValue>): string {
 export const api = {
   get: <T>(path: string, params?: Record<string, QueryValue>) =>
     request<T>('GET', withQuery(path, params)),
-  post: <T>(path: string, body?: unknown) => request<T>('POST', path, body ?? {}),
+  post: <T>(path: string, body?: unknown, params?: Record<string, QueryValue>) =>
+    request<T>('POST', withQuery(path, params), body ?? {}),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body ?? {}),
   delete: <T>(path: string) => request<T>('DELETE', path),
 };

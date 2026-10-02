@@ -1,7 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import type { ComboboxOption } from '@/components/ui/AsyncCombobox';
+import { CheckCheck } from 'lucide-react';
+import { AsyncCombobox, type ComboboxOption } from '@/components/ui/AsyncCombobox';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ClearFiltersButton, FilterBar } from '@/components/ui/FilterBar';
 import { MultiCombobox } from '@/components/ui/MultiCombobox';
@@ -14,7 +15,7 @@ import { StatCard } from '@/components/ui/StatCard';
 import { useCatalog } from '@/hooks/useCatalog';
 import { useCategories } from '@/hooks/useCategories';
 import { type ToggleTreballResult, usePanellObrador } from '@/hooks/usePanellObrador';
-import type { FilaPanellObradorApi } from '@/lib/api';
+import { api, type ClientApi, type FilaPanellObradorApi, type RespostaPaginada } from '@/lib/api';
 import { formatData } from '@/lib/dates';
 import { formatDecimal } from '@/lib/decimals';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
@@ -27,6 +28,24 @@ const ALL_FEM = 'Totes';
 // conjunt tancat conegut, no un catàleg lliure.
 const FORMAT_OPTIONS = ['SENCER', 'TALLAT', 'LLESCAT'];
 const ENVASAT_OPTIONS = ['NORMAL', 'NORMAL (pes)', 'NORMAL (web)', 'ESPECIAL'];
+
+// Tasca 31: amb / sense observacions de producció de la línia.
+const OBSERVACIONS_OPTIONS = { 'Amb observacions': 'si', 'Sense observacions': 'no' } as const;
+// Tasca 26: línies pendents o ja fetes.
+const TREBALL_OPTIONS = { Pendents: 'pendents', Fetes: 'fets' } as const;
+
+// Tasca 25: mateix cercador de clients que Empaquetat i Oficina
+// (GET /clients?cerca=, mode servidor).
+async function loadClientOptions(query: string): Promise<ComboboxOption[]> {
+  const resposta = await api.get<RespostaPaginada<ClientApi>>('/clients', {
+    cerca: query,
+    mida: 8,
+  });
+  return resposta.dades.map((client) => ({
+    id: client.id,
+    label: `${client.codi ?? client.id} · ${client.nom ?? ''}`,
+  }));
+}
 
 function leftBorderClass(treballat: boolean) {
   return treballat ? 'border-l-4 border-l-green-500' : 'border-l-4 border-l-gray-200';
@@ -216,14 +235,38 @@ export default function WorkshopPage() {
         : undefined,
     [categoryFilter, categories],
   );
+  // Tasca 28: agrupacions de producció del catàleg, sense repetir i
+  // ordenades; l'id només serveix per al MultiCombobox.
+  const [selectedAgrupacions, setSelectedAgrupacions] = useState<ComboboxOption[]>([]);
+  const agrupacions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          catalog
+            .map((product) => product.agrupacioProduccio)
+            .filter((value): value is string => !!value),
+        ),
+      ).sort((a, b) => a.localeCompare(b, 'ca')),
+    [catalog],
+  );
+  const loadAgrupacioOptions = useMemo(
+    () => (query: string) =>
+      Promise.resolve(
+        agrupacions
+          .map((nom, index) => ({ id: index + 1, label: nom }))
+          .filter((option) => option.label.toLowerCase().startsWith(query.toLowerCase())),
+      ),
+    [agrupacions],
+  );
+  const [selectedClient, setSelectedClient] = useState<ComboboxOption | null>(null);
+  const [observacionsFilter, setObservacionsFilter] = useState(ALL_FEM);
+  const [treballFilter, setTreballFilter] = useState(ALL_FEM);
   const [envasatFilter, setEnvasatFilter] = useState(ALL);
   const [formatFilter, setFormatFilter] = useState(ALL);
   const [productionDateFilter, setProductionDateFilter] = useState('');
 
   // Mode LOCAL (filtrant `catalog` ja carregat), mateix criteri que
-  // Producte a OrderForm.tsx: GET /productes?cerca= fa coincidència EXACTA
-  // a propòsit (regla 3.1 — "lomo" no ha de portar "cabeza de lomo"), no
-  // serveix per a cerca incremental — ver lib/productSearch.ts.
+  // Producte a OrderForm.tsx — ver lib/productSearch.ts.
   const loadProductOptions = useMemo(
     () => (query: string) =>
       Promise.resolve(
@@ -237,6 +280,19 @@ export default function WorkshopPage() {
 
   const filters = useMemo(
     () => ({
+      ...(selectedAgrupacions.length > 0
+        ? { agrupacioProduccio: selectedAgrupacions.map((item) => item.label) }
+        : {}),
+      ...(selectedClient !== null ? { clientId: selectedClient.id } : {}),
+      ...(observacionsFilter !== ALL_FEM
+        ? {
+            observacions:
+              OBSERVACIONS_OPTIONS[observacionsFilter as keyof typeof OBSERVACIONS_OPTIONS],
+          }
+        : {}),
+      ...(treballFilter !== ALL_FEM
+        ? { treball: TREBALL_OPTIONS[treballFilter as keyof typeof TREBALL_OPTIONS] }
+        : {}),
       ...(categoriaId !== undefined ? { categoriaId } : {}),
       ...(selectedProducts.length > 0
         ? { producte: selectedProducts.map((product) => product.label) }
@@ -247,15 +303,58 @@ export default function WorkshopPage() {
         ? { dataProduccioDes: productionDateFilter, dataProduccioFins: productionDateFilter }
         : {}),
     }),
-    [categoriaId, selectedProducts, envasatFilter, formatFilter, productionDateFilter],
+    [
+      selectedAgrupacions,
+      selectedClient,
+      observacionsFilter,
+      treballFilter,
+      categoriaId,
+      selectedProducts,
+      envasatFilter,
+      formatFilter,
+      productionDateFilter,
+    ],
   );
 
   // "pendents primer" ja ve per defecte des del backend (GET
   // /panells/obrador, ORDER BY treballat_a IS NOT NULL ASC), sense cap
   // paràmetre — confirmat amb curl real abans de treure el sort client-side
   // que hi havia acá com a pedaç temporal.
-  const { data, totals, paginacio, setPagina, isLoading, error, refetch, toggleTreball } =
-    usePanellObrador(filters);
+  const {
+    data,
+    totals,
+    paginacio,
+    setPagina,
+    isLoading,
+    error,
+    refetch,
+    toggleTreball,
+    marcarTotesFetes,
+  } = usePanellObrador(filters);
+
+  // Tasca 26: marcar totes les pendents dels filtres actius, amb confirmació.
+  const [isConfirmingMarkAll, setIsConfirmingMarkAll] = useState(false);
+  const [isMarkingAll, setIsMarkingAll] = useState(false);
+  const [markAllError, setMarkAllError] = useState<string | null>(null);
+  const [markAllNotice, setMarkAllNotice] = useState<string | null>(null);
+  const pendents = totals?.liniesPendents ?? 0;
+
+  async function handleConfirmMarkAll() {
+    setIsMarkingAll(true);
+    setMarkAllError(null);
+    const result = await marcarTotesFetes();
+    setIsMarkingAll(false);
+    if (!result.success) {
+      setMarkAllError(result.error);
+      return;
+    }
+    setIsConfirmingMarkAll(false);
+    setMarkAllNotice(
+      result.congeladesOmeses > 0
+        ? `${result.marcades} línies marcades com a fetes. ${result.congeladesOmeses} no s'han pogut marcar perquè la comanda està congelada.`
+        : `${result.marcades} línies marcades com a fetes.`,
+    );
+  }
 
   // Consistència amb Empaquetat (lineToUndo, packaging/page.tsx) — mateix
   // patró: estat del diàleg alçat a la pàgina, un sol ConfirmDialog al
@@ -288,6 +387,10 @@ export default function WorkshopPage() {
   }
 
   function clearFilters() {
+    setSelectedAgrupacions([]);
+    setSelectedClient(null);
+    setObservacionsFilter(ALL_FEM);
+    setTreballFilter(ALL_FEM);
     setSelectedProducts([]);
     setCategoryFilter(ALL_FEM);
     setEnvasatFilter(ALL);
@@ -307,12 +410,44 @@ export default function WorkshopPage() {
               value={formatDecimal(totals?.totalKg ?? null, 3)}
               secondary={`${formatDecimal(totals?.totalUnitats ?? null, 2)} unitats`}
             />
-            <StatCard label="TOTAL LÍNIES" value={totals?.linies ?? 0} />
+            <StatCard
+              label="TOTAL LÍNIES"
+              value={totals?.linies ?? 0}
+              secondary={`${totals?.liniesFetes ?? 0} fetes · ${pendents} pendents`}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setMarkAllError(null);
+                setMarkAllNotice(null);
+                setIsConfirmingMarkAll(true);
+              }}
+              disabled={isLoading || pendents === 0}
+              className="flex items-center gap-2 self-center rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <CheckCheck className="h-4 w-4" />
+              Marcar totes com a fetes ({pendents})
+            </button>
           </div>
         }
       />
+      {markAllNotice && (
+        <p className="-mt-6 mb-6 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+          {markAllNotice}
+        </p>
+      )}
 
       <FilterBar>
+        {/* Tasca 28: primer filtre de tots, selecció múltiple. */}
+        <MultiCombobox
+          label="Agrupació producció"
+          selected={selectedAgrupacions}
+          onChange={setSelectedAgrupacions}
+          placeholder="Cercar agrupació..."
+          addMorePlaceholder="Afegir una altra agrupació..."
+          debounceMs={0}
+          loadOptions={loadAgrupacioOptions}
+        />
         <SimpleDropdown
           label="Categoria"
           options={categories.map((item) => item.nom)}
@@ -328,6 +463,14 @@ export default function WorkshopPage() {
           addMorePlaceholder="Afegir un altre producte..."
           debounceMs={0}
           loadOptions={loadProductOptions}
+        />
+        <AsyncCombobox
+          label="Client"
+          value={selectedClient?.id ?? null}
+          displayValue={selectedClient?.label ?? ''}
+          placeholder="Cercar client..."
+          onChange={setSelectedClient}
+          loadOptions={loadClientOptions}
         />
         <SimpleDropdown
           label="Envasat"
@@ -347,6 +490,20 @@ export default function WorkshopPage() {
           label="Data de producció"
           value={productionDateFilter}
           onChange={setProductionDateFilter}
+        />
+        <SimpleDropdown
+          label="Observacions"
+          options={Object.keys(OBSERVACIONS_OPTIONS)}
+          value={observacionsFilter}
+          onChange={setObservacionsFilter}
+          allLabel={ALL_FEM}
+        />
+        <SimpleDropdown
+          label="Estat línia"
+          options={Object.keys(TREBALL_OPTIONS)}
+          value={treballFilter}
+          onChange={setTreballFilter}
+          allLabel={ALL_FEM}
         />
         <ClearFiltersButton onClick={clearFilters} />
       </FilterBar>
@@ -440,6 +597,17 @@ export default function WorkshopPage() {
         onCancel={handleCancelUnmark}
         errorMessage={unmarkError}
         isConfirming={isUnmarking}
+      />
+      <ConfirmDialog
+        isOpen={isConfirmingMarkAll}
+        title="Marcar totes com a fetes"
+        message={`Es marcaran com a fetes les ${pendents} línies pendents que compleixen els filtres actuals (no només les de la pàgina visible). Vols continuar?`}
+        confirmLabel="Marcar totes"
+        confirmingLabel="Marcant..."
+        onConfirm={handleConfirmMarkAll}
+        onCancel={() => setIsConfirmingMarkAll(false)}
+        errorMessage={markAllError}
+        isConfirming={isMarkingAll}
       />
     </div>
   );

@@ -37,6 +37,9 @@ const CONFIRMACIO_OPTIONS = {
   Enviades: 'confirmades',
 } as const satisfies Record<string, 'pendents' | 'confirmades'>;
 
+// Tasca 23 (01/10/2026): amb / sense observacions de la línia.
+const OBSERVACIONS_OPTIONS = { 'Amb observacions': 'si', 'Sense observacions': 'no' } as const;
+
 function clientLabel(client: ClientApi) {
   return `${client.codi ?? client.id} · ${client.nom ?? ''}`;
 }
@@ -349,13 +352,14 @@ export default function PackagingPage() {
   // o més, mateix patró que Obrador) ja tenen suport real al backend. Mateix patró que
   // "Data d'expedició" (un sol camp, enviat com Des=Fins=mateix valor).
   // Producte segueix en mode LOCAL (filtrant `catalog` ja carregat, mateix
-  // criteri que Producte a OrderForm.tsx): GET /productes?cerca= fa
-  // coincidència EXACTA a propòsit (regla 3.1), no serveix per a cerca
-  // incremental — veure lib/productSearch.ts.
+  // criteri que Producte a OrderForm.tsx) — veure lib/productSearch.ts.
   const [deliveryDateFilter, setDeliveryDateFilter] = useState('');
   const [selectedProducts, setSelectedProducts] = useState<ComboboxOption[]>([]);
   const [categoryFilter, setCategoryFilter] = useState(ALL_FEM);
   const [confirmacioFilter, setConfirmacioFilter] = useState(ALL_FEM);
+  const [observacionsFilter, setObservacionsFilter] = useState(ALL_FEM);
+  const observacions =
+    OBSERVACIONS_OPTIONS[observacionsFilter as keyof typeof OBSERVACIONS_OPTIONS] ?? undefined;
 
   const categoriaId = useMemo(
     () =>
@@ -405,6 +409,7 @@ export default function PackagingPage() {
         : {}),
       ...(categoriaId !== undefined ? { categoriaId } : {}),
       ...(confirmacio !== undefined ? { confirmacio } : {}),
+      ...(observacions !== undefined ? { observacions } : {}),
     }),
     [
       shippingDateFilter,
@@ -414,6 +419,7 @@ export default function PackagingPage() {
       selectedProducts,
       categoriaId,
       confirmacio,
+      observacions,
     ],
   );
 
@@ -473,6 +479,7 @@ export default function PackagingPage() {
     setSelectedProducts([]);
     setCategoryFilter(ALL_FEM);
     setConfirmacioFilter(ALL_FEM);
+    setObservacionsFilter(ALL_FEM);
   }
 
   async function handleSave(
@@ -510,6 +517,13 @@ export default function PackagingPage() {
           options={Object.keys(CONFIRMACIO_OPTIONS)}
           value={confirmacioFilter}
           onChange={setConfirmacioFilter}
+          allLabel={ALL_FEM}
+        />
+        <SimpleDropdown
+          label="Observacions"
+          options={Object.keys(OBSERVACIONS_OPTIONS)}
+          value={observacionsFilter}
+          onChange={setObservacionsFilter}
           allLabel={ALL_FEM}
         />
         <SimpleDropdown

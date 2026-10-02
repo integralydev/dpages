@@ -20,6 +20,14 @@ import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
  */
 export type WorkshopPanelFilters = {
   categoriaId?: number;
+  /** Tasca 25. */
+  clientId?: number;
+  /** Tasca 28: una o més agrupacions de producció (OR). */
+  agrupacioProduccio?: string[];
+  /** Tasca 31: amb / sense observacions de producció de la línia. */
+  observacions?: 'si' | 'no';
+  /** Tasca 26: línies pendents o ja fetes. Sense valor = totes. */
+  treball?: 'pendents' | 'fets';
   /** Un o més productes (descripció exacta); el backend en fa un OR. */
   producte?: string[];
   format?: string;
@@ -27,6 +35,10 @@ export type WorkshopPanelFilters = {
   dataProduccioDes?: string;
   dataProduccioFins?: string;
 };
+
+/** Tasca 26: resultat de POST /panells/obrador/marcar-fets. */
+export type MarcarTotesResult =
+  { success: true; marcades: number; congeladesOmeses: number } | { success: false; error: string };
 
 /** `PATCH .../treball`. El 409 (comanda congelada) no porta `detalls` per camp, mateix criteri que `LliuramentSaveResult`. */
 export type ToggleTreballResult = { success: true } | { success: false; error: string };
@@ -78,6 +90,7 @@ type UsePanellObradorResult = {
     liniaId: number,
     marcat: boolean,
   ) => Promise<ToggleTreballResult>;
+  marcarTotesFetes: () => Promise<MarcarTotesResult>;
 };
 
 // Paginació real (MIDA_PAGINA_LLISTATS/pàgina). `totals` ve calculat pel backend sobre TOT
@@ -160,6 +173,7 @@ export function usePanellObrador(filters: WorkshopPanelFilters = {}): UsePanellO
           `/comandes/${comandaId}/linies/${liniaId}/treball`,
           { marcat },
         );
+        const abans = data.find((line) => line.liniaId === liniaId);
         setData((current) =>
           current
             .map((line) =>
@@ -169,14 +183,63 @@ export function usePanellObrador(filters: WorkshopPanelFilters = {}): UsePanellO
             )
             .sort(compararOrdreObrador),
         );
+        // Tasca 26: sense refetch, els comptadors de fetes/pendents
+        // s'ajusten aquí perquè no quedin desfasats.
+        const eraFeta = abans ? abans.treballatA !== null : !marcat;
+        const araFeta = resposta.treballatA !== null;
+        if (eraFeta !== araFeta) {
+          const delta = araFeta ? 1 : -1;
+          setTotals((current) =>
+            current
+              ? {
+                  ...current,
+                  liniesFetes: current.liniesFetes + delta,
+                  liniesPendents: current.liniesPendents - delta,
+                }
+              : current,
+          );
+        }
         return { success: true };
       } catch (caught) {
         const error = caught instanceof ApiError ? caught.message : "No s'ha pogut actualitzar.";
         return { success: false, error };
       }
     },
-    [],
+    [data],
   );
 
-  return { data, totals, paginacio, pagina, setPagina, isLoading, error, refetch, toggleTreball };
+  // Tasca 26: marca com a fetes totes les línies pendents que compleixen
+  // els filtres actius (el backend aplica els mateixos filtres, no només la
+  // pàgina visible) i torna a carregar la llista.
+  const marcarTotesFetes = useCallback(async (): Promise<MarcarTotesResult> => {
+    try {
+      // `treball` no aplica: l'acció ja només toca les pendents.
+      const filtresAccio = { ...filters };
+      delete filtresAccio.treball;
+      const resposta = await api.post<{ marcades: number; congeladesOmeses: number }>(
+        '/panells/obrador/marcar-fets',
+        {},
+        filtresAccio,
+      );
+      setReloadToken((token) => token + 1);
+      return { success: true, ...resposta };
+    } catch (caught) {
+      const error = caught instanceof ApiError ? caught.message : "No s'han pogut marcar.";
+      return { success: false, error };
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtersKey]);
+
+  return {
+    data,
+    totals,
+    paginacio,
+    pagina,
+    setPagina,
+    isLoading,
+    error,
+    refetch,
+    toggleTreball,
+    marcarTotesFetes,
+  };
 }

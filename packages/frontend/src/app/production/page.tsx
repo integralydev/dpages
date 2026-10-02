@@ -105,10 +105,35 @@ function ProductionCard({
   );
 }
 
+// Tasca 34 (01/10/2026): el nombre de porcs es manté fins que el tornin a
+// canviar, també després de tancar i obrir sessió — es guarda al navegador
+// (preferència de pantalla, no una dada de negoci; és per navegador, no
+// per usuari). Sense valor guardat, 1 com sempre.
+const CLAU_NOMBRE_PORCS = 'dpages.panellProduccio.nombrePorcs';
+
+function llegirNombrePorcsGuardat(): string {
+  if (typeof window === 'undefined') return '1';
+  try {
+    const valor = window.localStorage.getItem(CLAU_NOMBRE_PORCS);
+    return valor && Number(valor) > 0 ? valor : '1';
+  } catch {
+    return '1';
+  }
+}
+
+function guardarNombrePorcs(valor: string) {
+  if (!(Number(valor) > 0)) return;
+  try {
+    window.localStorage.setItem(CLAU_NOMBRE_PORCS, valor);
+  } catch {
+    // Navegador sense localStorage (mode privat estricte): només no es recorda.
+  }
+}
+
 export default function ProductionPage() {
   const { data: catalog } = useCatalog();
 
-  const [nombrePorcsInput, setNombrePorcsInput] = useState('1');
+  const [nombrePorcsInput, setNombrePorcsInput] = useState(llegirNombrePorcsGuardat);
   const [agrupacioFilter, setAgrupacioFilter] = useState(ALL);
   const [productFilter, setProductFilter] = useState(ALL);
   // Issue #18 — "sense dades = totes les dades" aplica també acá: ja NO es
@@ -122,9 +147,7 @@ export default function ProductionPage() {
   const [dateTo, setDateTo] = useState('');
 
   // Mode LOCAL (filtrant `catalog` ja carregat), mateix criteri que
-  // Producte a OrderForm.tsx: GET /productes?cerca= fa coincidència EXACTA
-  // a propòsit (regla 3.1 — "lomo" no ha de portar "cabeza de lomo"), no
-  // serveix per a cerca incremental — ver lib/productSearch.ts.
+  // Producte a OrderForm.tsx — ver lib/productSearch.ts.
   const productId = useMemo(
     () =>
       productFilter !== ALL
@@ -201,7 +224,10 @@ export default function ProductionPage() {
               type="number"
               min={1}
               value={nombrePorcsInput}
-              onChange={(event) => setNombrePorcsInput(event.target.value)}
+              onChange={(event) => {
+                setNombrePorcsInput(event.target.value);
+                guardarNombrePorcs(event.target.value);
+              }}
               placeholder="Introdueix un valor"
               className="w-full max-w-[160px] rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-brand focus:outline-none"
             />
@@ -299,31 +325,28 @@ export default function ProductionPage() {
               desborda ni es talla, i en el cas normal (valors curts)
               segueix quedant visualment a prop de sota de la graella de
               dalt. */}
-          {/* La franja quedava massa alta copiant el
-              padding vertical complet de StatCard (p-6 + label/valor en 2
-              línies). `px-6` (horitzontal, sense canvis) però `py-3` en
-              comptes de `p-6`, i etiqueta+valor en UNA sola línia
-              (`items-baseline`) en comptes de apilats — la mateixa dada,
-              menys alçada. */}
-          <div className={`bg-gray-50 px-6 py-3 ${showTopCards ? 'border-t border-gray-200' : ''}`}>
-            <div className="flex flex-wrap gap-x-6 gap-y-2">
+          {/* Tasca 35 (01/10/2026): el client no veia gairebé el total de
+              canals (franja grisa amb text de 10-14 px). Ara és un bloc
+              destacat amb els colors de marca i les xifres grans. */}
+          <div
+            className={`bg-brand-tint px-6 py-4 ${showTopCards ? 'border-t border-brand-light' : ''}`}
+          >
+            <div className="flex flex-wrap items-center gap-x-10 gap-y-3">
               <div className="flex items-center gap-2">
-                <Package className="h-3.5 w-3.5 shrink-0 text-gray-400" aria-hidden="true" />
-                <span className="text-[10px] font-semibold tracking-wide text-gray-500 uppercase">
-                  Canals
-                </span>
+                <Package className="h-5 w-5 shrink-0 text-ink" aria-hidden="true" />
+                <span className="text-base font-bold tracking-wide text-ink uppercase">Canals</span>
               </div>
-              <div className="flex items-baseline gap-1.5">
-                <p className="text-xs font-semibold tracking-wide text-gray-500 uppercase">
+              <div className="flex items-baseline gap-2">
+                <p className="text-sm font-semibold tracking-wide text-gray-700 uppercase">
                   Unitats
                 </p>
-                <p className="text-sm font-bold whitespace-nowrap text-gray-900">
+                <p className="text-3xl font-bold whitespace-nowrap text-gray-900">
                   {formatDecimal(totals?.canals.unitats ?? null, 2)}
                 </p>
               </div>
-              <div className="flex items-baseline gap-1.5">
-                <p className="text-xs font-semibold tracking-wide text-gray-500 uppercase">Kg</p>
-                <p className="text-sm font-bold whitespace-nowrap text-gray-900">
+              <div className="flex items-baseline gap-2">
+                <p className="text-sm font-semibold tracking-wide text-gray-700 uppercase">Kg</p>
+                <p className="text-3xl font-bold whitespace-nowrap text-gray-900">
                   {formatDecimal(totals?.canals.kg ?? null, 3)}
                 </p>
               </div>
