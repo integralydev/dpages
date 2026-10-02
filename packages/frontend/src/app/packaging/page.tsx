@@ -168,6 +168,8 @@ function PackagingRow({
       <td className="hidden px-3 py-3 break-words text-gray-900 xl:table-cell">
         {line.client ?? '—'}
       </td>
+      {/* Tasca 7: observació d'empaquetat de la línia (ve de l'entrada de comandes). */}
+      <td className="px-3 py-3 break-words text-gray-900">{line.obsEmpaquetat ?? ''}</td>
       <td className="px-3 py-3 text-right text-gray-900">
         {formatDecimal(line.unitatsDemanades, 2)}
       </td>
@@ -285,6 +287,7 @@ function PackagingCard({
             <DataCardField label="Kilos demanats">
               {formatDecimal(line.kgDemanats, 3)}
             </DataCardField>
+            <DataCardField label="Obs. empaquetat">{line.obsEmpaquetat ?? '—'}</DataCardField>
           </DataCardGrid>
         </div>
 
@@ -605,40 +608,43 @@ export default function PackagingPage() {
             <table className="w-full table-fixed text-sm">
               <thead className="border-b border-gray-200">
                 <tr>
-                  <th className="w-[8%] px-3 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[7%] px-3 py-2 text-left font-medium text-gray-500 break-words">
                     Categoria
                   </th>
                   <th className="hidden w-[4%] px-3 py-2 text-center font-medium text-gray-500 break-words xl:table-cell">
                     <span className="sr-only">Treballada</span>
                   </th>
-                  <th className="hidden w-[9%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
+                  <th className="hidden w-[7%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
                     Data d&apos;expedició
                   </th>
-                  <th className="hidden w-[8%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
+                  <th className="hidden w-[7%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
                     Data de lliurament
                   </th>
-                  <th className="hidden w-[9%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
+                  <th className="hidden w-[8%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
                     Transportista
                   </th>
-                  <th className="w-[12%] px-3 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[11%] px-3 py-2 text-left font-medium text-gray-500 break-words">
                     Producte
                   </th>
                   <th className="hidden w-[8%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
                     Client
                   </th>
-                  <th className="w-[9%] px-3 py-2 text-right font-medium text-gray-500 break-words">
+                  <th className="w-[10%] px-3 py-2 text-left font-medium text-gray-500 break-words">
+                    Obs. empaquetat
+                  </th>
+                  <th className="w-[8%] px-3 py-2 text-right font-medium text-gray-500 break-words">
                     Unitats demanades
                   </th>
                   <th className="w-[8%] px-3 py-2 text-right font-medium text-gray-500 break-words">
                     Unitats lliurades
                   </th>
-                  <th className="w-[8%] px-3 py-2 text-right font-medium text-gray-500 break-words">
+                  <th className="w-[7%] px-3 py-2 text-right font-medium text-gray-500 break-words">
                     Kilos demanats
                   </th>
                   <th className="w-[8%] px-3 py-2 text-right font-medium text-gray-500 break-words">
                     Kilos lliurats
                   </th>
-                  <th className="w-[9%] px-3 py-2 text-center font-medium text-gray-500 break-words">
+                  <th className="w-[7%] px-3 py-2 text-center font-medium text-gray-500 break-words">
                     Desar
                   </th>
                 </tr>

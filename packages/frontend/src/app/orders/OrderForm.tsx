@@ -1,7 +1,7 @@
 'use client';
 
 import { Plus } from 'lucide-react';
-import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import { forwardRef, Fragment, useEffect, useImperativeHandle, useState } from 'react';
 import { AsyncCombobox, type ComboboxOption } from '@/components/ui/AsyncCombobox';
 import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -136,6 +136,7 @@ function createEmptyLine(ordinal: number, dataProduccio: string | null): LineDra
     totalLinia: '0.00',
     dataProduccio,
     obsProduccio: '',
+    obsEmpaquetat: '',
     esborrat: false,
   };
 }
@@ -157,6 +158,8 @@ function toLiniaCreacio(line: LineDraft): LiniaCreacioApi {
     // Issue #21 — LiniaCreacioApi.dataProduccio torna a admetre null: ja no
     // hi ha cap bloqueig de submit que en garanteixi la presència.
     dataProduccio: line.dataProduccio,
+    // Tasca 7: observació d'empaquetat de la línia.
+    obsEmpaquetat: line.obsEmpaquetat || null,
   };
 }
 
@@ -167,6 +170,7 @@ function toLiniaEdicio(line: LineDraft): LiniaEdicioApi {
     kgDemanats: line.kgEditable ? line.kgDemanats : undefined,
     dataProduccio: line.dataProduccio,
     obsProduccio: line.obsProduccio || null,
+    obsEmpaquetat: line.obsEmpaquetat || null,
   };
 }
 
@@ -501,6 +505,16 @@ function LineFormCard({
           value={line.obsProduccio ?? ''}
           disabled={disabled}
           onChange={(event) => onUpdate({ obsProduccio: event.target.value })}
+          rows={2}
+          className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+        />
+      </label>
+      <label className="mt-3 flex flex-col gap-1 text-sm">
+        <span className="text-xs text-gray-500">Obs. empaquetat</span>
+        <textarea
+          value={line.obsEmpaquetat ?? ''}
+          disabled={disabled}
+          onChange={(event) => onUpdate({ obsEmpaquetat: event.target.value })}
           rows={2}
           className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
         />
@@ -1198,16 +1212,16 @@ export const OrderForm = forwardRef<
           <table className="w-full table-fixed text-sm">
             <thead className="border-b border-gray-200">
               <tr>
-                <th className="w-[13%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
+                <th className="w-[18%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
                   Producte
                 </th>
-                <th className="w-[9%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
+                <th className="w-[10%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
                   Categoria
                 </th>
-                <th className="w-[9%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
+                <th className="w-[8%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
                   Format
                 </th>
-                <th className="w-[8%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
+                <th className="w-[10%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
                   Envasat
                 </th>
                 <th className="w-[13%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
@@ -1225,9 +1239,6 @@ export const OrderForm = forwardRef<
                 <th className="w-[7%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
                   Pes lliurat (kg)
                 </th>
-                <th className="w-[7%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
-                  Obs. producció
-                </th>
                 <th className="w-[8%] px-1.5 py-2" />
               </tr>
             </thead>
@@ -1242,125 +1253,156 @@ export const OrderForm = forwardRef<
                   dataProduccio,
                 );
                 return (
-                  <tr key={line.id} className="border-b border-gray-100 last:border-0">
-                    <td className="px-1.5 py-2">
-                      <AsyncCombobox
-                        value={line.producte?.id ?? null}
-                        displayValue={
-                          line.producte ? productLabel(line.producte as ProducteApi) : ''
-                        }
-                        placeholder={NO_PRODUCT}
-                        disabled={isFrozen || line.id > 0}
-                        debounceMs={0}
-                        loadOptions={loadLocalProductOptions(products)}
-                        onChange={(option) => {
-                          const selected = option
-                            ? products.find((p) => p.id === option.id)
-                            : undefined;
-                          updateLine(line.id, applyProduct({ ...line }, selected));
-                        }}
-                      />
-                      {resolvePriceRisk(line, tarifaId, products, tariffCoverage).risk && (
-                        <p className="mt-1 text-xs text-amber-700">
-                          Sense preu — cal completar més endavant.
-                        </p>
-                      )}
-                    </td>
-                    <td className="px-1.5 py-2 break-words text-gray-500">
-                      {line.categoria ?? '—'}
-                    </td>
-                    <td className="px-1.5 py-2 break-words text-gray-500">{line.format ?? '—'}</td>
-                    <td className="px-1.5 py-2 break-words text-gray-500">{line.envasat ?? '—'}</td>
-                    <td className="px-1.5 py-2">
-                      <input
-                        type="date"
-                        disabled={isFrozen}
-                        value={line.dataProduccio ? line.dataProduccio.slice(0, 10) : ''}
-                        onChange={(event) =>
-                          updateLine(line.id, {
-                            dataProduccio: event.target.value
-                              ? `${event.target.value}T00:00:00Z`
-                              : null,
-                          })
-                        }
-                        className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
-                      />
-                      {lineDateError && (
-                        <p className="mt-1 text-xs text-red-600">{lineDateError}</p>
-                      )}
-                      {/* Issue #21 — mateix criteri que a la vista de card:
-                          indicador informatiu, no una incidència; només per a
-                          línies ja existents (line.id > 0). */}
-                      {line.id > 0 && line.dataProduccio === null && (
-                        <div className="mt-1">
-                          <Badge variant="neutral">Sense data assignada</Badge>
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-1.5 py-2">
-                      <DecimalInput
-                        disabled={isFrozen}
-                        value={line.unitatsDemanades}
-                        onChange={(value) => {
-                          const recalculated = calculateOrderedWeightKg(Number(value), product);
-                          updateLine(line.id, {
-                            unitatsDemanades: value,
-                            kgDemanats:
-                              !line.kgEditable && recalculated.isCalculated
-                                ? recalculated.value.toFixed(3)
-                                : line.kgDemanats,
-                          });
-                        }}
-                        className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-right text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
-                      />
-                    </td>
-                    {/* Sólo lectura: ver nota de Unitats/Pes lliurades en LineFormCard. */}
-                    <td className="px-1.5 py-2 text-right text-gray-500">
-                      {formatDecimal(line.unitatsLliurades, 2)}
-                    </td>
-                    <td className="px-1.5 py-2">
-                      {!line.kgEditable ? (
-                        <input
-                          type="text"
-                          value={Number(line.kgDemanats).toFixed(3).replace('.', ',')}
-                          disabled
-                          className="w-full rounded-md border border-gray-200 bg-gray-50 px-1.5 py-1 text-right text-sm text-gray-400"
+                  <Fragment key={line.id}>
+                    <tr>
+                      <td className="px-1.5 py-2">
+                        <AsyncCombobox
+                          value={line.producte?.id ?? null}
+                          displayValue={
+                            line.producte ? productLabel(line.producte as ProducteApi) : ''
+                          }
+                          placeholder={NO_PRODUCT}
+                          disabled={isFrozen || line.id > 0}
+                          debounceMs={0}
+                          loadOptions={loadLocalProductOptions(products)}
+                          onChange={(option) => {
+                            const selected = option
+                              ? products.find((p) => p.id === option.id)
+                              : undefined;
+                            updateLine(line.id, applyProduct({ ...line }, selected));
+                          }}
                         />
-                      ) : (
-                        <DecimalInput
+                        {resolvePriceRisk(line, tarifaId, products, tariffCoverage).risk && (
+                          <p className="mt-1 text-xs text-amber-700">
+                            Sense preu — cal completar més endavant.
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-1.5 py-2 break-words text-gray-500">
+                        {line.categoria ?? '—'}
+                      </td>
+                      <td className="px-1.5 py-2 break-words text-gray-500">
+                        {line.format ?? '—'}
+                      </td>
+                      <td className="px-1.5 py-2 break-words text-gray-500">
+                        {line.envasat ?? '—'}
+                      </td>
+                      <td className="px-1.5 py-2">
+                        <input
+                          type="date"
                           disabled={isFrozen}
-                          value={line.kgDemanats}
-                          onChange={(value) => updateLine(line.id, { kgDemanats: value })}
-                          onBlur={() =>
+                          value={line.dataProduccio ? line.dataProduccio.slice(0, 10) : ''}
+                          onChange={(event) =>
                             updateLine(line.id, {
-                              kgDemanats: parseDecimalInput(line.kgDemanats, 3),
+                              dataProduccio: event.target.value
+                                ? `${event.target.value}T00:00:00Z`
+                                : null,
                             })
                           }
+                          className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+                        />
+                        {lineDateError && (
+                          <p className="mt-1 text-xs text-red-600">{lineDateError}</p>
+                        )}
+                        {/* Issue #21 — mateix criteri que a la vista de card:
+                          indicador informatiu, no una incidència; només per a
+                          línies ja existents (line.id > 0). */}
+                        {line.id > 0 && line.dataProduccio === null && (
+                          <div className="mt-1">
+                            <Badge variant="neutral">Sense data assignada</Badge>
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-1.5 py-2">
+                        <DecimalInput
+                          disabled={isFrozen}
+                          value={line.unitatsDemanades}
+                          onChange={(value) => {
+                            const recalculated = calculateOrderedWeightKg(Number(value), product);
+                            updateLine(line.id, {
+                              unitatsDemanades: value,
+                              kgDemanats:
+                                !line.kgEditable && recalculated.isCalculated
+                                  ? recalculated.value.toFixed(3)
+                                  : line.kgDemanats,
+                            });
+                          }}
                           className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-right text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
                         />
-                      )}
-                    </td>
-                    <td className="px-1.5 py-2 text-right text-gray-500">{line.kgLliurats}</td>
-                    <td className="px-1.5 py-2">
-                      <textarea
-                        value={line.obsProduccio ?? ''}
-                        disabled={isFrozen}
-                        onChange={(event) =>
-                          updateLine(line.id, { obsProduccio: event.target.value })
-                        }
-                        rows={1}
-                        className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
-                      />
-                    </td>
-                    <td className="px-1.5 py-2">
-                      <IconButton
-                        variant="delete"
-                        label="Eliminar línia"
-                        onClick={() => removeLine(line)}
-                        disabled={isFrozen}
-                      />
-                    </td>
-                  </tr>
+                      </td>
+                      {/* Sólo lectura: ver nota de Unitats/Pes lliurades en LineFormCard. */}
+                      <td className="px-1.5 py-2 text-right text-gray-500">
+                        {formatDecimal(line.unitatsLliurades, 2)}
+                      </td>
+                      <td className="px-1.5 py-2">
+                        {!line.kgEditable ? (
+                          <input
+                            type="text"
+                            value={Number(line.kgDemanats).toFixed(3).replace('.', ',')}
+                            disabled
+                            className="w-full rounded-md border border-gray-200 bg-gray-50 px-1.5 py-1 text-right text-sm text-gray-400"
+                          />
+                        ) : (
+                          <DecimalInput
+                            disabled={isFrozen}
+                            value={line.kgDemanats}
+                            onChange={(value) => updateLine(line.id, { kgDemanats: value })}
+                            onBlur={() =>
+                              updateLine(line.id, {
+                                kgDemanats: parseDecimalInput(line.kgDemanats, 3),
+                              })
+                            }
+                            className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-right text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+                          />
+                        )}
+                      </td>
+                      <td className="px-1.5 py-2 text-right text-gray-500">{line.kgLliurats}</td>
+                      <td className="px-1.5 py-2">
+                        <IconButton
+                          variant="delete"
+                          label="Eliminar línia"
+                          onClick={() => removeLine(line)}
+                          disabled={isFrozen}
+                        />
+                      </td>
+                    </tr>
+                    {/* Observacions a la fila de sota, a tota l'amplada (abans
+                      eren dues columnes massa estretes). */}
+                    <tr className="border-b border-gray-100 last:border-0">
+                      <td colSpan={10} className="px-1.5 pb-3">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <label className="flex flex-col gap-1">
+                            <span className="text-xs font-medium text-gray-500">
+                              Obs. producció
+                            </span>
+                            <textarea
+                              value={line.obsProduccio ?? ''}
+                              disabled={isFrozen}
+                              onChange={(event) =>
+                                updateLine(line.id, { obsProduccio: event.target.value })
+                              }
+                              rows={2}
+                              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className="text-xs font-medium text-gray-500">
+                              Obs. empaquetat
+                            </span>
+                            <textarea
+                              value={line.obsEmpaquetat ?? ''}
+                              disabled={isFrozen}
+                              onChange={(event) =>
+                                updateLine(line.id, { obsEmpaquetat: event.target.value })
+                              }
+                              rows={2}
+                              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+                            />
+                          </label>
+                        </div>
+                      </td>
+                    </tr>
+                  </Fragment>
                 );
               })}
             </tbody>

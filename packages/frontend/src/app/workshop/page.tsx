@@ -144,6 +144,9 @@ function WorkshopCard({
       <DataCard>
         <div className="flex items-start justify-between gap-2">
           <div>
+            <p className="text-xs font-medium tracking-wide text-gray-500 uppercase">
+              {line.agrupacioProduccio ?? '—'}
+            </p>
             <p className="font-semibold text-gray-900">{line.producte.descripcio}</p>
             <p className="text-sm text-gray-500">{line.client ?? '—'}</p>
           </div>
@@ -203,6 +206,7 @@ function WorkshopRow({
         <TreballCheckbox checked={checked} disabled={isToggling} onChange={handleChange} />
         {error && <p className="mt-1 max-w-[100px] text-xs text-red-600">{error}</p>}
       </td>
+      <td className="px-3 py-3 break-words text-gray-700">{line.agrupacioProduccio ?? '—'}</td>
       <td className="px-3 py-3 break-words">
         <span className="font-semibold text-gray-900">{line.producte.descripcio}</span>
       </td>
@@ -544,7 +548,10 @@ export default function WorkshopPage() {
                   <th className="w-[5%] px-3 py-2 text-center font-medium text-gray-500 break-words">
                     <span className="sr-only">Treballada</span>
                   </th>
-                  <th className="w-[15%] px-3 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[10%] px-3 py-2 text-left font-medium text-gray-500 break-words">
+                    Agrupació producció
+                  </th>
+                  <th className="w-[14%] px-3 py-2 text-left font-medium text-gray-500 break-words">
                     Producte
                   </th>
                   <th className="w-[10%] px-3 py-2 text-left font-medium text-gray-500 break-words">
@@ -553,7 +560,7 @@ export default function WorkshopPage() {
                   <th className="w-[8%] px-3 py-2 text-left font-medium text-gray-500 break-words">
                     Format
                   </th>
-                  <th className="w-[14%] px-3 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[12%] px-3 py-2 text-left font-medium text-gray-500 break-words">
                     Client
                   </th>
                   <th className="w-[10%] px-3 py-2 text-left font-medium text-gray-500 break-words">
@@ -562,10 +569,10 @@ export default function WorkshopPage() {
                   <th className="w-[8%] px-3 py-2 text-right font-medium text-gray-500 break-words">
                     Unitats
                   </th>
-                  <th className="w-[10%] px-3 py-2 text-right font-medium text-gray-500 break-words">
+                  <th className="w-[9%] px-3 py-2 text-right font-medium text-gray-500 break-words">
                     Pes (kg)
                   </th>
-                  <th className="w-[20%] px-3 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[14%] px-3 py-2 text-left font-medium text-gray-500 break-words">
                     Obs. producció
                   </th>
                 </tr>

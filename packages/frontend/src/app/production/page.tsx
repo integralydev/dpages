@@ -337,16 +337,16 @@ export default function ProductionPage() {
                 <span className="text-base font-bold tracking-wide text-ink uppercase">Canals</span>
               </div>
               <div className="flex items-baseline gap-2">
-                <p className="text-sm font-semibold tracking-wide text-gray-700 uppercase">
+                <p className="text-xs font-semibold tracking-wide text-gray-500 uppercase">
                   Unitats
                 </p>
-                <p className="text-3xl font-bold whitespace-nowrap text-gray-900">
+                <p className="text-2xl font-bold whitespace-nowrap text-gray-900">
                   {formatDecimal(totals?.canals.unitats ?? null, 2)}
                 </p>
               </div>
               <div className="flex items-baseline gap-2">
-                <p className="text-sm font-semibold tracking-wide text-gray-700 uppercase">Kg</p>
-                <p className="text-3xl font-bold whitespace-nowrap text-gray-900">
+                <p className="text-xs font-semibold tracking-wide text-gray-500 uppercase">Kg</p>
+                <p className="text-2xl font-bold whitespace-nowrap text-gray-900">
                   {formatDecimal(totals?.canals.kg ?? null, 3)}
                 </p>
               </div>
