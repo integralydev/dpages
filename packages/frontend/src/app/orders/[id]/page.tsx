@@ -113,17 +113,32 @@ export default function OrderDetailPage() {
     setIsSaving(true);
 
     let headerFailed = false;
-    try {
-      await editOrder(order.id, values);
-    } catch (caught) {
-      headerFailed = true;
-      setSaveError(
-        ambAvisSiCal(
-          extractComandaErrorMessage(caught, "No s'ha pogut desar la comanda."),
-          hasDeletedLineThisSession,
-        ),
-      );
+    async function desarCapcalera() {
+      if (!order) return;
+      try {
+        await editOrder(order.id, values);
+      } catch (caught) {
+        headerFailed = true;
+        setSaveError(
+          ambAvisSiCal(
+            extractComandaErrorMessage(caught, "No s'ha pogut desar la comanda."),
+            hasDeletedLineThisSession,
+          ),
+        );
+      }
     }
+
+    // Tasca 15: el backend valida la capçalera contra les línies TAL COM
+    // ESTAN guardades (regla 4: cap línia anterior a la data de producció
+    // de capçalera). Si la data de producció de capçalera s'avança, les
+    // línies que la seguien s'han d'avançar ABANS (si no, la capçalera
+    // xocaria amb les dates velles); si s'endarrereix, la capçalera va
+    // primer (si no, les línies noves xocarien amb la capçalera vella).
+    const capcaleraDespres =
+      values.dataProduccio !== null &&
+      order.dataProduccio !== null &&
+      values.dataProduccio.slice(0, 10) > order.dataProduccio.slice(0, 10);
+    if (!capcaleraDespres) await desarCapcalera();
 
     // Una llamada por línia nova/editada (el backend no ofereix un
     // endpoint batch). Cap error interromp les altres: es guarden totes
@@ -148,6 +163,7 @@ export default function OrderDetailPage() {
         lineErrors.push(extractComandaErrorMessage(caught, "No s'ha pogut editar una línia."));
       }
     }
+    if (capcaleraDespres) await desarCapcalera();
     if (lineErrors.length > 0) {
       setLineWarning(ambAvisSiCal(lineErrors.join(' '), hasDeletedLineThisSession));
     }

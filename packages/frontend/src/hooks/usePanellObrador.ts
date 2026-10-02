@@ -11,13 +11,15 @@ import {
   type TreballLiniaRespostaApi,
 } from '@/lib/api';
 import { usePageClamp } from './usePageClamp';
+import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
 
 /**
- * Els 4 filtres reals de GET /panells/obrador (contrato §4.7, confirmat
- * contra panells.ts) — categoriaId/tipus existeixen al backend però no
- * formen part del disseny d'aquesta pantalla, no es passen mai acá.
+ * Filtres reals de GET /panells/obrador (contrato §4.7, confirmat contra
+ * panells.ts). categoriaId: tasca 24 (01/10/2026). `tipus` existeix al
+ * backend però no forma part del disseny d'aquesta pantalla.
  */
 export type WorkshopPanelFilters = {
+  categoriaId?: number;
   /** Un o més productes (descripció exacta); el backend en fa un OR. */
   producte?: string[];
   format?: string;
@@ -78,10 +80,10 @@ type UsePanellObradorResult = {
   ) => Promise<ToggleTreballResult>;
 };
 
-// Paginació real (20/pàgina). `totals` ve calculat pel backend sobre TOT
+// Paginació real (MIDA_PAGINA_LLISTATS/pàgina). `totals` ve calculat pel backend sobre TOT
 // el filtrat (no només `dades`, que sí pagina de veritat) — mai es
 // recalcula sumant `dades` acá.
-const MIDA_PAGINA = 20;
+const MIDA_PAGINA = MIDA_PAGINA_LLISTATS;
 
 export function usePanellObrador(filters: WorkshopPanelFilters = {}): UsePanellObradorResult {
   const [data, setData] = useState<FilaPanellObradorApi[]>([]);

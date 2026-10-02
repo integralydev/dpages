@@ -25,8 +25,8 @@ export type CarrierFormValues = Pick<TransportistaApi, 'nom'>;
  * com a taula de consulta completa en 4 llocs fora de la seva pròpia
  * pantalla (packaging, office, orders/new, orders/[id]) per omplir el
  * `SelectFilter`/select de transportista — necessiten TOTS els
- * transportistes, no una pàgina de 20. Només `app/transportistes/page.tsx`
- * passa `mida: 20` explícit per paginar de veritat la seva pròpia llista.
+ * transportistes, no una sola pàgina. Només `app/transportistes/page.tsx`
+ * passa `mida: MIDA_PAGINA_LLISTATS` explícit per paginar de veritat la seva pròpia llista.
  */
 export type UseCarriersParams = { mida?: number };
 

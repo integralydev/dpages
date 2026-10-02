@@ -9,7 +9,7 @@ export type CategoryFormValues = Pick<CategoriaApi, 'nom' | 'elaboratPorc' | 'ag
 /**
  * `mida` per defecte es manté a 200 (no 20): aquest hook no només alimenta
  * la seva pròpia pantalla (Categories, que sí pagina de veritat passant
- * `mida: 20` explícit) — `ProductForm.tsx`/`PigYieldFormModal.tsx`/
+ * `mida: MIDA_PAGINA_LLISTATS` explícit) — `ProductForm.tsx`/`PigYieldFormModal.tsx`/
  * `pig-yields/page.tsx` el fan servir com a taula de consulta completa per
  * resoldre noms de categoria, i necessiten TOTES les files, no una pàgina.
  * Canviar el valor per defecte trencaria aquests 3 llocs en silenci.

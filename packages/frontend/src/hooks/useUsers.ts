@@ -10,6 +10,7 @@ import {
   type UsuariCreatRespostaApi,
 } from '@/lib/api';
 import { usePageClamp } from './usePageClamp';
+import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
 
 export type UserFilters = {
   actiu?: boolean;
@@ -32,8 +33,8 @@ type UseUsersResult = {
   editUser: (id: number, input: EditUserInput) => Promise<UsuariApi>;
 };
 
-// Paginació real (20/pàgina).
-const MIDA_PAGINA = 20;
+// Paginació real (MIDA_PAGINA_LLISTATS/pàgina).
+const MIDA_PAGINA = MIDA_PAGINA_LLISTATS;
 
 export function useUsers(filters: UserFilters = {}): UseUsersResult {
   const [data, setData] = useState<UsuariApi[]>([]);

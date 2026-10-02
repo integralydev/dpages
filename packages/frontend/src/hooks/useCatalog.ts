@@ -34,7 +34,7 @@ export type CatalogFilters = { cerca?: string };
  * PigYieldFormModal, rates/page.tsx — aquest últim el necessita per
  * resoldre categoria/format de CADA producte de la matriu de tarifes, no
  * només els 20 de la pàgina actual). Sols `app/catalog/page.tsx` passa
- * `mida: 20` explícit per paginar de veritat la seva pròpia llista.
+ * `mida: MIDA_PAGINA_LLISTATS` explícit per paginar de veritat la seva pròpia llista.
  *
  * BUG real corregit (2026-09): amb catàleg real (353 productes), "sense
  * `mida`" no volia dir "tots" — el backend té un topall dur de 200 files
@@ -42,7 +42,7 @@ export type CatalogFilters = { cerca?: string };
  * es quedaven en silenci amb només les primeres 200. Quan `params.mida` no
  * es passa, l'efecte de sota demana totes les pàgines i les combina (ver
  * `obtenirTotesLesPagines`, lib/api.ts) — `app/catalog/page.tsx` (que sí
- * passa `mida: 20`) no entra per aquest camí, segueix paginant una sola
+ * passa `mida: MIDA_PAGINA_LLISTATS`) no entra per aquest camí, segueix paginant una sola
  * pàgina real com sempre.
  */
 export type UseCatalogParams = { mida?: number };

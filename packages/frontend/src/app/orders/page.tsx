@@ -102,6 +102,17 @@ export default function OrdersPage() {
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(ALL);
+  // Filtre d'origen: tots els orígens (també WooCommerce i l'històric
+  // "manual"), encara que a mà només es puguin triar els 3 canals manuals.
+  const { data: origins } = useOrigensComanda();
+  const [originFilter, setOriginFilter] = useState(ALL);
+  const originCode = useMemo(
+    () =>
+      originFilter !== ALL
+        ? origins.find((origin) => origin.nom === originFilter)?.codi
+        : undefined,
+    [originFilter, origins],
+  );
   const [productionDateFilter, setProductionDateFilter] = useState('');
   const [orderDateFilter, setOrderDateFilter] = useState('');
   const [deliveryDateFilter, setDeliveryDateFilter] = useState('');
@@ -133,6 +144,7 @@ export default function OrdersPage() {
   const filters = useMemo(
     () => ({
       ...(statusCode ? { estat: statusCode } : {}),
+      ...(originCode ? { origen: originCode } : {}),
       ...(orderDateFilter ? { dataDes: orderDateFilter, dataFins: orderDateFilter } : {}),
       ...(productionDateFilter
         ? { dataProduccioDes: productionDateFilter, dataProduccioFins: productionDateFilter }
@@ -142,19 +154,18 @@ export default function OrdersPage() {
         : {}),
       ...(search.trim() ? { cerca: search.trim() } : {}),
     }),
-    [statusCode, orderDateFilter, productionDateFilter, deliveryDateFilter, search],
+    [statusCode, originCode, orderDateFilter, productionDateFilter, deliveryDateFilter, search],
   );
 
   const { data, paginacio, setPagina, isLoading, error, refetch, markIncidence } =
     useOrders(filters);
-  const { data: origins } = useOrigensComanda();
   const originLabel = useMemo(() => {
     const byCodi = new Map(origins.map((origin) => [origin.codi, origin.nom]));
     return (codi: string) => byCodi.get(codi) ?? codi;
   }, [origins]);
 
   // Llistat en PDF (petició del client, 29/09/2026): TOTES les comandes
-  // que compleixen els filtres actius, no només la pàgina de 20 visible —
+  // que compleixen els filtres actius, no només la pàgina visible —
   // es tornen a demanar totes a GET /comandes amb els mateixos filtres.
   const [isPrinting, setIsPrinting] = useState(false);
   const [printError, setPrintError] = useState<string | null>(null);
@@ -162,6 +173,7 @@ export default function OrdersPage() {
   const activeFilterLabels = [
     search.trim() && `Cerca: ${search.trim()}`,
     statusFilter !== ALL && `Estat: ${statusFilter}`,
+    originFilter !== ALL && `Origen: ${originFilter}`,
     productionDateFilter && `Data producció: ${formatData(productionDateFilter, false)}`,
     orderDateFilter && `Data comanda: ${formatData(orderDateFilter, false)}`,
     deliveryDateFilter && `Data lliurament: ${formatData(deliveryDateFilter, false)}`,
@@ -244,6 +256,13 @@ export default function OrdersPage() {
           options={Object.values(ESTAT_LABELS)}
           value={statusFilter}
           onChange={setStatusFilter}
+          allLabel={ALL}
+        />
+        <SimpleDropdown
+          label="Origen"
+          options={origins.map((origin) => origin.nom)}
+          value={originFilter}
+          onChange={setOriginFilter}
           allLabel={ALL}
         />
         <DateInput

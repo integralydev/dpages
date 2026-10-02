@@ -12,6 +12,7 @@ import { Pagination } from '@/components/ui/Pagination';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { StatCard } from '@/components/ui/StatCard';
 import { useCatalog } from '@/hooks/useCatalog';
+import { useCategories } from '@/hooks/useCategories';
 import { type ToggleTreballResult, usePanellObrador } from '@/hooks/usePanellObrador';
 import type { FilaPanellObradorApi } from '@/lib/api';
 import { formatData } from '@/lib/dates';
@@ -19,6 +20,7 @@ import { formatDecimal } from '@/lib/decimals';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
 
 const ALL = 'Tots';
+const ALL_FEM = 'Totes';
 
 // Valors fixos del enum real (ProducteApi.format/envasat, contrato §4.2) —
 // filtres exactes contra el backend, no es deriven de `data` perquè són un
@@ -204,6 +206,16 @@ export default function WorkshopPage() {
   // Un o més productes (petició del client, 29/09/2026) — es guarda
   // l'opció sencera (id+label) per poder pintar l'etiqueta de cadascun.
   const [selectedProducts, setSelectedProducts] = useState<ComboboxOption[]>([]);
+  // Tasca 24 (01/10/2026): mateix filtre que al Panell Empaquetat.
+  const { data: categories } = useCategories();
+  const [categoryFilter, setCategoryFilter] = useState(ALL_FEM);
+  const categoriaId = useMemo(
+    () =>
+      categoryFilter !== ALL_FEM
+        ? categories.find((item) => item.nom === categoryFilter)?.id
+        : undefined,
+    [categoryFilter, categories],
+  );
   const [envasatFilter, setEnvasatFilter] = useState(ALL);
   const [formatFilter, setFormatFilter] = useState(ALL);
   const [productionDateFilter, setProductionDateFilter] = useState('');
@@ -225,6 +237,7 @@ export default function WorkshopPage() {
 
   const filters = useMemo(
     () => ({
+      ...(categoriaId !== undefined ? { categoriaId } : {}),
       ...(selectedProducts.length > 0
         ? { producte: selectedProducts.map((product) => product.label) }
         : {}),
@@ -234,7 +247,7 @@ export default function WorkshopPage() {
         ? { dataProduccioDes: productionDateFilter, dataProduccioFins: productionDateFilter }
         : {}),
     }),
-    [selectedProducts, envasatFilter, formatFilter, productionDateFilter],
+    [categoriaId, selectedProducts, envasatFilter, formatFilter, productionDateFilter],
   );
 
   // "pendents primer" ja ve per defecte des del backend (GET
@@ -276,6 +289,7 @@ export default function WorkshopPage() {
 
   function clearFilters() {
     setSelectedProducts([]);
+    setCategoryFilter(ALL_FEM);
     setEnvasatFilter(ALL);
     setFormatFilter(ALL);
     setProductionDateFilter('');
@@ -299,6 +313,13 @@ export default function WorkshopPage() {
       />
 
       <FilterBar>
+        <SimpleDropdown
+          label="Categoria"
+          options={categories.map((item) => item.nom)}
+          value={categoryFilter}
+          onChange={setCategoryFilter}
+          allLabel={ALL_FEM}
+        />
         <MultiCombobox
           label="Productes"
           selected={selectedProducts}

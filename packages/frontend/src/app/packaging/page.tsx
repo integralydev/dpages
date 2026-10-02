@@ -27,7 +27,6 @@ import { formatData } from '@/lib/dates';
 import { formatDecimal, parseDecimalInput } from '@/lib/decimals';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
 
-const ALL = 'Tots';
 const ALL_FEM = 'Totes';
 
 // Petició d'Ari (29/09/2026): una línia és "enviada" quan s'hi han desat
@@ -337,7 +336,8 @@ export default function PackagingPage() {
   const { data: categories } = useCategories();
 
   const [shippingDateFilter, setShippingDateFilter] = useState('');
-  const [carrierFilter, setCarrierFilter] = useState(ALL);
+  // Un o més transportistes (tasca 22, 01/10/2026), mateix patró que Productes.
+  const [selectedCarriers, setSelectedCarriers] = useState<ComboboxOption[]>([]);
   // Client ja no ve d'un <select> amb els clients de useClientTariffs()
   // precarregats (per defecte només 200, i n'hi ha 1291 reals — el filtre
   // ja quedava incomplet abans d'aquest canvi) — AsyncCombobox el resol via
@@ -367,10 +367,15 @@ export default function PackagingPage() {
   const confirmacio =
     CONFIRMACIO_OPTIONS[confirmacioFilter as keyof typeof CONFIRMACIO_OPTIONS] ?? undefined;
 
-  const carrierId = useMemo(
-    () =>
-      carrierFilter !== ALL ? carriers.find((item) => item.nom === carrierFilter)?.id : undefined,
-    [carrierFilter, carriers],
+  const loadCarrierOptions = useMemo(
+    () => (query: string) =>
+      Promise.resolve(
+        carriers
+          .filter((item) => item.nom.toLowerCase().includes(query.toLowerCase()))
+          .map((item) => ({ id: item.id, label: item.nom }))
+          .sort((a, b) => a.label.localeCompare(b.label, 'ca')),
+      ),
+    [carriers],
   );
   const loadProductOptions = useMemo(
     () => (query: string) =>
@@ -388,7 +393,9 @@ export default function PackagingPage() {
       ...(shippingDateFilter
         ? { dataExpedicioDes: shippingDateFilter, dataExpedicioFins: shippingDateFilter }
         : {}),
-      ...(carrierId !== undefined ? { transportistaId: carrierId } : {}),
+      ...(selectedCarriers.length > 0
+        ? { transportistaId: selectedCarriers.map((item) => item.id) }
+        : {}),
       ...(selectedClient !== null ? { clientId: selectedClient.id } : {}),
       ...(deliveryDateFilter
         ? { dataLliuramentDes: deliveryDateFilter, dataLliuramentFins: deliveryDateFilter }
@@ -401,7 +408,7 @@ export default function PackagingPage() {
     }),
     [
       shippingDateFilter,
-      carrierId,
+      selectedCarriers,
       selectedClient,
       deliveryDateFilter,
       selectedProducts,
@@ -460,7 +467,7 @@ export default function PackagingPage() {
 
   function clearFilters() {
     setShippingDateFilter('');
-    setCarrierFilter(ALL);
+    setSelectedCarriers([]);
     setSelectedClient(null);
     setDeliveryDateFilter('');
     setSelectedProducts([]);
@@ -522,12 +529,14 @@ export default function PackagingPage() {
           value={deliveryDateFilter}
           onChange={setDeliveryDateFilter}
         />
-        <SimpleDropdown
-          label="Transportista"
-          options={carriers.map((item) => item.nom)}
-          value={carrierFilter}
-          onChange={setCarrierFilter}
-          allLabel={ALL}
+        <MultiCombobox
+          label="Transportistes"
+          selected={selectedCarriers}
+          onChange={setSelectedCarriers}
+          placeholder="Cercar transportista..."
+          addMorePlaceholder="Afegir un altre transportista..."
+          debounceMs={0}
+          loadOptions={loadCarrierOptions}
         />
         <MultiCombobox
           label="Productes"

@@ -9,6 +9,7 @@ import { Pagination } from '@/components/ui/Pagination';
 import { useCarriers } from '@/hooks/useCarriers';
 import type { TransportistaApi } from '@/lib/api';
 import { TransportistFormModal } from './TransportistFormModal';
+import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
 
 function CarrierCard({ carrier, onEdit }: { carrier: TransportistaApi; onEdit: () => void }) {
   return (
@@ -37,7 +38,7 @@ function CarrierCard({ carrier, onEdit }: { carrier: TransportistaApi; onEdit: (
 export default function TransportistesPage() {
   const { data, paginacio, setPagina, isLoading, error, refetch, createCarrier, editCarrier } =
     useCarriers({
-      mida: 20,
+      mida: MIDA_PAGINA_LLISTATS,
     });
   const [formState, setFormState] = useState<{
     mode: 'create' | 'edit';

@@ -161,7 +161,7 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
-type QueryValue = string | number | boolean | string[] | undefined;
+type QueryValue = string | number | boolean | (string | number)[] | undefined;
 
 // Un array es manda com a paràmetre repetit (`?producte=A&producte=B`),
 // que és com el backend rep els filtres de valor múltiple.
@@ -170,7 +170,7 @@ function withQuery(path: string, params?: Record<string, QueryValue>): string {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (Array.isArray(value)) {
-      for (const item of value) query.append(key, item);
+      for (const item of value) query.append(key, String(item));
     } else if (value !== undefined) {
       query.set(key, String(value));
     }

@@ -10,6 +10,7 @@ import { Pagination } from '@/components/ui/Pagination';
 import { useCategories, type CategoryFormValues } from '@/hooks/useCategories';
 import { ApiError, type CategoriaApi } from '@/lib/api';
 import { CategoryFormModal } from './CategoryFormModal';
+import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
 
 function CategoryCard({
   category,
@@ -58,7 +59,7 @@ export default function CategoriesPage() {
     createCategory,
     editCategory,
     deleteCategory,
-  } = useCategories({ mida: 20 });
+  } = useCategories({ mida: MIDA_PAGINA_LLISTATS });
   const [formState, setFormState] = useState<{
     mode: 'create' | 'edit';
     category?: CategoriaApi;

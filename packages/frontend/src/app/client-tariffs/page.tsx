@@ -14,6 +14,7 @@ import { useClientTariffs, type ClientFormValues } from '@/hooks/useClientTariff
 import { useRates } from '@/hooks/useRates';
 import type { ClientApi } from '@/lib/api';
 import { ClientFormModal } from './ClientFormModal';
+import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
 
 const ALL_FEM = 'Totes';
 
@@ -83,7 +84,7 @@ export default function ClientTariffsPage() {
     [search, tarifaId],
   );
   const { data, paginacio, setPagina, isLoading, error, refetch, createClient, editClient } =
-    useClientTariffs(clientFilters, { mida: 20 });
+    useClientTariffs(clientFilters, { mida: MIDA_PAGINA_LLISTATS });
 
   async function handleSave(values: ClientFormValues) {
     if (formState?.mode === 'edit' && formState.client) {

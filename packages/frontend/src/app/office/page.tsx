@@ -219,7 +219,7 @@ export default function OfficePage() {
   // manera de filtrar per "sense població" contra un backend que compara
   // per igualtat exacta de text (enviar-ho literal no matchejaria res).
   // LIMITACIÓ CONEGUDA amb paginació real: només reflecteix
-  // les poblacions presents a la pàgina actual (20 comandes), no totes les
+  // les poblacions presents a la pàgina actual (MIDA_PAGINA_LLISTATS comandes), no totes les
   // que existeixen — no hi ha cap fix net possible sense un endpoint nou.
   const destinationOptions = useMemo(
     () =>
@@ -298,7 +298,7 @@ export default function OfficePage() {
           />
           <SimpleDropdown
             label="Transportista"
-            options={carriers.map((item) => item.nom)}
+            options={carriers.map((item) => item.nom).sort((a, b) => a.localeCompare(b, 'ca'))}
             value={carrierFilter}
             onChange={setCarrierFilter}
             allLabel={ALL}

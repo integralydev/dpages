@@ -9,6 +9,7 @@ import {
   type PanellProduccioFilaApi,
 } from '@/lib/api';
 import { usePageClamp } from './usePageClamp';
+import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
 
 /**
  * Els filtres reals de GET /panells/produccio (confirmat contra
@@ -38,11 +39,11 @@ type UseProductionPanellResult = {
   isReady: boolean;
 };
 
-// Paginació real (20/pàgina) — les files venen d'un GROUP BY
+// Paginació real (MIDA_PAGINA_LLISTATS/pàgina) — les files venen d'un GROUP BY
 // (agrupacioProduccio × agrupacioRendiment, ver panells.ts), acotat pel
 // catàleg real; en la pràctica és probable que `totalPagines` sigui sempre
 // 1, però el component es mostra igual per consistència amb la resta.
-const MIDA_PAGINA = 20;
+const MIDA_PAGINA = MIDA_PAGINA_LLISTATS;
 
 export function useProductionPanell(filters: ProductionPanelFilters): UseProductionPanellResult {
   const [data, setData] = useState<PanellProduccioFilaApi[]>([]);

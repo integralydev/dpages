@@ -9,6 +9,7 @@ import {
   type TarifaResumApi,
 } from '@/lib/api';
 import { usePageClamp } from './usePageClamp';
+import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
 
 export type CellSaveResult =
   { tarifaId: string; success: true } | { tarifaId: string; success: false; error: ApiError };
@@ -32,13 +33,13 @@ type UseRatesResult = {
   createTariff: (codi: string, nom: string) => Promise<void>;
 };
 
-// Paginació real de files (20/pàgina) — `tariffColumns` NO forma part
+// Paginació real de files (MIDA_PAGINA_LLISTATS/pàgina) — `tariffColumns` NO forma part
 // d'aquesta paginació: `/tarifes/matriu` sempre el retorna sencer (és la
 // llista de columnes de la matriu, no una fila més), per això els altres 4
 // llocs que criden aquest hook només per `tariffColumns`
 // (client-tariffs/office/orders new/[id]) segueixen veient-les totes sense
 // cap canvi encara que aquí es paginin les files.
-const MIDA_PAGINA = 20;
+const MIDA_PAGINA = MIDA_PAGINA_LLISTATS;
 
 export function useRates(filters: RatesFilters = {}): UseRatesResult {
   const [data, setData] = useState<FilaMatriuTarifesApi[]>([]);
