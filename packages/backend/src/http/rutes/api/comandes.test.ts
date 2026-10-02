@@ -1318,6 +1318,10 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
       );
     });
 
+    // Tasca 11: "woocommerce" ja no es pot triar en crear una comanda a mà
+    // — només el posa la sincronització. Per simular una comanda
+    // sincronitzada es crea com a "manual" i es canvia l'origen directament a
+    // la base, que és el que deixa el sync.
     async function crearComandaAmbOrigen(
       fastify: ReturnType<typeof construirServidor>,
       origen: string,
@@ -1328,7 +1332,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
         payload: {
           dataComanda: '2026-08-01',
           dataLliurament: '2026-08-30T00:00:00Z',
-          origen,
+          origen: origen === 'woocommerce' ? 'manual' : origen,
           linies: [
             {
               dataProduccio: '2026-08-01T00:00:00Z',
@@ -1338,10 +1342,17 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
           ],
         },
       });
-      return cuerpoJson<ComandaDetallApi>(creada);
+      const detall = cuerpoJson<ComandaDetallApi>(creada);
+      if (origen !== 'woocommerce') return detall;
+      await entorn.poolTest.query(
+        `UPDATE comanda SET origen_id = (SELECT id FROM origen_comanda WHERE codi = 'woocommerce')
+         WHERE id_seq = $1`,
+        [detall.id],
+      );
+      return { ...detall, origen: 'woocommerce' };
     }
 
-    it('un pedido sincronitzat (origen "woocommerce") es pot reassignar a "whatsapp"', async () => {
+    it('tasca 11: l\'origen d\'un pedido sincronitzat ("woocommerce") NO es pot canviar', async () => {
       const fastify = construirServidor();
       const comandaCreada = await crearComandaAmbOrigen(fastify, 'woocommerce');
       expect(comandaCreada.origen).toBe('woocommerce');
@@ -1352,8 +1363,10 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
         payload: { origen: 'whatsapp' },
       });
 
-      expect(res.statusCode).toBe(200);
-      expect(cuerpoJson<ComandaDetallApi>(res).origen).toBe('whatsapp');
+      expect(res.statusCode).toBe(400);
+      expect(
+        cuerpoJson<{ error: { detalls: { camp: string }[] } }>(res).error.detalls,
+      ).toContainEqual(expect.objectContaining({ camp: 'origen' }));
 
       // Confirmació real contra la base, no només la resposta HTTP.
       const fila = await entorn.poolTest.query<{ codi: string }>(
@@ -1361,12 +1374,56 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
          WHERE c.id_seq = $1`,
         [comandaCreada.id],
       );
-      expect(fila.rows[0]?.codi).toBe('whatsapp');
+      expect(fila.rows[0]?.codi).toBe('woocommerce');
 
       await fastify.close();
     });
 
-    it('el valor històric "manual" també es pot reassignar a un dels 4 canals elegibles (telefon)', async () => {
+    it('tasca 11: reenviar "woocommerce" a un pedido que ja ho és no és un error (no-op)', async () => {
+      const fastify = construirServidor();
+      const comandaCreada = await crearComandaAmbOrigen(fastify, 'woocommerce');
+
+      const res = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comandaCreada.id}`,
+        payload: { origen: 'woocommerce', bultos: 2 },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(cuerpoJson<ComandaDetallApi>(res).origen).toBe('woocommerce');
+
+      await fastify.close();
+    });
+
+    it('tasca 11: no es pot crear a mà una comanda amb origen "woocommerce"', async () => {
+      const fastify = construirServidor();
+
+      const res = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'woocommerce',
+          linies: [
+            {
+              dataProduccio: '2026-08-01T00:00:00Z',
+              producteId: producteFitxaId,
+              unitatsDemanades: 1,
+            },
+          ],
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(
+        cuerpoJson<{ error: { detalls: { camp: string }[] } }>(res).error.detalls,
+      ).toContainEqual(expect.objectContaining({ camp: 'origen' }));
+
+      await fastify.close();
+    });
+
+    it('el valor històric "manual" també es pot reassignar a un dels 3 canals elegibles (telefon)', async () => {
       const fastify = construirServidor();
       const comandaCreada = await crearComandaAmbOrigen(fastify, 'manual');
 
@@ -1382,7 +1439,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
       await fastify.close();
     });
 
-    it('"woocommerce" és triable a mà: un pedido "manual" es pot reassignar cap a "woocommerce"', async () => {
+    it('tasca 11: "woocommerce" ja no és triable a mà: un pedido "manual" no es pot reassignar cap a "woocommerce"', async () => {
       const fastify = construirServidor();
       const comandaCreada = await crearComandaAmbOrigen(fastify, 'manual');
 
@@ -1392,8 +1449,8 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
         payload: { origen: 'woocommerce' },
       });
 
-      expect(res.statusCode).toBe(200);
-      expect(cuerpoJson<ComandaDetallApi>(res).origen).toBe('woocommerce');
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: { codi: 'VALIDACIO' } });
 
       // Confirmació real contra la base, no només la resposta HTTP.
       const fila = await entorn.poolTest.query<{ codi: string }>(
@@ -1401,14 +1458,14 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
          WHERE c.id_seq = $1`,
         [comandaCreada.id],
       );
-      expect(fila.rows[0]?.codi).toBe('woocommerce');
+      expect(fila.rows[0]?.codi).toBe('manual');
 
       await fastify.close();
     });
 
-    it('rebutja amb 400 VALIDACIO intentar reassignar cap a "manual" (l’únic codi no triable)', async () => {
+    it('rebutja amb 400 VALIDACIO intentar reassignar cap a "manual" (valor històric, no triable)', async () => {
       const fastify = construirServidor();
-      const comandaCreada = await crearComandaAmbOrigen(fastify, 'woocommerce');
+      const comandaCreada = await crearComandaAmbOrigen(fastify, 'telefon');
 
       const res = await fastify.inject({
         method: 'PATCH',
@@ -1427,7 +1484,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
         method: 'GET',
         url: `/api/v1/comandes/${comandaCreada.id}`,
       });
-      expect(cuerpoJson<ComandaDetallApi>(detall).origen).toBe('woocommerce');
+      expect(cuerpoJson<ComandaDetallApi>(detall).origen).toBe('telefon');
 
       await fastify.close();
     });

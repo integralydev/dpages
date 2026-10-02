@@ -941,6 +941,64 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
     });
   });
 
+  describe("tasca 22 — GET /panells/empaquetat amb més d'un transportista", () => {
+    it('?transportistaId= repetible: línies de qualsevol dels transportistes indicats', async () => {
+      const fastify = construirServidor();
+
+      const transportistes = await entorn.poolTest.query<{ id: string; id_seq: string }>(
+        `INSERT INTO transportista (nom) VALUES ('T22-A'), ('T22-B'), ('T22-C') RETURNING id, id_seq`,
+      );
+      const [tA, tB, tC] = transportistes.rows;
+      const comandes: number[] = [];
+      for (const t of [tA!, tB!, tC!]) {
+        const creada = await fastify.inject({
+          method: 'POST',
+          url: '/api/v1/comandes',
+          payload: {
+            dataComanda: '2026-08-01',
+            dataLliurament: '2026-08-30T00:00:00Z',
+            origen: 'manual',
+            linies: [{ dataProduccio: '2026-08-01T00:00:00Z', producteId, unitatsDemanades: 1 }],
+          },
+        });
+        const id = cuerpoJson<{ id: number }>(creada).id;
+        comandes.push(id);
+        await entorn.poolTest.query(`UPDATE comanda SET transportista_id = $1 WHERE id_seq = $2`, [
+          t.id,
+          id,
+        ]);
+      }
+
+      const dos = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: `/api/v1/panells/empaquetat?transportistaId=${tA!.id_seq}&transportistaId=${tB!.id_seq}&mida=200`,
+        }),
+      );
+      expect(new Set(dos.dades.map((f) => f.comandaId))).toEqual(
+        new Set([comandes[0], comandes[1]]),
+      );
+      expect(new Set(dos.dades.map((f) => f.transportista))).toEqual(new Set(['T22-A', 'T22-B']));
+
+      // Un sol transportista segueix funcionant igual que abans.
+      const un = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: `/api/v1/panells/empaquetat?transportistaId=${tC!.id_seq}`,
+        }),
+      );
+      expect(un.dades.map((f) => f.comandaId)).toEqual([comandes[2]]);
+
+      const invalid = await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/panells/empaquetat?transportistaId=${tA!.id_seq}&transportistaId=abc`,
+      });
+      expect(invalid.statusCode).toBe(400);
+
+      await fastify.close();
+    });
+  });
+
   // Petició d'Ari (29/09/2026). Al final del fitxer a propòsit: el pedido
   // cancel·lat no altera els totals que comproven els tests d'abans.
   describe('estat cancellada — fora de tots els panells', () => {

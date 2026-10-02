@@ -1117,7 +1117,12 @@ paths:
           schema: { type: string, format: date }
         - name: transportistaId
           in: query
-          schema: { type: integer }
+          description: >-
+            Repetible (tarea 22, 01/10/2026): varios valores = líneas de
+            cualquiera de esos transportistas.
+          style: form
+          explode: true
+          schema: { type: array, items: { type: integer } }
         - name: clientId
           in: query
           schema: { type: integer }
@@ -1901,8 +1906,10 @@ components:
         origen:
           type: string
           description: >-
-            Codi de origen_comanda (ej. "woocommerce", "manual") — ya no es
+            Codi de origen_comanda (ej. "telefon", "whatsapp") — ya no es
             un enum fijo, ver el schema OrigenComanda y GET /origens-comanda.
+            "woocommerce" no se puede elegir a mano (tarea 11): 400.
+            Sólo lo asigna la sincronización.
         clientId: { type: integer }
         tarifaId:
           type: integer

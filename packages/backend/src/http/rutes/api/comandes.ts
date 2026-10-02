@@ -57,12 +57,13 @@ const ESTATS_COMANDA_VALIDS = [
 ] as const;
 
 // Mateix criteri que CODIS_ORIGEN_ELEGIBLES al frontend (OrderForm.tsx):
-// "manual" (valor històric) és l'únic codi que mai es pot triar a mà, ni en
-// alta ni en edició. "woocommerce" SÍ és triable a mà (decisió de negoci
-// actualitzada) tant per a alta com per a reassignar l'origen d'un pedido ja
-// creat — coexisteix amb el fet que també sigui el valor que posa la
-// sincronització automàtica.
-const CODIS_ORIGEN_EDITABLES = ['whatsapp', 'telefon', 'correu', 'woocommerce'] as const;
+// només els 3 canals manuals es poden triar a mà. "manual" és un valor
+// històric. "woocommerce" queda BLOQUEJAT en els dos sentits (tasca 11,
+// 01/10/2026, reverteix la decisió anterior que el feia triable): només el
+// posa la sincronització automàtica, no es pot triar en crear una comanda
+// a mà ni canviar-lo en una comanda que ja ve de WooCommerce.
+const CODIS_ORIGEN_EDITABLES = ['whatsapp', 'telefon', 'correu'] as const;
+const CODI_ORIGEN_WOOCOMMERCE = 'woocommerce';
 
 interface FilaComandaResum {
   id_seq: string;
@@ -645,6 +646,13 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       return enviarValidacio(reply, 'Les dates no són coherents', [violacioCreacio]);
     }
 
+    // Tasca 11: una comanda creada a mà mai pot dir que ve de WooCommerce.
+    if (cos.origen === CODI_ORIGEN_WOOCOMMERCE) {
+      return enviarValidacio(reply, "L'origen WooCommerce no es pot triar a mà", [
+        { camp: 'origen', missatge: 'woocommerce només el posa la sincronització automàtica' },
+      ]);
+    }
+
     // origen ja no és un enum fix (migració 0013): és el codi d'una fila
     // d'origen_comanda — es resol igual que clientId/transportistaId més
     // avall.
@@ -913,12 +921,26 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       }
     }
 
-    // Reassignació d'origen: cap a qualsevol dels 4 canals triables a mà
-    // (CODIS_ORIGEN_EDITABLES) — mai "manual", sense importar quin sigui
-    // l'origen actual (inclou pedidos avui en 'woocommerce' o 'manual'). Es
-    // resol igual que a POST /comandes (codi → UUID), amb el mateix criteri
-    // de "no existeix" per si el codi no estigués sembrat.
+    // Reassignació d'origen: cap a qualsevol dels 3 canals triables a mà
+    // (CODIS_ORIGEN_EDITABLES). Tasca 11: si la comanda ve de WooCommerce,
+    // el seu origen ja no es pot canviar (reenviar el mateix valor és un
+    // no-op, no un error). Es resol igual que a POST /comandes (codi →
+    // UUID), amb el mateix criteri de "no existeix".
     let origenUuid: string | undefined;
+    if (cos.origen !== undefined) {
+      const origenActual = await pool.query<{ codi: string }>(
+        `SELECT oc.codi FROM comanda c JOIN origen_comanda oc ON oc.id = c.origen_id WHERE c.id = $1`,
+        [comandaUuid],
+      );
+      const esWoocommerce = origenActual.rows[0]?.codi === CODI_ORIGEN_WOOCOMMERCE;
+      if (esWoocommerce && cos.origen === CODI_ORIGEN_WOOCOMMERCE) {
+        cos.origen = undefined;
+      } else if (esWoocommerce) {
+        return enviarValidacio(reply, "L'origen d'una comanda de WooCommerce no es pot canviar", [
+          { camp: 'origen', missatge: 'la comanda ve de WooCommerce' },
+        ]);
+      }
+    }
     if (cos.origen !== undefined) {
       if (!CODIS_ORIGEN_EDITABLES.includes(cos.origen as (typeof CODIS_ORIGEN_EDITABLES)[number])) {
         return enviarValidacio(reply, "L'origen indicat no es pot triar a mà", [

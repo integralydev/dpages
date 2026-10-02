@@ -833,6 +833,12 @@ Filtros: `?estat=oberta&clientId=45&origen=web&dataDes=2026-08-01&dataFins=2026-
 > que es del pedido completo). El prototipo muestra ambas como editables por
 > separado.
 >
+> **Tarea 15 (01/10/2026):** el formulario vuelve a tener la fecha de
+> producción de **cabecera** como campo propio (antes se enviaba siempre
+> igual a `dataComanda`). Se copia por defecto a las líneas nuevas y a las
+> que la seguían; cada línea la puede cambiar, pero no a una fecha anterior
+> (regla 4). Sin cambios en la API: `dataProduccio` de cabecera ya existía.
+>
 > **`linies[].categoria`/`format`/`envasat`** (capa 20): mismos tres campos
 > que ya devuelve `GET /panells/obrador` para esta misma línea (sección
 > 4.7), resueltos igual — `categoria` es el nombre de la categoría del
@@ -1012,21 +1018,26 @@ automáticas. Para cualquier otro valor de `estat`, `detall` se ignora si
 viene. Un `estat` que no sea uno de los 5 valores válidos también es
 `400 VALIDACIO`. Mismo `409 CONFLICTE` si el pedido está congelado.
 
-**`origen` en `PATCH /comandes/:id`** — reasigna el canal del pedido, sin
-importar cuál sea el origen actual (incluye pedidos hoy en `"woocommerce"`
-o en el valor histórico `"manual"`: cualquiera de los dos se puede mover a
-uno de los 4 canales elegibles).
+**`origen` en `PATCH /comandes/:id`** — reasigna el canal del pedido.
 
 ```json
 { "origen": "whatsapp" }
 ```
 
-Sólo acepta uno de estos 4 códigos — `"whatsapp"`, `"telefon"`,
-`"correu"`, `"woocommerce"` — **nunca** `"manual"` (valor histórico):
+Sólo acepta uno de estos 3 códigos — `"whatsapp"`, `"telefon"`,
+`"correu"` — **nunca** `"manual"` (valor histórico) **ni `"woocommerce"`**:
 cualquier otro valor es `400 VALIDACIO`, con el mensaje indicando los
-códigos válidos. `"woocommerce"` es a la vez el valor que asigna la
-sincronización automática y un destino elegible a mano — las dos cosas
-coexisten sin conflicto. Un código bien formado pero inexistente en
+códigos válidos.
+
+> **`"woocommerce"` bloqueado en los dos sentidos** (tarea 11, 01/10/2026,
+> revierte la decisión anterior que lo hacía elegible a mano): sólo lo
+> asigna la sincronización automática. No se puede elegir al crear un
+> pedido a mano (`POST /comandes` con `origen: "woocommerce"` →
+> `400 VALIDACIO`) ni cambiar el origen de un pedido que ya es de
+> WooCommerce (`400 VALIDACIO`). Reenviar `"woocommerce"` a un pedido que ya
+> lo es no es un error: se ignora.
+
+Un código bien formado pero inexistente en
 `origen_comanda` también es `400 VALIDACIO` (chequeo defensivo — los
 canales están sembrados de fábrica). Mismo `409 CONFLICTE` que el resto de
 los campos si el pedido está congelado — sin ninguna excepción especial
@@ -1322,6 +1333,11 @@ Respuesta `200`:
 **`GET /panells/empaquetat`**
 
 Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&producte=&categoriaId=&confirmacio=`
+
+> **`transportistaId` repetible** (tarea 22, 01/10/2026):
+> `?transportistaId=1&transportistaId=4` devuelve las líneas de cualquiera
+> de esos transportistas. Un solo valor funciona igual que antes; un id no
+> numérico es `400 VALIDACIO`.
 
 > **Peticiones de Ari (29/09/2026):**
 >

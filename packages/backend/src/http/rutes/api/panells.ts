@@ -37,6 +37,32 @@ async function resolverFiltreEntitat(
 }
 
 /**
+ * Igual que `resolverFiltreEntitat`, però el paràmetre es pot repetir
+ * (`?transportistaId=1&transportistaId=4`, tasca 22, 01/10/2026): retorna
+ * els UUID de tots els ids. Un id que no existeix es resol al UUID buit
+ * (mateix criteri: no coincideix amb res, no és un error). `undefined` =
+ * sense filtre; `null` = resposta 400 ja enviada.
+ */
+async function resolverFiltreEntitats(
+  reply: FastifyReply,
+  valor: unknown,
+  camp: string,
+  resolver: (idSeq: number) => Promise<string | null>,
+): Promise<string[] | undefined | null> {
+  const valors = (Array.isArray(valor) ? valor : [valor]).filter(
+    (item): item is string => typeof item === 'string',
+  );
+  if (valors.length === 0) return undefined;
+  const uuids: string[] = [];
+  for (const item of valors) {
+    const uuid = await resolverFiltreEntitat(reply, item, camp, resolver);
+    if (uuid === null) return null;
+    if (uuid !== undefined) uuids.push(uuid);
+  }
+  return uuids;
+}
+
+/**
  * `?producte=` repetible (petició del client, 29/09/2026): `?producte=A&
  * producte=B` = línies de A o de B. Fastify ja lliura un array quan la clau
  * es repeteix; un sol valor funciona igual que sempre. Coincidència EXACTA
@@ -453,16 +479,17 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         condicions.push(condicioDataFinsInclusiva('c.data_lliurament', valors.length + 1));
         valors.push(query.dataLliuramentFins);
       }
-      const transportistaUuid = await resolverFiltreEntitat(
+      // Un o més transportistes (tasca 22): OR entre ells.
+      const transportistaUuids = await resolverFiltreEntitats(
         reply,
         query.transportistaId,
         'transportistaId',
         (id) => resolverTransportistaUuid(pool, id),
       );
-      if (transportistaUuid === null) return;
-      if (transportistaUuid !== undefined) {
-        condicions.push(`c.transportista_id = $${valors.length + 1}`);
-        valors.push(transportistaUuid);
+      if (transportistaUuids === null) return;
+      if (transportistaUuids !== undefined) {
+        condicions.push(`c.transportista_id = ANY($${valors.length + 1}::uuid[])`);
+        valors.push(transportistaUuids);
       }
       const clientUuid = await resolverFiltreEntitat(reply, query.clientId, 'clientId', (id) =>
         resolverClientUuid(pool, id),
