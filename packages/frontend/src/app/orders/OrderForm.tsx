@@ -61,7 +61,15 @@ const CODIS_ORIGEN_ELEGIBLES = ['whatsapp', 'telefon', 'correu'];
 // pugui triar cap a ella des d'acá.
 // cancellada (petició d'Ari, 29/09/2026) sí és triable aquí: no demana
 // motiu, i treu la comanda de tots els panells.
-const ESTAT_OPTIONS_SELECCIONABLES: string[] = ['oberta', 'en_proces', 'tancada', 'cancellada'];
+// esborrany (tasca 33): també triable; en passar-la a oberta entra a
+// Obrador i Empaquetat.
+const ESTAT_OPTIONS_SELECCIONABLES: string[] = [
+  'esborrany',
+  'oberta',
+  'en_proces',
+  'tancada',
+  'cancellada',
+];
 
 function clientLabel(client: ClientApi) {
   return `${client.codi ?? client.id} · ${client.nom ?? ''}`;

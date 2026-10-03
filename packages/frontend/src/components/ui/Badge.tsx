@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 export type BadgeVariant =
-  'neutral' | 'info' | 'positive' | 'negative' | 'purple' | 'amber' | 'orange' | 'yellow';
+  'neutral' | 'info' | 'positive' | 'negative' | 'purple' | 'amber' | 'orange' | 'yellow' | 'draft';
 
 const VARIANT_STYLES: Record<BadgeVariant, string> = {
   neutral: 'bg-gray-100 text-gray-700',
@@ -18,6 +18,8 @@ const VARIANT_STYLES: Record<BadgeVariant, string> = {
   amber: 'bg-amber-50 text-amber-700',
   orange: 'bg-orange-50 text-orange-700',
   yellow: 'bg-yellow-50 text-yellow-700',
+  // Estat esborrany (tasca 33): vora discontínua, "encara no és definitiva".
+  draft: 'border border-dashed border-gray-400 bg-white text-gray-600',
 };
 
 export function Badge({
