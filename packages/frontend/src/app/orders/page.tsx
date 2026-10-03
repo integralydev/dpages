@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Copy, Printer } from 'lucide-react';
+import { Copy, FileText, Printer } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DataCard, DataCardActions, DataCardField, DataCardGrid } from '@/components/ui/DataCard';
@@ -20,6 +20,8 @@ import {
   api,
   ApiError,
   obtenirTotesLesPagines,
+  type ClientApi,
+  type ComandaDetallApi,
   type ComandaDuplicadaApi,
   type ComandaResumApi,
   type RespostaPaginada,
@@ -27,7 +29,7 @@ import {
 import { origenBadgeVariant } from '@/lib/comandaOrigen';
 import { formatData } from '@/lib/dates';
 import { duplicarComandes } from '@/lib/duplicarComandes';
-import { descarregarPdfLlistatComandes } from '@/lib/ordersPdf';
+import { descarregarPdfComandes, descarregarPdfLlistatComandes } from '@/lib/ordersPdf';
 import { ResultatDuplicatDialog } from './ResultatDuplicatDialog';
 
 const ALL = 'Tots';
@@ -256,6 +258,37 @@ export default function OrdersPage() {
     }
   }
 
+  // Tasca 13: detall de les comandes seleccionades en PDF (una per pàgina).
+  const [isPrintingOrders, setIsPrintingOrders] = useState(false);
+
+  async function handlePrintOrders() {
+    setIsPrintingOrders(true);
+    setPrintError(null);
+    try {
+      const [comandes, clients] = await Promise.all([
+        Promise.all(
+          seleccionades.map((order) => api.get<ComandaDetallApi>(`/comandes/${order.id}`)),
+        ),
+        obtenirTotesLesPagines((pagina) =>
+          api.get<RespostaPaginada<ClientApi>>('/clients', { mida: 200, pagina }),
+        ),
+      ]);
+      await descarregarPdfComandes({
+        comandes,
+        clients: new Map(clients.map((client) => [client.id, client])),
+        originLabel,
+      });
+    } catch (caught) {
+      setPrintError(
+        caught instanceof ApiError
+          ? `No s'han pogut imprimir les comandes: ${caught.message}`
+          : "No s'han pogut imprimir les comandes.",
+      );
+    } finally {
+      setIsPrintingOrders(false);
+    }
+  }
+
   async function handleConfirmIncidence() {
     if (!incidenceTarget) return;
     setIsMarkingIncidence(true);
@@ -293,6 +326,20 @@ export default function OrdersPage() {
                 : seleccionades.length > 1
                   ? `Duplicar comanda (${seleccionades.length})`
                   : 'Duplicar comanda'}
+            </button>
+            <button
+              type="button"
+              onClick={handlePrintOrders}
+              disabled={isPrintingOrders || seleccionades.length === 0}
+              title={seleccionades.length === 0 ? 'Selecciona les comandes a imprimir' : undefined}
+              className="flex items-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <FileText className="h-4 w-4" />
+              {isPrintingOrders
+                ? 'Generant PDF...'
+                : seleccionades.length > 1
+                  ? `Imprimir comanda (${seleccionades.length})`
+                  : 'Imprimir comanda'}
             </button>
             <button
               type="button"

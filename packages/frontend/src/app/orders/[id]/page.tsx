@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, Copy } from 'lucide-react';
+import { ArrowLeft, Copy, FileText } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
@@ -15,6 +15,7 @@ import { useOrigensComanda } from '@/hooks/useOrigensComanda';
 import { useRates } from '@/hooks/useRates';
 import { api, ApiError, type ComandaDetallApi, type ComandaDuplicadaApi } from '@/lib/api';
 import { duplicarComandes } from '@/lib/duplicarComandes';
+import { descarregarPdfComandes } from '@/lib/ordersPdf';
 import { OrderForm, type OrderFormHandle } from '../OrderForm';
 import { ResultatDuplicatDialog } from '../ResultatDuplicatDialog';
 
@@ -212,6 +213,26 @@ export default function OrderDetailPage() {
     }
   }
 
+  // Tasca 13: la comanda desada, en PDF.
+  const [isPrinting, setIsPrinting] = useState(false);
+
+  async function handlePrint() {
+    if (!order) return;
+    setIsPrinting(true);
+    setDuplicateError(null);
+    try {
+      await descarregarPdfComandes({
+        comandes: [order],
+        clients: new Map(clients.map((client) => [client.id, client])),
+        originLabel: (codi) => origins.find((origin) => origin.codi === codi)?.nom ?? codi,
+      });
+    } catch {
+      setDuplicateError("No s'ha pogut generar el PDF de la comanda.");
+    } finally {
+      setIsPrinting(false);
+    }
+  }
+
   async function handleConfirmIncidence() {
     if (!order) return;
     setIsMarkingIncidence(true);
@@ -266,6 +287,16 @@ export default function OrderDetailPage() {
                   Marcar com a incidència
                 </button>
               )}
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={isPrinting || hasUnsavedChanges}
+              title={hasUnsavedChanges ? "Desa els canvis abans d'imprimir la comanda" : undefined}
+              className="flex items-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <FileText className="h-4 w-4" />
+              {isPrinting ? 'Generant PDF...' : 'Imprimir comanda'}
+            </button>
             <button
               type="button"
               onClick={handleDuplicate}
