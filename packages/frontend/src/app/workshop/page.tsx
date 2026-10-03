@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { CheckCheck, Printer } from 'lucide-react';
+import { Fragment, useMemo, useState } from 'react';
+import { CheckCheck, ChevronRight, Printer } from 'lucide-react';
 import { AsyncCombobox, type ComboboxOption } from '@/components/ui/AsyncCombobox';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ClearFiltersButton, FilterBar } from '@/components/ui/FilterBar';
@@ -14,11 +14,18 @@ import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { StatCard } from '@/components/ui/StatCard';
 import { useCatalog } from '@/hooks/useCatalog';
 import { useCategories } from '@/hooks/useCategories';
-import { type ToggleTreballResult, usePanellObrador } from '@/hooks/usePanellObrador';
+import {
+  type MarcarTotesResult,
+  type ToggleTreballResult,
+  usePanellObrador,
+  type WorkshopPanelFilters,
+} from '@/hooks/usePanellObrador';
+import { usePanellObradorAcumulat } from '@/hooks/usePanellObradorAcumulat';
 import {
   api,
   ApiError,
   type ClientApi,
+  type FilaPanellObradorAcumulatApi,
   type FilaPanellObradorApi,
   obtenirTotesLesPagines,
   type PanellObradorApi,
@@ -232,6 +239,123 @@ function WorkshopRow({
   );
 }
 
+type OnToggle = (
+  comandaId: number,
+  liniaId: number,
+  marcat: boolean,
+) => Promise<ToggleTreballResult>;
+type OnRequestUnmark = (line: FilaPanellObradorApi, toggle: OnToggle) => void;
+
+const LINE_HEADERS: { label: string; className: string }[] = [
+  { label: 'Agrupació producció', className: 'w-[10%] text-left' },
+  { label: 'Producte', className: 'w-[14%] text-left' },
+  { label: 'Envasat', className: 'w-[10%] text-left' },
+  { label: 'Format', className: 'w-[8%] text-left' },
+  { label: 'Client', className: 'w-[12%] text-left' },
+  { label: 'Data producció', className: 'w-[10%] text-left' },
+  { label: 'Unitats', className: 'w-[8%] text-right' },
+  { label: 'Pes (kg)', className: 'w-[9%] text-right' },
+  { label: 'Obs. producció', className: 'w-[14%] text-left' },
+];
+
+/**
+ * Tasca 29: les línies d'un producte quan se'n desplega la fila acumulada.
+ * Es demanen amb els mateixos filtres que la vista acumulada (més
+ * `producteId`), així que mai hi surten línies que no els compleixin.
+ */
+function ProducteLinies({
+  filters,
+  producteId,
+  vista,
+  onChanged,
+  onRequestUnmark,
+}: {
+  filters: WorkshopPanelFilters;
+  producteId: number;
+  vista: 'taula' | 'targetes';
+  /** Una línia s'ha marcat o desmarcat: cal refrescar els acumulats. */
+  onChanged: () => void;
+  onRequestUnmark: OnRequestUnmark;
+}) {
+  const { data, paginacio, setPagina, isLoading, error, toggleTreball } = usePanellObrador({
+    ...filters,
+    producteId,
+  });
+
+  const onToggle: OnToggle = async (comandaId, liniaId, marcat) => {
+    const result = await toggleTreball(comandaId, liniaId, marcat);
+    if (result.success) onChanged();
+    return result;
+  };
+  const requestUnmark = (line: FilaPanellObradorApi) => onRequestUnmark(line, onToggle);
+
+  if (isLoading) return <p className="px-3 py-2 text-sm text-gray-500">Carregant...</p>;
+  if (error) {
+    return (
+      <p className="px-3 py-2 text-sm text-red-600">
+        No s&apos;han pogut carregar les línies: {error.message}
+      </p>
+    );
+  }
+
+  const pagination = paginacio && paginacio.totalPagines > 1 && (
+    <Pagination paginacio={paginacio} onPageChange={setPagina} />
+  );
+
+  if (vista === 'targetes') {
+    return (
+      <div className="flex flex-col gap-3">
+        {data.map((line) => (
+          <WorkshopCard
+            key={line.liniaId}
+            line={line}
+            onToggle={onToggle}
+            onRequestUnmark={requestUnmark}
+          />
+        ))}
+        {pagination}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <table className="w-full table-fixed rounded-lg border border-gray-200 bg-white text-sm">
+        <thead className="border-b border-gray-200">
+          <tr>
+            <th className="w-[5%] px-3 py-2">
+              <span className="sr-only">Treballada</span>
+            </th>
+            {LINE_HEADERS.map((header) => (
+              <th
+                key={header.label}
+                className={`${header.className} px-3 py-2 font-medium text-gray-500 break-words`}
+              >
+                {header.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((line) => (
+            <WorkshopRow
+              key={line.liniaId}
+              line={line}
+              onToggle={onToggle}
+              onRequestUnmark={requestUnmark}
+            />
+          ))}
+        </tbody>
+      </table>
+      {pagination}
+    </>
+  );
+}
+
+function liniesFetesText(grup: FilaPanellObradorAcumulatApi): string {
+  return `${grup.linies} ${grup.linies === 1 ? 'línia' : 'línies'} · ${grup.liniesFetes} ${grup.liniesFetes === 1 ? 'feta' : 'fetes'}`;
+}
+
 export default function WorkshopPage() {
   const { data: catalog } = useCatalog();
 
@@ -333,17 +457,41 @@ export default function WorkshopPage() {
   // /panells/obrador, ORDER BY treballat_a IS NOT NULL ASC), sense cap
   // paràmetre — confirmat amb curl real abans de treure el sort client-side
   // que hi havia acá com a pedaç temporal.
-  const {
-    data,
-    totals,
-    paginacio,
-    setPagina,
-    isLoading,
-    error,
-    refetch,
-    toggleTreball,
-    marcarTotesFetes,
-  } = usePanellObrador(filters);
+  // Tasca 29: per defecte, una fila per producte; la fletxa en desplega
+  // les línies (que es carreguen amb els mateixos filtres).
+  const { data: grups, totals, isLoading, error, refetch } = usePanellObradorAcumulat(filters);
+  const [obertes, setObertes] = useState<Set<number>>(() => new Set());
+  // Canvia després de "marcar totes": les files obertes es tornen a carregar.
+  const [versio, setVersio] = useState(0);
+
+  function toggleObert(producteId: number) {
+    setObertes((actual) => {
+      const nova = new Set(actual);
+      if (nova.has(producteId)) nova.delete(producteId);
+      else nova.add(producteId);
+      return nova;
+    });
+  }
+
+  // Tasca 26: marca com a fetes totes les pendents dels filtres actius.
+  async function marcarTotesFetes(): Promise<MarcarTotesResult> {
+    try {
+      // `treball` no aplica: l'acció ja només toca les pendents.
+      const filtresAccio = { ...filters };
+      delete filtresAccio.treball;
+      const resposta = await api.post<{ marcades: number; congeladesOmeses: number }>(
+        '/panells/obrador/marcar-fets',
+        {},
+        filtresAccio,
+      );
+      refetch();
+      setVersio((actual) => actual + 1);
+      return { success: true, ...resposta };
+    } catch (caught) {
+      const missatge = caught instanceof ApiError ? caught.message : "No s'han pogut marcar.";
+      return { success: false, error: missatge };
+    }
+  }
 
   // Tasca 26: marcar totes les pendents dels filtres actius, amb confirmació.
   const [isConfirmingMarkAll, setIsConfirmingMarkAll] = useState(false);
@@ -414,14 +562,17 @@ export default function WorkshopPage() {
   // Consistència amb Empaquetat (lineToUndo, packaging/page.tsx) — mateix
   // patró: estat del diàleg alçat a la pàgina, un sol ConfirmDialog al
   // final del JSX en comptes d'un per fila.
-  const [lineToUnmark, setLineToUnmark] = useState<FilaPanellObradorApi | null>(null);
+  const [lineToUnmark, setLineToUnmark] = useState<{
+    line: FilaPanellObradorApi;
+    toggle: OnToggle;
+  } | null>(null);
   const [unmarkError, setUnmarkError] = useState<string | null>(null);
   const [isUnmarking, setIsUnmarking] = useState(false);
 
-  function handleRequestUnmark(line: FilaPanellObradorApi) {
+  const handleRequestUnmark: OnRequestUnmark = (line, toggle) => {
     setUnmarkError(null);
-    setLineToUnmark(line);
-  }
+    setLineToUnmark({ line, toggle });
+  };
 
   function handleCancelUnmark() {
     setLineToUnmark(null);
@@ -432,7 +583,8 @@ export default function WorkshopPage() {
     if (!lineToUnmark) return;
     setIsUnmarking(true);
     setUnmarkError(null);
-    const result = await toggleTreball(lineToUnmark.comandaId, lineToUnmark.liniaId, false);
+    const { line, toggle } = lineToUnmark;
+    const result = await toggle(line.comandaId, line.liniaId, false);
     setIsUnmarking(false);
     if (result.success) {
       setLineToUnmark(null);
@@ -591,67 +743,143 @@ export default function WorkshopPage() {
 
       {!isLoading && !error && (
         <>
+          {grups.length === 0 && (
+            <p className="text-sm text-gray-500">Cap línia compleix els filtres.</p>
+          )}
+
           <div className="flex flex-col gap-3 md:hidden">
-            {data.map((line) => (
-              <WorkshopCard
-                key={line.liniaId}
-                line={line}
-                onToggle={toggleTreball}
-                onRequestUnmark={handleRequestUnmark}
-              />
-            ))}
+            {grups.map((grup) => {
+              const oberta = obertes.has(grup.producte.id);
+              return (
+                <div key={grup.producte.id} className="flex flex-col gap-3">
+                  <button
+                    type="button"
+                    onClick={() => toggleObert(grup.producte.id)}
+                    aria-expanded={oberta}
+                    className={`${leftBorderClass(grup.liniesFetes === grup.linies)} flex items-start gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left`}
+                  >
+                    <ChevronRight
+                      aria-hidden
+                      className={`mt-1 h-4 w-4 shrink-0 text-gray-500 transition-transform ${oberta ? 'rotate-90' : ''}`}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs font-medium tracking-wide text-gray-500 uppercase">
+                        {grup.agrupacioProduccio ?? '—'}
+                      </span>
+                      <span className="block font-semibold text-gray-900">
+                        {grup.producte.descripcio}
+                      </span>
+                      <span className="block text-xs text-gray-500">{liniesFetesText(grup)}</span>
+                    </span>
+                    <span className="shrink-0 text-right text-sm text-gray-900">
+                      <span className="block">{formatDecimal(grup.unitats, 2)} u.</span>
+                      <span className="block">{formatDecimal(grup.kg, 3)} kg</span>
+                    </span>
+                  </button>
+                  {oberta && (
+                    <div className="pl-4">
+                      <ProducteLinies
+                        key={versio}
+                        filters={filters}
+                        producteId={grup.producte.id}
+                        vista="targetes"
+                        onChanged={refetch}
+                        onRequestUnmark={handleRequestUnmark}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           <div className="hidden overflow-x-auto rounded-xl border border-gray-200 bg-white md:block">
             <table className="w-full table-fixed text-sm">
               <thead className="border-b border-gray-200">
                 <tr>
-                  <th className="w-[5%] px-3 py-2 text-center font-medium text-gray-500 break-words">
-                    <span className="sr-only">Treballada</span>
+                  <th className="w-[5%] px-3 py-2">
+                    <span className="sr-only">Desplegar</span>
                   </th>
-                  <th className="w-[10%] px-3 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[25%] px-3 py-2 text-left font-medium text-gray-500 break-words">
                     Agrupació producció
                   </th>
-                  <th className="w-[14%] px-3 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[40%] px-3 py-2 text-left font-medium text-gray-500 break-words">
                     Producte
                   </th>
-                  <th className="w-[10%] px-3 py-2 text-left font-medium text-gray-500 break-words">
-                    Envasat
-                  </th>
-                  <th className="w-[8%] px-3 py-2 text-left font-medium text-gray-500 break-words">
-                    Format
-                  </th>
-                  <th className="w-[12%] px-3 py-2 text-left font-medium text-gray-500 break-words">
-                    Client
-                  </th>
-                  <th className="w-[10%] px-3 py-2 text-left font-medium text-gray-500 break-words">
-                    Data producció
-                  </th>
-                  <th className="w-[8%] px-3 py-2 text-right font-medium text-gray-500 break-words">
+                  <th className="w-[15%] px-3 py-2 text-right font-medium text-gray-500 break-words">
                     Unitats
                   </th>
-                  <th className="w-[9%] px-3 py-2 text-right font-medium text-gray-500 break-words">
+                  <th className="w-[15%] px-3 py-2 text-right font-medium text-gray-500 break-words">
                     Pes (kg)
-                  </th>
-                  <th className="w-[14%] px-3 py-2 text-left font-medium text-gray-500 break-words">
-                    Obs. producció
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {data.map((line) => (
-                  <WorkshopRow
-                    key={line.liniaId}
-                    line={line}
-                    onToggle={toggleTreball}
-                    onRequestUnmark={handleRequestUnmark}
-                  />
-                ))}
+                {grups.map((grup) => {
+                  const oberta = obertes.has(grup.producte.id);
+                  return (
+                    <Fragment key={grup.producte.id}>
+                      <tr
+                        onClick={() => toggleObert(grup.producte.id)}
+                        className="cursor-pointer border-b border-gray-100 hover:bg-gray-50"
+                      >
+                        <td
+                          className={`${leftBorderClass(grup.liniesFetes === grup.linies)} px-3 py-3 text-center`}
+                        >
+                          <button
+                            type="button"
+                            aria-expanded={oberta}
+                            aria-label={
+                              oberta
+                                ? `Plegar les línies de ${grup.producte.descripcio}`
+                                : `Desplegar les línies de ${grup.producte.descripcio}`
+                            }
+                            className="rounded p-1 text-gray-500 hover:bg-gray-100"
+                          >
+                            <ChevronRight
+                              aria-hidden
+                              className={`h-4 w-4 transition-transform ${oberta ? 'rotate-90' : ''}`}
+                            />
+                          </button>
+                        </td>
+                        <td className="px-3 py-3 break-words text-gray-700">
+                          {grup.agrupacioProduccio ?? '—'}
+                        </td>
+                        <td className="px-3 py-3 break-words">
+                          <span className="block font-semibold text-gray-900">
+                            {grup.producte.descripcio}
+                          </span>
+                          <span className="block text-xs text-gray-500">
+                            {liniesFetesText(grup)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-right text-gray-900">
+                          {formatDecimal(grup.unitats, 2)}
+                        </td>
+                        <td className="px-3 py-3 text-right font-semibold text-gray-900">
+                          {formatDecimal(grup.kg, 3)}
+                        </td>
+                      </tr>
+                      {oberta && (
+                        <tr className="border-b border-gray-100">
+                          <td colSpan={5} className="bg-gray-50 px-3 py-3">
+                            <ProducteLinies
+                              key={versio}
+                              filters={filters}
+                              producteId={grup.producte.id}
+                              vista="taula"
+                              onChanged={refetch}
+                              onRequestUnmark={handleRequestUnmark}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-
-          {paginacio && <Pagination paginacio={paginacio} onPageChange={setPagina} />}
         </>
       )}
 

@@ -55,6 +55,8 @@ export type {
   PanellOficinaApi,
   FilaPanellOficinaApi,
   TotalsPanellOficinaApi,
+  PanellObradorAcumulatApi,
+  FilaPanellObradorAcumulatApi,
   PanellObradorApi,
   FilaPanellObradorApi,
   TotalsPanellObradorApi,
