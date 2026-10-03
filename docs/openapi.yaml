@@ -1169,6 +1169,43 @@ paths:
               schema: { $ref: '#/components/schemas/PanellProduccio' }
         '400': { $ref: '#/components/responses/Validacio' }
 
+  /api/v1/panells/obrador/acumulat:
+    get:
+      tags: [Panells]
+      summary: Panel de obrador acumulado por producto (tarea 29)
+      description: >-
+        Una fila por producto con la suma de unidades y kg de las líneas
+        que cumplen los filtros, que son los mismos de GET
+        /panells/obrador. Ordenado por agrupación de producción (nulas al
+        final) y descripción. Sin paginar. El detalle de un producto se
+        pide a GET /panells/obrador con producteId.
+      responses:
+        '200':
+          description: Filas acumuladas y totales
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totals: { type: object }
+                  dades:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        producte:
+                          type: object
+                          properties:
+                            id: { type: integer }
+                            codi: { type: string, nullable: true }
+                            descripcio: { type: string }
+                        agrupacioProduccio: { type: string, nullable: true }
+                        unitats: { type: string }
+                        kg: { type: string }
+                        linies: { type: integer }
+                        liniesFetes: { type: integer }
+        '400': { $ref: '#/components/responses/Validacio' }
+
   /api/v1/panells/obrador/marcar-fets:
     post:
       tags: [Panells]

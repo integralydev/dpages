@@ -1,5 +1,6 @@
 import type {
   FilaPanellEmpaquetatApi,
+  FilaPanellObradorAcumulatApi,
   FilaPanellObradorApi,
   FilaPanellOficinaApi,
   PanellProduccioFilaApi,
@@ -149,6 +150,18 @@ export async function construirFiltresObrador(
     valors.push(query.tipus);
   }
   afegirFiltreProductes(query.producte, condicions, valors);
+  // Tasca 29: les línies d'un sol producte (desplegar una fila de la vista
+  // acumulada), per id públic.
+  if (query.producteId !== undefined && query.producteId !== '') {
+    const producteId =
+      typeof query.producteId === 'string' ? parsearIdPublic(query.producteId) : null;
+    if (producteId === null) {
+      enviarValidacio(reply, 'producteId ha de ser un enter');
+      return null;
+    }
+    condicions.push(`p.id_seq = $${valors.length + 1}`);
+    valors.push(producteId);
+  }
   if (typeof query.format === 'string' && query.format.trim() !== '') {
     condicions.push(`p.format = $${valors.length + 1}`);
     valors.push(query.format.trim());
@@ -511,6 +524,82 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         },
         dades,
         paginacio: construirPaginacio(pagina, mida, Number(totals.rows[0]?.linies ?? 0)),
+      };
+    },
+  );
+
+  // Tasca 29 (03/10/2026): vista per defecte de l'Obrador, una fila per
+  // producte amb la suma de les línies que compleixen els filtres. Mateixos
+  // filtres i mateixos totals que GET /panells/obrador; sense paginar (com
+  // a molt, una fila per article del catàleg).
+  fastify.get(
+    '/panells/obrador/acumulat',
+    { preHandler: crearGuardaModul('panell-obrador') },
+    async (req, reply) => {
+      const filtres = await construirFiltresObrador(reply, req.query as Record<string, unknown>);
+      if (filtres === null) return;
+      const { condicions, valors } = filtres;
+
+      const files = await pool.query<{
+        producte_id_seq: string;
+        producte_codi: string | null;
+        producte_descripcio: string;
+        agrupacio_produccio: string | null;
+        unitats: string;
+        kg: string;
+        linies: string;
+        linies_fetes: string;
+      }>(
+        `SELECT p.id_seq AS producte_id_seq, p.codi AS producte_codi,
+                p.descripcio AS producte_descripcio, p.agrupacio_produccio,
+                SUM(cl.unitats_demanades)::numeric(10,2) AS unitats,
+                SUM(cl.pes_calculat_kg)::numeric(14,3) AS kg,
+                count(*) AS linies,
+                count(*) FILTER (WHERE cl.treballat_a IS NOT NULL) AS linies_fetes
+         FROM comanda_linia cl
+         JOIN comanda c ON c.id = cl.comanda_id
+         JOIN producte p ON p.id = cl.producte_id
+         WHERE ${condicions.join(' AND ')}
+         GROUP BY p.id
+         ORDER BY p.agrupacio_produccio ASC NULLS LAST, p.descripcio ASC`,
+        valors,
+      );
+
+      const dades: FilaPanellObradorAcumulatApi[] = files.rows.map((f) => ({
+        producte: {
+          id: Number(f.producte_id_seq),
+          codi: f.producte_codi,
+          descripcio: f.producte_descripcio,
+        },
+        agrupacioProduccio: f.agrupacio_produccio,
+        unitats: f.unitats,
+        kg: f.kg,
+        linies: Number(f.linies),
+        liniesFetes: Number(f.linies_fetes),
+      }));
+
+      // Els totals surten de les mateixes files (mateixos filtres).
+      const linies = dades.reduce((total, fila) => total + fila.linies, 0);
+      const liniesFetes = dades.reduce((total, fila) => total + fila.liniesFetes, 0);
+      const totals = await pool.query<{ total_unitats: string; total_kg: string }>(
+        `SELECT COALESCE(SUM(cl.unitats_demanades), 0)::numeric(10,2) AS total_unitats,
+                COALESCE(SUM(cl.pes_calculat_kg), 0)::numeric(14,3) AS total_kg
+         FROM comanda_linia cl
+         JOIN comanda c ON c.id = cl.comanda_id
+         JOIN producte p ON p.id = cl.producte_id
+         WHERE ${condicions.join(' AND ')}`,
+        valors,
+      );
+
+      return {
+        totals: {
+          linies,
+          totalUnitats: totals.rows[0]?.total_unitats ?? '0.00',
+          totalKg: totals.rows[0]?.total_kg ?? '0.000',
+          liniesFetes,
+          liniesPendents: linies - liniesFetes,
+        },
+        dades,
       };
     },
   );

@@ -599,6 +599,29 @@ export interface FilaPanellObradorApi {
   treballatPer: ReferenciaApi | null;
 }
 
+/**
+ * Tasca 29 (03/10/2026): una fila per producte a `GET /panells/obrador/acumulat`,
+ * amb la suma de les línies que compleixen els filtres (els mateixos de
+ * `GET /panells/obrador`). El detall es demana a `GET /panells/obrador`
+ * amb `producteId`.
+ */
+export interface FilaPanellObradorAcumulatApi {
+  producte: { id: number; codi: string | null; descripcio: string };
+  agrupacioProduccio: string | null;
+  /** SUM de `unitats_demanades`, NUMERIC(10,2) com a string. */
+  unitats: string;
+  /** SUM de `pes_calculat_kg`, NUMERIC(14,3) com a string. */
+  kg: string;
+  linies: number;
+  liniesFetes: number;
+}
+
+export interface PanellObradorAcumulatApi {
+  totals: TotalsPanellObradorApi;
+  /** Sense paginar: com a molt, una fila per article del catàleg. */
+  dades: FilaPanellObradorAcumulatApi[];
+}
+
 export interface PanellObradorApi {
   totals: TotalsPanellObradorApi;
   dades: FilaPanellObradorApi[];

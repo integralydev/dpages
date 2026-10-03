@@ -1269,6 +1269,39 @@ Filtros: `?dataProduccioDes=&dataProduccioFins=&categoriaId=&tipus=&producte=&fo
 > Otro valor de `observacions`/`treball` es `400 VALIDACIO`. Los `totals`
 > traen además `liniesFetes` y `liniesPendents`.
 >
+> - `producteId` (tarea 29, 03/10/2026): las líneas de un solo producto
+>   (id público). Es lo que usa la pantalla para desplegar una fila de la
+>   vista acumulada. No numérico: `400 VALIDACIO`.
+
+**`GET /panells/obrador/acumulat`** (tarea 29, 03/10/2026) — vista por
+defecto de la pantalla: una fila por producto con la suma de las líneas que
+cumplen los filtros (los mismos de `GET /panells/obrador`, incluido
+`treball`). Ordenada por `agrupacioProduccio` (las nulas al final) y
+descripción. Sin paginar: como mucho, una fila por artículo. Los `totals`
+son los mismos que los de `GET /panells/obrador` con esos filtros.
+
+```json
+{
+  "totals": {
+    "linies": 572,
+    "liniesFetes": 0,
+    "liniesPendents": 572,
+    "totalUnitats": "2015.90",
+    "totalKg": "1044.265"
+  },
+  "dades": [
+    {
+      "producte": { "id": 348, "codi": "CAPLLSN", "descripcio": "CAP LLOM SENCER NORMAL" },
+      "agrupacioProduccio": "CAP LLOM",
+      "unitats": "14.00",
+      "kg": "28.000",
+      "linies": 5,
+      "liniesFetes": 0
+    }
+  ]
+}
+```
+
 > Cada fila trae además `agrupacioProduccio` (`producte.agrupacio_produccio`,
 > `null` si el producto no tiene), que el panel muestra antes del producto.
 >

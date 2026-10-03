@@ -1,6 +1,7 @@
 import type {
   ComandaDetallApi,
   PanellEmpaquetatApi,
+  PanellObradorAcumulatApi,
   PanellObradorApi,
   PanellOficinaApi,
 } from '@dpages/shared';
@@ -1184,6 +1185,109 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
         url: `/api/v1/comandes/${comandaId}`,
         payload: { estat: 'tancada' },
       });
+
+      await fastify.close();
+    });
+  });
+
+  describe('tasca 29 — Obrador acumulat per producte', () => {
+    it('suma només les línies que compleixen els filtres, i producteId en desplega el detall', async () => {
+      const fastify = construirServidor();
+      const productes: number[] = [];
+      for (const [codi, descripcio] of [
+        ['T29-B', 'T29 Producte B'],
+        ['T29-A', 'T29 Producte A'],
+      ]) {
+        const fila = await entorn.poolTest.query<{ id_seq: string }>(
+          `INSERT INTO producte (codi, descripcio, pes_kg, preu_venda, tipus, agrupacio_produccio)
+           VALUES ($1, $2, '0.500', '5.00', 'simple', 'AGRUP-T29') RETURNING id_seq`,
+          [codi, descripcio],
+        );
+        productes.push(Number(fila.rows[0]!.id_seq));
+      }
+      const [producteB, producteA] = productes as [number, number];
+      // B: dues línies (2 i 3 unitats); A: una línia (4 unitats) d'un altre dia.
+      for (const [producteId, unitatsDemanades, dia] of [
+        [producteB, 2, '2026-08-11'],
+        [producteB, 3, '2026-08-11'],
+        [producteA, 4, '2026-08-12'],
+      ] as const) {
+        await fastify.inject({
+          method: 'POST',
+          url: '/api/v1/comandes',
+          payload: {
+            dataComanda: '2026-08-01',
+            dataLliurament: '2026-08-30T00:00:00Z',
+            origen: 'manual',
+            linies: [{ dataProduccio: `${dia}T00:00:00Z`, producteId, unitatsDemanades }],
+          },
+        });
+      }
+      // Una línia de B ja feta.
+      await entorn.poolTest.query(
+        `UPDATE comanda_linia SET treballat_a = now()
+         WHERE id = (SELECT cl.id FROM comanda_linia cl JOIN producte p ON p.id = cl.producte_id
+                     WHERE p.id_seq = $1 AND cl.unitats_demanades = 2)`,
+        [producteB],
+      );
+
+      const acumulat = async (q: string) =>
+        cuerpoJson<PanellObradorAcumulatApi>(
+          await fastify.inject({
+            method: 'GET',
+            url: `/api/v1/panells/obrador/acumulat?agrupacioProduccio=AGRUP-T29${q}`,
+          }),
+        );
+
+      const tot = await acumulat('');
+      // Ordenat per agrupació i producte: A abans que B.
+      expect(tot.dades).toEqual([
+        {
+          producte: { id: producteA, codi: 'T29-A', descripcio: 'T29 Producte A' },
+          agrupacioProduccio: 'AGRUP-T29',
+          unitats: '4.00',
+          kg: '2.000',
+          linies: 1,
+          liniesFetes: 0,
+        },
+        {
+          producte: { id: producteB, codi: 'T29-B', descripcio: 'T29 Producte B' },
+          agrupacioProduccio: 'AGRUP-T29',
+          unitats: '5.00',
+          kg: '2.500',
+          linies: 2,
+          liniesFetes: 1,
+        },
+      ]);
+      expect(tot.totals).toEqual({
+        linies: 3,
+        totalUnitats: '9.00',
+        totalKg: '4.500',
+        liniesFetes: 1,
+        liniesPendents: 2,
+      });
+
+      // Filtres: només les pendents del dia 11 → només B, amb una línia.
+      const filtrat = await acumulat(
+        '&treball=pendents&dataProduccioDes=2026-08-11&dataProduccioFins=2026-08-11',
+      );
+      expect(filtrat.dades).toHaveLength(1);
+      expect(filtrat.dades[0]).toMatchObject({ unitats: '3.00', linies: 1, liniesFetes: 0 });
+
+      // Desplegar B amb els mateixos filtres: només la línia que els compleix.
+      const detall = cuerpoJson<PanellObradorApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: `/api/v1/panells/obrador?producteId=${producteB}&treball=pendents`,
+        }),
+      );
+      expect(detall.dades.map((f) => [f.producte.id, f.unitats])).toEqual([[producteB, '3.00']]);
+
+      const invalid = await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/obrador/acumulat?producteId=abc',
+      });
+      expect(invalid.statusCode).toBe(400);
 
       await fastify.close();
     });
