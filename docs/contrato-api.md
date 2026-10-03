@@ -2109,6 +2109,13 @@ bueno, porque el visto bueno se convierte en automatismo.
 **No se puede guardar sin confirmar.** Rellenar los campos y no marcar la
 confirmación no es un estado válido.
 
+**Cierre automático (tarea 16, 03/10/2026).** Al confirmar la última línea
+activa (no borrada) de una comanda en `oberta` o `en_proces`, la comanda
+pasa sola a `tancada`. Las de otros estados (`esborrany`, `amb_incidencia`,
+`cancellada`) no se tocan. Al revés, `PATCH .../lliurament/desfer` sobre una
+línea de una comanda `tancada` la devuelve a `oberta`. La respuesta de los
+dos endpoints no cambia: el estado nuevo se ve en `GET /comandes/:id`.
+
 **Por qué existe todo esto:** por mermas se envía menos de lo pedido —una
 longaniza sale más corta, falta materia prima— y la diferencia entre lo pedido
 y lo enviado determina si se emite un abono o se cobra de más. Es conciliación

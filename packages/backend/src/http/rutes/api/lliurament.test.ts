@@ -198,4 +198,85 @@ describe('API negoci — PATCH .../lliurament (Postgres real, esquema aislado)',
 
     await fastify.close();
   });
+
+  describe('tasca 16 — la comanda es tanca sola quan totes les línies estan lliurades', () => {
+    async function crearComandaDuesLinies(fastify: ReturnType<typeof construirServidor>) {
+      const codi = `T16-${randomUUID().slice(0, 8)}`;
+      const producte = await entorn.poolTest.query<{ id_seq: string }>(
+        `INSERT INTO producte (codi, descripcio, pes_kg, preu_venda, tipus)
+         VALUES ($1, 'Llom fresc de porc', '1.250', '9.86', 'simple') RETURNING id_seq`,
+        [codi],
+      );
+      const producteId = Number(producte.rows[0]!.id_seq);
+      const res = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [
+            { producteId, unitatsDemanades: 1 },
+            { producteId, unitatsDemanades: 2 },
+            { producteId, unitatsDemanades: 3 },
+          ],
+        },
+      });
+      const cos = cuerpoJson<ComandaDetallApi>(res);
+      // La tercera línia s'esborra: no ha de comptar.
+      await fastify.inject({
+        method: 'DELETE',
+        url: `/api/v1/comandes/${cos.id}/linies/${cos.linies[2]!.id}`,
+      });
+      return { id: cos.id, linies: cos.linies.slice(0, 2).map((l) => l.id) };
+    }
+
+    const confirmar = (f: ReturnType<typeof construirServidor>, c: number, l: number) =>
+      f.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${c}/linies/${l}/lliurament`,
+        payload: { unitatsLliurades: 1, kgLliurats: '1.250' },
+      });
+    const estat = async (f: ReturnType<typeof construirServidor>, c: number) =>
+      cuerpoJson<ComandaDetallApi>(await f.inject({ method: 'GET', url: `/api/v1/comandes/${c}` }))
+        .estat;
+
+    it("es tanca en confirmar l'última línia activa i es reobre si se'n desfà una", async () => {
+      const fastify = construirServidor();
+      const comanda = await crearComandaDuesLinies(fastify);
+
+      await confirmar(fastify, comanda.id, comanda.linies[0]!);
+      expect(await estat(fastify, comanda.id)).toBe('oberta');
+      await confirmar(fastify, comanda.id, comanda.linies[1]!);
+      expect(await estat(fastify, comanda.id)).toBe('tancada');
+
+      const desfer = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comanda.id}/linies/${comanda.linies[1]!}/lliurament/desfer`,
+      });
+      expect(desfer.statusCode).toBe(200);
+      expect(await estat(fastify, comanda.id)).toBe('oberta');
+
+      await fastify.close();
+    });
+
+    it.each(['en_proces', 'cancellada', 'esborrany', 'amb_incidencia'])(
+      'des de %s',
+      async (estatInicial) => {
+        const fastify = construirServidor();
+        const comanda = await crearComandaDuesLinies(fastify);
+        await entorn.poolTest.query(`UPDATE comanda SET estat = $2 WHERE id_seq = $1`, [
+          comanda.id,
+          estatInicial,
+        ]);
+
+        for (const linia of comanda.linies) await confirmar(fastify, comanda.id, linia);
+
+        expect(await estat(fastify, comanda.id)).toBe(
+          estatInicial === 'en_proces' ? 'tancada' : estatInicial,
+        );
+        await fastify.close();
+      },
+    );
+  });
 });

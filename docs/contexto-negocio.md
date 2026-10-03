@@ -89,6 +89,10 @@ Puesta en producción objetivo: **finales de septiembre de 2026**.
   los pedidos cancelados quedan fuera de todos los paneles, pero se siguen
   viendo en la pantalla de pedidos; en el Panel Oficina sólo aparecen si se
   filtra explícitamente por ese estado).
+- Cierre automático (tarea 16, 03/10/2026): cuando Empaquetat confirma la
+  última línea de un pedido `oberta` o `en_proces`, el pedido pasa solo a
+  `tancada`; si después se deshace la confirmación de una línea, vuelve a
+  `oberta`.
 - Fecha de producción de los pedidos nuevos de WooCommerce (tarea 39,
   03/10/2026): los que entran de martes a las 16:00 a domingo a las 24:00
   (hora de Cataluña) se producen el lunes siguiente; los que entran el
