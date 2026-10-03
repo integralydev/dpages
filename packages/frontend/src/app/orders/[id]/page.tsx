@@ -15,6 +15,7 @@ import { useOrigensComanda } from '@/hooks/useOrigensComanda';
 import { useRates } from '@/hooks/useRates';
 import { api, ApiError, type ComandaDetallApi, type ComandaDuplicadaApi } from '@/lib/api';
 import { duplicarComandes } from '@/lib/duplicarComandes';
+import { eliminarComanda, potEliminarComanda } from '@/lib/eliminarComanda';
 import { descarregarPdfComandes } from '@/lib/ordersPdf';
 import { OrderForm, type OrderFormHandle } from '../OrderForm';
 import { ResultatDuplicatDialog } from '../ResultatDuplicatDialog';
@@ -233,6 +234,27 @@ export default function OrderDetailPage() {
     }
   }
 
+  // Tasca 14: eliminar la comanda (només si no té res generat).
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleConfirmDelete() {
+    if (!order) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await eliminarComanda(order.id);
+      setIsDirty(false);
+      router.push('/orders');
+    } catch (caught) {
+      setDeleteError(
+        caught instanceof ApiError ? caught.message : "No s'ha pogut eliminar la comanda.",
+      );
+      setIsDeleting(false);
+    }
+  }
+
   async function handleConfirmIncidence() {
     if (!order) return;
     setIsMarkingIncidence(true);
@@ -271,7 +293,19 @@ export default function OrderDetailPage() {
           {order?.congelada && <Badge variant="neutral">Congelada</Badge>}
         </div>
         {order && (
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {potEliminarComanda(order) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteError(null);
+                  setDeleteOpen(true);
+                }}
+                className="rounded-full border border-red-300 px-5 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50"
+              >
+                Eliminar comanda
+              </button>
+            )}
             {order.estat !== 'amb_incidencia' &&
               order.estat !== 'cancellada' &&
               !order.congelada && (
@@ -359,6 +393,21 @@ export default function OrderDetailPage() {
           }}
         />
       )}
+
+      <ConfirmDialog
+        isOpen={deleteOpen}
+        title="Eliminar comanda"
+        message={`Vols eliminar la comanda ${order?.num ?? ''}? S'esborrarà amb totes les seves línies i no es pot desfer.`}
+        confirmLabel="Eliminar"
+        cancelLabel="Cancel·lar"
+        errorMessage={deleteError}
+        isConfirming={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => {
+          setDeleteOpen(false);
+          setDeleteError(null);
+        }}
+      />
 
       <ResultatDuplicatDialog
         creades={duplicades}

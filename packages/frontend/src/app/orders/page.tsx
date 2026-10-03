@@ -29,6 +29,7 @@ import {
 import { origenBadgeVariant } from '@/lib/comandaOrigen';
 import { formatData } from '@/lib/dates';
 import { duplicarComandes } from '@/lib/duplicarComandes';
+import { eliminarComanda, potEliminarComanda } from '@/lib/eliminarComanda';
 import { descarregarPdfComandes, descarregarPdfLlistatComandes } from '@/lib/ordersPdf';
 import { ResultatDuplicatDialog } from './ResultatDuplicatDialog';
 
@@ -45,6 +46,7 @@ function OrderCard({
   onToggleSelected,
   onOpen,
   onMarkIncidence,
+  onDelete,
 }: {
   order: ComandaResumApi;
   originLabel: (codi: string) => string;
@@ -52,6 +54,7 @@ function OrderCard({
   onToggleSelected: () => void;
   onOpen: () => void;
   onMarkIncidence: () => void;
+  onDelete: () => void;
 }) {
   return (
     <DataCard>
@@ -108,6 +111,15 @@ function OrderCard({
             className="flex-1 rounded-full border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
           >
             Marcar incidència
+          </button>
+        )}
+        {potEliminarComanda(order) && (
+          <button
+            type="button"
+            onClick={onDelete}
+            className="flex-1 rounded-full border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+          >
+            Eliminar
           </button>
         )}
       </DataCardActions>
@@ -289,6 +301,28 @@ export default function OrdersPage() {
     }
   }
 
+  // Tasca 14: eliminar una comanda des de la llista.
+  const [deleteTarget, setDeleteTarget] = useState<ComandaResumApi | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleConfirmDelete() {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await eliminarComanda(deleteTarget.id);
+      setDeleteTarget(null);
+      refetch();
+    } catch (caught) {
+      setDeleteError(
+        caught instanceof ApiError ? caught.message : "No s'ha pogut eliminar la comanda.",
+      );
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
   async function handleConfirmIncidence() {
     if (!incidenceTarget) return;
     setIsMarkingIncidence(true);
@@ -426,6 +460,10 @@ export default function OrdersPage() {
                   setIncidenceDetall('');
                   setIncidenceTarget(order);
                 }}
+                onDelete={() => {
+                  setDeleteError(null);
+                  setDeleteTarget(order);
+                }}
               />
             ))}
           </div>
@@ -447,13 +485,13 @@ export default function OrdersPage() {
                       className="h-4 w-4 accent-ink"
                     />
                   </th>
-                  <th className="w-[8%] px-2 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[7%] px-2 py-2 text-left font-medium text-gray-500 break-words">
                     Núm.
                   </th>
                   <th className="w-[11%] px-2 py-2 text-left font-medium text-gray-500 break-words">
                     Client
                   </th>
-                  <th className="w-[9%] px-2 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[8%] px-2 py-2 text-left font-medium text-gray-500 break-words">
                     Origen
                   </th>
                   <th className="hidden w-[8%] px-2 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
@@ -465,7 +503,7 @@ export default function OrdersPage() {
                   <th className="hidden w-[9%] px-2 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
                     Data producció
                   </th>
-                  <th className="w-[9%] px-2 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[8%] px-2 py-2 text-left font-medium text-gray-500 break-words">
                     Data lliurament
                   </th>
                   <th className="hidden w-[9%] px-2 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
@@ -474,10 +512,10 @@ export default function OrdersPage() {
                   <th className="hidden w-[6%] px-2 py-2 text-right font-medium text-gray-500 break-words xl:table-cell">
                     Bultos
                   </th>
-                  <th className="w-[9%] px-2 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[8%] px-2 py-2 text-left font-medium text-gray-500 break-words">
                     Estat
                   </th>
-                  <th className="w-[9%] px-2 py-2 text-right font-medium text-gray-500 break-words">
+                  <th className="w-[13%] px-2 py-2 text-right font-medium text-gray-500 break-words">
                     Accions
                   </th>
                 </tr>
@@ -545,6 +583,16 @@ export default function OrdersPage() {
                           label="Editar comanda"
                           onClick={() => router.push(`/orders/${order.id}`)}
                         />
+                        {potEliminarComanda(order) && (
+                          <IconButton
+                            variant="delete"
+                            label="Eliminar comanda"
+                            onClick={() => {
+                              setDeleteError(null);
+                              setDeleteTarget(order);
+                            }}
+                          />
+                        )}
                         {order.estat !== 'amb_incidencia' && order.estat !== 'cancellada' && (
                           <IconButton
                             variant="warning"
@@ -567,6 +615,21 @@ export default function OrdersPage() {
           {paginacio && <Pagination paginacio={paginacio} onPageChange={setPagina} />}
         </>
       )}
+
+      <ConfirmDialog
+        isOpen={deleteTarget !== null}
+        title="Eliminar comanda"
+        message={`Vols eliminar la comanda ${deleteTarget?.num ?? ''}? S'esborrarà amb totes les seves línies i no es pot desfer.`}
+        confirmLabel="Eliminar"
+        cancelLabel="Cancel·lar"
+        errorMessage={deleteError}
+        isConfirming={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => {
+          setDeleteTarget(null);
+          setDeleteError(null);
+        }}
+      />
 
       <ResultatDuplicatDialog
         creades={duplicades}
