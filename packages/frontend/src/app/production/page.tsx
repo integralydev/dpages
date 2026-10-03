@@ -331,25 +331,39 @@ export default function ProductionPage() {
           <div
             className={`bg-brand-tint px-6 py-4 ${showTopCards ? 'border-t border-brand-light' : ''}`}
           >
-            <div className="flex flex-wrap items-center gap-x-10 gap-y-3">
-              <div className="flex items-center gap-2">
-                <Package className="h-5 w-5 shrink-0 text-ink" aria-hidden="true" />
-                <span className="text-base font-bold tracking-wide text-ink uppercase">Canals</span>
-              </div>
-              <div className="flex items-baseline gap-2">
-                <p className="text-xs font-semibold tracking-wide text-gray-500 uppercase">
-                  Unitats
-                </p>
-                <p className="text-2xl font-bold whitespace-nowrap text-gray-900">
-                  {formatDecimal(totals?.canals.unitats ?? null, 2)}
-                </p>
-              </div>
-              <div className="flex items-baseline gap-2">
-                <p className="text-xs font-semibold tracking-wide text-gray-500 uppercase">Kg</p>
-                <p className="text-2xl font-bold whitespace-nowrap text-gray-900">
-                  {formatDecimal(totals?.canals.kg ?? null, 3)}
-                </p>
-              </div>
+            {/* Tasca 36 (03/10/2026): Canals (categoria CANALS) i, a sota,
+                Mitjes Canals (categoria MITJES CANALS), cadascuna amb el
+                seu total — ja no se sumen juntes. */}
+            <div className="flex flex-col gap-3">
+              {[
+                { label: 'Canals', valors: totals?.canals },
+                { label: 'Mitjes Canals', valors: totals?.mitgesCanals },
+              ].map(({ label, valors }) => (
+                <div key={label} className="flex flex-wrap items-center gap-x-10 gap-y-3">
+                  <div className="flex w-44 items-center gap-2">
+                    <Package className="h-5 w-5 shrink-0 text-ink" aria-hidden="true" />
+                    <span className="text-base font-bold tracking-wide text-ink uppercase">
+                      {label}
+                    </span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <p className="text-xs font-semibold tracking-wide text-gray-500 uppercase">
+                      Unitats
+                    </p>
+                    <p className="w-24 text-2xl font-bold whitespace-nowrap text-gray-900">
+                      {formatDecimal(valors?.unitats ?? null, 2)}
+                    </p>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <p className="text-xs font-semibold tracking-wide text-gray-500 uppercase">
+                      Kg
+                    </p>
+                    <p className="text-2xl font-bold whitespace-nowrap text-gray-900">
+                      {formatDecimal(valors?.kg ?? null, 3)}
+                    </p>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
