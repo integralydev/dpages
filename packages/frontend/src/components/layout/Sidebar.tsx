@@ -4,18 +4,21 @@ import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ComponentType } from 'react';
 import {
-  Boxes,
+  Beef,
+  BookOpen,
+  Briefcase,
   ChevronLeft,
   ChevronRight,
-  ClipboardList,
-  LayoutGrid,
-  Layers,
-  List,
+  ContactRound,
+  Euro,
+  Factory,
+  FolderTree,
   Menu,
-  Package,
-  Tag,
+  PackageCheck,
+  PiggyBank,
+  ShoppingCart,
   Truck,
-  Users,
+  UserCog,
   X,
 } from 'lucide-react';
 import { GuardedLink } from '@/components/ui/GuardedLink';
@@ -36,7 +39,7 @@ const STANDALONE_ITEM: NavItem = {
   label: 'Comandes',
   href: '/orders',
   modul: 'comandes',
-  icon: Package,
+  icon: ShoppingCart,
 };
 
 type NavGroup = { label: string; items: NavItem[] };
@@ -45,46 +48,53 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Catàleg',
     items: [
-      { label: 'Categories', href: '/categories', modul: 'categories', icon: Layers },
-      { label: 'Catàleg', href: '/catalog', modul: 'catalog', icon: Boxes },
+      { label: 'Categories', href: '/categories', modul: 'categories', icon: FolderTree },
+      { label: 'Catàleg', href: '/catalog', modul: 'catalog', icon: BookOpen },
       {
         label: 'Rendiments Porcs',
         href: '/pig-yields',
         modul: 'rendiments-porcs',
-        icon: ClipboardList,
+        icon: PiggyBank,
       },
     ],
   },
   {
     label: 'Tarifes',
     items: [
-      { label: 'Llistat de Tarifes', href: '/rates', modul: 'tarifes', icon: List },
-      { label: 'Tarifes per client', href: '/client-tariffs', modul: 'tarifes-clients', icon: Tag },
+      { label: 'Llistat de Tarifes', href: '/rates', modul: 'tarifes', icon: Euro },
+      {
+        label: 'Tarifes per client',
+        href: '/client-tariffs',
+        modul: 'tarifes-clients',
+        icon: ContactRound,
+      },
     ],
   },
   {
     label: 'Panells',
+    // Una icona per panell, relacionada amb el que s'hi fa: oficina,
+    // elaboració de la carn, caixes preparades i producció.
     items: [
-      { label: 'Panell Oficina', href: '/office', modul: 'panell-oficina', icon: LayoutGrid },
-      { label: 'Panell Obrador', href: '/workshop', modul: 'panell-obrador', icon: LayoutGrid },
+      { label: 'Panell Oficina', href: '/office', modul: 'panell-oficina', icon: Briefcase },
+      { label: 'Panell Obrador', href: '/workshop', modul: 'panell-obrador', icon: Beef },
       {
         label: 'Panell Empaquetat',
         href: '/packaging',
         modul: 'panell-empaquetat',
-        icon: LayoutGrid,
+        icon: PackageCheck,
       },
       {
         label: 'Panell Producció',
         href: '/production',
         modul: 'panell-produccio',
-        icon: LayoutGrid,
+        icon: Factory,
       },
     ],
   },
   {
     label: 'Configuració',
     items: [
-      { label: "Administració d'usuaris", href: '/users', modul: 'usuaris', icon: Users },
+      { label: "Administració d'usuaris", href: '/users', modul: 'usuaris', icon: UserCog },
       { label: 'Transportistes', href: '/transportistes', modul: 'transportistes', icon: Truck },
     ],
   },
