@@ -735,6 +735,19 @@ paths:
         '400': { $ref: '#/components/responses/Validacio' }
         '404': { $ref: '#/components/responses/NoTrobat' }
         '409': { $ref: '#/components/responses/Conflicte' }
+    delete:
+      tags: [Comandes]
+      summary: Eliminar una comanda sin nada generado (tarea 14)
+      description: >-
+        Borrado físico, con sus líneas e incidencias. 409 si es de
+        WooCommerce, si está congelada o si alguna línea (también borrada)
+        está hecha en el Obrador o tiene datos de empaquetado.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204': { description: Comanda eliminada }
+        '404': { $ref: '#/components/responses/NoTrobat' }
+        '409': { $ref: '#/components/responses/Conflicte' }
 
   /api/v1/comandes/{comandaId}/linies:
     post:

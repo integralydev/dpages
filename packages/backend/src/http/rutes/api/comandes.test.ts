@@ -2919,4 +2919,107 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
       await fastify.close();
     });
   });
+
+  describe('tasca 14 — DELETE /comandes/:id (només si no té res generat)', () => {
+    async function crearManual(fastify: ReturnType<typeof construirServidor>): Promise<number> {
+      const res = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [{ producteId: producteFitxaId, unitatsDemanades: 1 }],
+        },
+      });
+      return cuerpoJson<ComandaDetallApi>(res).id;
+    }
+
+    function eliminar(fastify: ReturnType<typeof construirServidor>, id: number) {
+      return fastify.inject({ method: 'DELETE', url: `/api/v1/comandes/${id}` });
+    }
+
+    it('elimina una comanda manual sense feina feta, amb les seves línies i incidències', async () => {
+      const fastify = construirServidor();
+      const id = await crearManual(fastify);
+      await entorn.poolTest.query(
+        `INSERT INTO incidencia_comanda (comanda_id, tipus, detall)
+         SELECT id, 'manual', 'prova' FROM comanda WHERE id_seq = $1`,
+        [id],
+      );
+
+      const res = await eliminar(fastify, id);
+      expect(res.statusCode).toBe(204);
+      expect(
+        (await fastify.inject({ method: 'GET', url: `/api/v1/comandes/${id}` })).statusCode,
+      ).toBe(404);
+      const restes = await entorn.poolTest.query<{ n: string }>(
+        `SELECT (SELECT count(*) FROM comanda_linia cl
+                 WHERE NOT EXISTS (SELECT 1 FROM comanda c WHERE c.id = cl.comanda_id))
+              + (SELECT count(*) FROM incidencia_comanda i
+                 WHERE NOT EXISTS (SELECT 1 FROM comanda c WHERE c.id = i.comanda_id)) AS n`,
+      );
+      expect(restes.rows[0]!.n).toBe('0');
+      expect((await eliminar(fastify, id)).statusCode).toBe(404);
+
+      await fastify.close();
+    });
+
+    it.each([
+      ['feta a Obrador', `UPDATE comanda_linia SET treballat_a = now() WHERE comanda_id = $1`],
+      [
+        'confirmada a Empaquetat',
+        `UPDATE comanda_linia SET confirmat_a = now() WHERE comanda_id = $1`,
+      ],
+      [
+        'amb kg enviats, encara que la línia estigui esborrada',
+        `UPDATE comanda_linia SET kg_lliurats = '0.500', esborrat = true WHERE comanda_id = $1`,
+      ],
+    ])('no elimina una comanda amb una línia %s (409)', async (_motiu, sql) => {
+      const fastify = construirServidor();
+      const id = await crearManual(fastify);
+      await entorn.poolTest.query(sql, [
+        (
+          await entorn.poolTest.query<{ id: string }>(`SELECT id FROM comanda WHERE id_seq = $1`, [
+            id,
+          ])
+        ).rows[0]!.id,
+      ]);
+
+      const res = await eliminar(fastify, id);
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({ error: { codi: 'CONFLICTE' } });
+      expect(
+        (await fastify.inject({ method: 'GET', url: `/api/v1/comandes/${id}` })).statusCode,
+      ).toBe(200);
+
+      await fastify.close();
+    });
+
+    it('no elimina una comanda congelada ni una de WooCommerce (409)', async () => {
+      const fastify = construirServidor();
+      const congelada = await crearManual(fastify);
+      await entorn.poolTest.query(`UPDATE comanda SET congelat_a = now() WHERE id_seq = $1`, [
+        congelada,
+      ]);
+      const congeladaRes = await eliminar(fastify, congelada);
+      expect(congeladaRes.statusCode).toBe(409);
+      expect(congeladaRes.json()).toMatchObject({
+        error: { missatge: expect.stringMatching(/congelada/) as unknown },
+      });
+
+      const woo = await entorn.poolTest.query<{ id_seq: string }>(
+        `INSERT INTO comanda (woo_order_id, origen_id, estat, data_comanda)
+         VALUES (555001, (SELECT id FROM origen_comanda WHERE codi = 'woocommerce'), 'esborrany', '2026-08-01')
+         RETURNING id_seq`,
+      );
+      const wooRes = await eliminar(fastify, Number(woo.rows[0]!.id_seq));
+      expect(wooRes.statusCode).toBe(409);
+      expect(wooRes.json()).toMatchObject({
+        error: { missatge: expect.stringMatching(/WooCommerce/) as unknown },
+      });
+
+      await fastify.close();
+    });
+  });
 });

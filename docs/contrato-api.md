@@ -82,7 +82,7 @@ Tres criterios de guard, según el endpoint:
   `tarifes`, `categories`, `transportistes`, `tarifes-clients`,
   `rendiments-porcs`, `usuaris`, `rols`, o el `panell-*` correspondiente).
   Aplica a la escritura de todo recurso (incluida toda escritura sobre
-  `comandes`: `POST /comandes`, `POST /comandes/duplicar`, `PATCH /comandes/:id`,
+  `comandes`: `POST /comandes`, `POST /comandes/duplicar`, `PATCH /comandes/:id`, `DELETE /comandes/:id`,
   `POST`/`PATCH`/`DELETE .../linies`) y a la lectura de `/panells/*` y
   `/rendiments-porcs`.
 - **De apoyo** — la lectura (`GET`) de `/categories`, `/productes`,
@@ -1023,6 +1023,14 @@ repetidos cuentan una vez). Respuesta `201`:
 > - Una comanda de WooCommerce se duplica con origen `manual` (tarea 11).
 >   Sus líneas sin artículo resuelto no se copian (`liniesOmeses`).
 > - Todo o nada: si algún id no existe, `400 VALIDACIO` y no se crea ninguna.
+
+**`DELETE /comandes/:id`** (tarea 14, 03/10/2026) — elimina una comanda que
+no tiene nada generado. Borrado físico: sus líneas e incidencias se borran
+con ella. `204` si se elimina; `409 CONFLICTE` (con el motivo en el
+mensaje) si es de WooCommerce (el sync la volvería a crear: se cancela en
+su lugar), si está congelada o si alguna línea, también borrada, está
+hecha en el Obrador (`treballatA`) o tiene datos de empaquetado (unidades
+o kg enviados, confirmación). `404` si no existe.
 
 **`PATCH /comandes/:id`** · **`DELETE /comandes/:id/linies/:liniaId`**
 

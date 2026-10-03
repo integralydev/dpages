@@ -1656,6 +1656,66 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
     },
   );
 
+  /**
+   * Tarea 14 (03/10/2026): eliminar una comanda que no tiene nada generado.
+   * Borrado físico (las líneas y las incidencias caen por ON DELETE
+   * CASCADE). Sólo si:
+   * - no es de WooCommerce: el sync la volvería a crear; se cancela en su
+   *   lugar (decisión del cliente);
+   * - no está congelada;
+   * - ninguna línea (tampoco las borradas) está marcada como hecha en el
+   *   Obrador ni tiene nada de empaquetado (unidades/kg enviados o
+   *   confirmación).
+   * Las condiciones van en el propio DELETE para que sea atómico; si no
+   * borra nada, se averigua el motivo para el mensaje.
+   */
+  fastify.delete('/comandes/:id', { preHandler: GUARD_COMANDES }, async (req, reply) => {
+    const comandaUuid = await resolverComandaOResponder(reply, (req.params as { id: string }).id);
+    if (comandaUuid === null) return;
+
+    const esborrada = await pool.query(
+      `DELETE FROM comanda c
+       WHERE c.id = $1
+         AND c.woo_order_id IS NULL
+         AND c.origen_id <> (SELECT id FROM origen_comanda WHERE codi = $2)
+         AND c.congelat_a IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM comanda_linia cl
+           WHERE cl.comanda_id = c.id
+             AND (cl.treballat_a IS NOT NULL OR cl.confirmat_a IS NOT NULL
+                  OR cl.unitats_lliurades <> 0 OR cl.kg_lliurats <> 0)
+         )`,
+      [comandaUuid, CODI_ORIGEN_WOOCOMMERCE],
+    );
+    if ((esborrada.rowCount ?? 0) > 0) {
+      reply.code(204);
+      return;
+    }
+
+    const motiu = await pool.query<{ woo: boolean; congelada: boolean }>(
+      `SELECT (c.woo_order_id IS NOT NULL OR o.codi = $2) AS woo,
+              c.congelat_a IS NOT NULL AS congelada
+       FROM comanda c JOIN origen_comanda o ON o.id = c.origen_id
+       WHERE c.id = $1`,
+      [comandaUuid, CODI_ORIGEN_WOOCOMMERCE],
+    );
+    const fila = motiu.rows[0];
+    if (!fila) return enviarNoTrobat(reply, 'Comanda no trobada');
+    if (fila.woo) {
+      return enviarConflicte(
+        reply,
+        "Les comandes de WooCommerce no es poden eliminar: si no s'ha de servir, cancel·la-la",
+      );
+    }
+    if (fila.congelada) {
+      return enviarConflicte(reply, 'La comanda està congelada i no es pot eliminar');
+    }
+    return enviarConflicte(
+      reply,
+      "La comanda no es pot eliminar: ja té línies fetes a l'Obrador o amb dades d'empaquetat",
+    );
+  });
+
   fastify.delete(
     '/comandes/:comandaId/linies/:liniaId',
     { preHandler: GUARD_COMANDES },
