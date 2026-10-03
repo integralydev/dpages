@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { CheckCheck } from 'lucide-react';
+import { CheckCheck, Printer } from 'lucide-react';
 import { AsyncCombobox, type ComboboxOption } from '@/components/ui/AsyncCombobox';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ClearFiltersButton, FilterBar } from '@/components/ui/FilterBar';
@@ -15,9 +15,18 @@ import { StatCard } from '@/components/ui/StatCard';
 import { useCatalog } from '@/hooks/useCatalog';
 import { useCategories } from '@/hooks/useCategories';
 import { type ToggleTreballResult, usePanellObrador } from '@/hooks/usePanellObrador';
-import { api, type ClientApi, type FilaPanellObradorApi, type RespostaPaginada } from '@/lib/api';
+import {
+  api,
+  ApiError,
+  type ClientApi,
+  type FilaPanellObradorApi,
+  obtenirTotesLesPagines,
+  type PanellObradorApi,
+  type RespostaPaginada,
+} from '@/lib/api';
 import { formatData } from '@/lib/dates';
 import { formatDecimal } from '@/lib/decimals';
+import { descarregarPdfObradorNoFetes } from '@/lib/ordersPdf';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
 
 const ALL = 'Tots';
@@ -360,6 +369,48 @@ export default function WorkshopPage() {
     );
   }
 
+  // Tasca 27: llistat en PDF de TOTES les línies no fetes que compleixen la
+  // resta de filtres actius (no només la pàgina visible). El filtre de
+  // "Fetes/Pendents" de pantalla no hi compta: sempre surten les pendents.
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
+
+  async function handlePrintPending() {
+    setIsPrinting(true);
+    setPrintError(null);
+    try {
+      const linies = await obtenirTotesLesPagines((pagina) =>
+        api.get<PanellObradorApi>('/panells/obrador', {
+          ...filters,
+          treball: 'pendents',
+          mida: 200,
+          pagina,
+        }),
+      );
+      const etiquetes = [
+        selectedAgrupacions.length > 0 &&
+          `Agrupació: ${selectedAgrupacions.map((item) => item.label).join(', ')}`,
+        categoryFilter !== ALL_FEM && `Categoria: ${categoryFilter}`,
+        selectedProducts.length > 0 &&
+          `Productes: ${selectedProducts.map((item) => item.label).join(', ')}`,
+        selectedClient && `Client: ${selectedClient.label}`,
+        observacionsFilter !== ALL_FEM && observacionsFilter,
+        envasatFilter !== ALL && `Envasat: ${envasatFilter}`,
+        formatFilter !== ALL && `Format: ${formatFilter}`,
+        productionDateFilter && `Data producció: ${formatData(productionDateFilter, false)}`,
+      ].filter((etiqueta): etiqueta is string => Boolean(etiqueta));
+      await descarregarPdfObradorNoFetes({ linies, filtres: etiquetes });
+    } catch (caught) {
+      setPrintError(
+        caught instanceof ApiError
+          ? `No s'ha pogut generar el llistat: ${caught.message}`
+          : "No s'ha pogut generar el llistat.",
+      );
+    } finally {
+      setIsPrinting(false);
+    }
+  }
+
   // Consistència amb Empaquetat (lineToUndo, packaging/page.tsx) — mateix
   // patró: estat del diàleg alçat a la pàgina, un sol ConfirmDialog al
   // final del JSX en comptes d'un per fila.
@@ -432,9 +483,19 @@ export default function WorkshopPage() {
               <CheckCheck className="h-4 w-4" />
               Marcar totes com a fetes ({pendents})
             </button>
+            <button
+              type="button"
+              onClick={handlePrintPending}
+              disabled={isLoading || isPrinting}
+              className="flex items-center gap-2 self-center rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Printer className="h-4 w-4" />
+              {isPrinting ? 'Generant PDF...' : 'Imprimir no fetes'}
+            </button>
           </div>
         }
       />
+      {printError && <p className="-mt-6 mb-6 text-sm text-red-600">{printError}</p>}
       {markAllNotice && (
         <p className="-mt-6 mb-6 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
           {markAllNotice}

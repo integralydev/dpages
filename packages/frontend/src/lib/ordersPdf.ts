@@ -1,4 +1,10 @@
-import type { ClientApi, ComandaDetallApi, ComandaResumApi, FilaPanellOficinaApi } from '@/lib/api';
+import type {
+  ClientApi,
+  ComandaDetallApi,
+  ComandaResumApi,
+  FilaPanellObradorApi,
+  FilaPanellOficinaApi,
+} from '@/lib/api';
 import { ESTAT_LABELS } from '@/lib/comandaEstat';
 import { formatData } from '@/lib/dates';
 import { formatDecimal } from '@/lib/decimals';
@@ -29,6 +35,8 @@ type OpcionsLlistat = {
   resum: string;
   /** Resum llegible dels filtres actius ("Estat: Oberta"...); buit = cap. */
   filtres: string[];
+  /** Text quan no hi ha cap filtre actiu. */
+  senseFiltres?: string;
   midaLletra?: number;
 };
 
@@ -86,6 +94,7 @@ async function descarregarPdfLlistat({
   files,
   resum,
   filtres,
+  senseFiltres = 'Filtres: cap (totes les comandes)',
   midaLletra = 8.5,
 }: OpcionsLlistat): Promise<void> {
   const [{ jsPDF }, { autoTable }, logo] = await Promise.all([
@@ -114,7 +123,7 @@ async function descarregarPdfLlistat({
   doc.setTextColor(...GRIS_TEXT);
   doc.text(textPdf(`${resum} · Generat el ${formatData(ara.toISOString(), true)}`), MARGE, 29);
   const liniaFiltres = textPdf(
-    filtres.length > 0 ? `Filtres: ${filtres.join(' · ')}` : 'Filtres: cap (totes les comandes)',
+    filtres.length > 0 ? `Filtres: ${filtres.join(' · ')}` : senseFiltres,
   );
   const filtresPartits = doc.splitTextToSize(liniaFiltres, ample - 2 * MARGE) as string[];
   doc.text(filtresPartits, MARGE, 34);
@@ -277,6 +286,62 @@ export function descarregarPdfPanellOficina({
       comanda.obsProduccio ? 'Sí' : '-',
       (comanda.obsLliurament ?? '').trim().length > 0 ? 'Sí' : '-',
     ]),
+  });
+}
+
+// ── Panell Obrador: línies no fetes (tasca 27) ───────────────────────────
+
+// 273 mm útils.
+const COLUMNES_OBRADOR: ColumnaPdf[] = [
+  { titol: 'Agrupació producció', ample: 30 },
+  { titol: 'Producte', ample: 56, negreta: true },
+  { titol: 'Envasat', ample: 25 },
+  { titol: 'Format', ample: 18 },
+  { titol: 'Client', ample: 40 },
+  { titol: 'Data producció', ample: 22 },
+  { titol: 'Unitats', ample: 18, alineacio: 'right' },
+  { titol: 'Pes (kg)', ample: 20, alineacio: 'right' },
+  { titol: 'Obs. producció', ample: 44 },
+];
+
+export function descarregarPdfObradorNoFetes({
+  linies,
+  filtres,
+}: {
+  linies: FilaPanellObradorApi[];
+  filtres: string[];
+}): Promise<void> {
+  const kg = linies.reduce((total, linia) => total + Number(linia.kg), 0);
+  const unitats = linies.reduce((total, linia) => total + Number(linia.unitats), 0);
+  const nomLinies = linies.length === 1 ? 'línia' : 'línies';
+  return descarregarPdfLlistat({
+    titol: 'Obrador: línies no fetes',
+    nomFitxer: 'obrador-no-fetes',
+    columnes: COLUMNES_OBRADOR,
+    resum: `${linies.length} ${nomLinies} · ${formatDecimal(kg.toFixed(3), 3)} kg · ${formatDecimal(unitats.toFixed(2), 2)} unitats`,
+    filtres,
+    senseFiltres: 'Filtres: cap (totes les línies no fetes)',
+    // Ordenades per agrupació de producció i producte (les que no tenen
+    // agrupació, al final).
+    files: [...linies]
+      .sort(
+        (a, b) =>
+          (a.agrupacioProduccio ?? '\uffff').localeCompare(
+            b.agrupacioProduccio ?? '\uffff',
+            'ca',
+          ) || a.producte.descripcio.localeCompare(b.producte.descripcio, 'ca'),
+      )
+      .map((linia) => [
+        linia.agrupacioProduccio ?? '-',
+        linia.producte.descripcio,
+        linia.envasat ?? '-',
+        linia.format ?? '-',
+        linia.client ?? '-',
+        dataOGuio(linia.dataProduccio),
+        formatDecimal(linia.unitats, 2),
+        formatDecimal(linia.kg, 3),
+        linia.obsProduccio ?? '',
+      ]),
   });
 }
 
