@@ -1,4 +1,9 @@
-import type { ComandaDetallApi, ComandaResumApi, RespostaPaginada } from '@dpages/shared';
+import type {
+  ComandaDetallApi,
+  ComandaDuplicadaApi,
+  ComandaResumApi,
+  RespostaPaginada,
+} from '@dpages/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { construirServidor as construirServidorType } from '../../servidor.js';
 import {
@@ -2222,7 +2227,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
         method: 'POST',
         url: '/api/v1/comandes',
         payload: {
-          dataComanda: avui,
+          dataComanda: `${avui}T00:00:00Z`,
           // Issue #16 (segona ronda) — regla 7: dataComanda no pot ser
           // posterior a dataLliurament. No es pot fixar dataLliurament amb
           // una data fixa del passat (aquest test compara contra "avui", el
@@ -2760,6 +2765,156 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
         await fastify.inject({ method: 'GET', url: '/api/v1/comandes?cerca=zzz-no-existeix-zzz' }),
       );
       expect(senseMatch.dades).toEqual([]);
+
+      await fastify.close();
+    });
+  });
+
+  describe('tasca 17 — POST /comandes/duplicar', () => {
+    const avui = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Madrid' }).format(new Date());
+
+    it("copia capçalera i línies en esborrany, amb data d'avui, sense altres dates ni empaquetat", async () => {
+      const fastify = construirServidor();
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          clientId,
+          obsLliurament: 'Porta del darrere',
+          linies: [
+            {
+              dataProduccio: '2026-08-10T00:00:00Z',
+              producteId: producteFitxaId,
+              unitatsDemanades: 2,
+              obsEmpaquetat: 'Família A',
+            },
+            {
+              producteId: producteAMidaId,
+              unitatsDemanades: 1,
+              kgDemanats: '2.400',
+            },
+          ],
+        },
+      });
+      const original = cuerpoJson<ComandaDetallApi>(creada);
+      // L'original ja s'ha empaquetat i tancat: res d'això s'ha de copiar.
+      await entorn.poolTest.query(
+        `UPDATE comanda_linia SET unitats_lliurades = 2, kg_lliurats = '2.500', confirmat_a = now()
+         WHERE comanda_id = (SELECT id FROM comanda WHERE id_seq = $1)`,
+        [original.id],
+      );
+      await entorn.poolTest.query(
+        `UPDATE comanda SET estat = 'tancada', bultos = 3, congelat_a = now(),
+                data_produccio = '2026-08-10', data_expedicio = '2026-08-20'
+         WHERE id_seq = $1`,
+        [original.id],
+      );
+
+      // L'id repetit es duplica una sola vegada.
+      const res = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes/duplicar',
+        payload: { ids: [original.id, original.id] },
+      });
+      expect(res.statusCode).toBe(201);
+      const { comandes } = cuerpoJson<{ comandes: ComandaDuplicadaApi[] }>(res);
+      expect(comandes).toHaveLength(1);
+      expect(comandes[0]!.origen).toEqual({ id: original.id, num: original.num });
+      expect(comandes[0]!.liniesOmeses).toBe(0);
+      expect(comandes[0]!.id).not.toBe(original.id);
+
+      const copia = cuerpoJson<ComandaDetallApi>(
+        await fastify.inject({ method: 'GET', url: `/api/v1/comandes/${comandes[0]!.id}` }),
+      );
+      expect(copia).toMatchObject({
+        num: comandes[0]!.num,
+        origen: 'manual',
+        estat: 'esborrany',
+        client: { id: clientId },
+        obsLliurament: 'Porta del darrere',
+        dataComanda: `${avui}T00:00:00Z`,
+        dataProduccio: null,
+        dataExpedicio: null,
+        dataLliurament: null,
+        bultos: null,
+        congelada: false,
+      });
+      expect(copia.linies.map((l) => l.producte?.id)).toEqual([producteFitxaId, producteAMidaId]);
+      expect(copia.linies[0]).toMatchObject({
+        unitatsDemanades: '2.00',
+        kgDemanats: '2.500',
+        kgEditable: false,
+        preuUnitari: '9.86',
+        obsEmpaquetat: 'Família A',
+        dataProduccio: null,
+        unitatsLliurades: '0.00',
+        kgLliurats: '0.000',
+        confirmatA: null,
+      });
+      expect(copia.linies[1]).toMatchObject({ kgDemanats: '2.400', kgEditable: true });
+
+      await fastify.close();
+    });
+
+    it('una de WooCommerce es duplica com a manual, sense les línies sense article', async () => {
+      const fastify = construirServidor();
+      const woo = await entorn.poolTest.query<{ id_seq: string; id: string }>(
+        `INSERT INTO comanda (woo_order_id, origen_id, estat, data_comanda)
+         VALUES (987654, (SELECT id FROM origen_comanda WHERE codi = 'woocommerce'), 'esborrany', '2026-08-01')
+         RETURNING id, id_seq`,
+      );
+      await entorn.poolTest.query(
+        `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades, preu_unitari, pes_calculat_kg)
+         VALUES ($1, 0, NULL, 1, '5.00', '0'),
+                ($1, 1, (SELECT id FROM producte WHERE id_seq = $2), 4, '1.00', '5.000')`,
+        [woo.rows[0]!.id, producteFitxaId],
+      );
+
+      const res = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes/duplicar',
+        payload: { ids: [Number(woo.rows[0]!.id_seq)] },
+      });
+      expect(res.statusCode).toBe(201);
+      const { comandes } = cuerpoJson<{ comandes: ComandaDuplicadaApi[] }>(res);
+      expect(comandes[0]!.liniesOmeses).toBe(1);
+
+      const copia = cuerpoJson<ComandaDetallApi>(
+        await fastify.inject({ method: 'GET', url: `/api/v1/comandes/${comandes[0]!.id}` }),
+      );
+      expect(copia.origen).toBe('manual');
+      expect(copia.linies).toHaveLength(1);
+      // Preu i pes es tornen a resoldre (preu base i pes de fitxa actuals).
+      expect(copia.linies[0]).toMatchObject({ preuUnitari: '9.86', kgDemanats: '5.000' });
+
+      await fastify.close();
+    });
+
+    it('rebutja una llista buida o comandes inexistents (sense crear-ne cap)', async () => {
+      const fastify = construirServidor();
+      const abans = await entorn.poolTest.query<{ n: string }>(`SELECT count(*) AS n FROM comanda`);
+
+      const buida = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes/duplicar',
+        payload: { ids: [] },
+      });
+      expect(buida.statusCode).toBe(400);
+      const inexistent = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes/duplicar',
+        payload: { ids: [999999] },
+      });
+      expect(inexistent.statusCode).toBe(400);
+      expect(inexistent.json()).toMatchObject({ error: { codi: 'VALIDACIO' } });
+
+      const despres = await entorn.poolTest.query<{ n: string }>(
+        `SELECT count(*) AS n FROM comanda`,
+      );
+      expect(despres.rows[0]!.n).toBe(abans.rows[0]!.n);
 
       await fastify.close();
     });

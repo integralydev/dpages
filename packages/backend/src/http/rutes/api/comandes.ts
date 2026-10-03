@@ -1,5 +1,6 @@
 import type {
   ComandaDetallApi,
+  ComandaDuplicadaApi,
   ComandaLiniaApi,
   ComandaResumApi,
   IncidenciaComandaApi,
@@ -479,6 +480,9 @@ async function resolverComandaOResponder(
   return uuid;
 }
 
+/** Tarea 17: tope de comandas por petición de duplicado (una página de la lista son 100). */
+const MAX_COMANDES_DUPLICAR = 100;
+
 export function registrarRutesComandes(fastify: FastifyInstance): void {
   fastify.get('/comandes', { preHandler: GUARD_COMANDES_LECTURA }, async (req, reply) => {
     const query = req.query as Record<string, unknown>;
@@ -871,6 +875,174 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
 
     reply.code(201);
     return carregarDetallPerUuid(comandaUuid);
+  });
+
+  /**
+   * Tarea 17 (03/10/2026): duplicar una o varias comandas. Cada copia nace
+   * en `esborrany`, con data_comanda = hoy (Europe/Madrid) y el resto de
+   * fechas en blanco (cabecera y líneas). Se copian cliente, tarifa,
+   * transportista, dirección y observaciones de cabecera; de las líneas,
+   * producto, unidades y observaciones. No se copia nada de empaquetado
+   * (unidades/kg enviados, confirmación, bultos) ni la congelación.
+   *
+   * Precio y peso se resuelven de nuevo como en POST /comandes (tarifa y
+   * peso de ficha actuales), no se copian: una copia es una comanda nueva.
+   * Una comanda de WooCommerce se duplica con origen `manual` (tarea 11:
+   * woocommerce sólo lo pone el sync). Las líneas sin artículo resuelto no
+   * se copian (se informa en `liniesOmeses`). Todo o nada: una transacción.
+   */
+  fastify.post('/comandes/duplicar', { preHandler: GUARD_COMANDES }, async (req, reply) => {
+    const cos = req.body as Partial<{ ids: unknown }>;
+    const ids = Array.isArray(cos?.ids) ? cos.ids : [];
+    if (
+      ids.length === 0 ||
+      ids.length > MAX_COMANDES_DUPLICAR ||
+      !ids.every((id) => typeof id === 'number' && Number.isSafeInteger(id) && id > 0)
+    ) {
+      return enviarValidacio(reply, 'Cal indicar les comandes a duplicar', [
+        { camp: 'ids', missatge: `entre 1 i ${MAX_COMANDES_DUPLICAR} identificadors de comanda` },
+      ]);
+    }
+    const idsUnics = [...new Set(ids as number[])];
+
+    const originals = await pool.query<{
+      id: string;
+      id_seq: string;
+      num: string;
+      origen_codi: string;
+      client_id: string | null;
+      tarifa_id: string | null;
+      client_tarifa_id: string | null;
+    }>(
+      `SELECT c.id, c.id_seq, c.num, o.codi AS origen_codi, c.client_id, c.tarifa_id,
+              cl.tarifa_id AS client_tarifa_id
+       FROM comanda c
+       JOIN origen_comanda o ON o.id = c.origen_id
+       LEFT JOIN client cl ON cl.id = c.client_id
+       WHERE c.id_seq = ANY($1::bigint[])`,
+      [idsUnics],
+    );
+    const perIdSeq = new Map(originals.rows.map((f) => [Number(f.id_seq), f]));
+    const noTrobades = idsUnics.filter((id) => !perIdSeq.has(id));
+    if (noTrobades.length > 0) {
+      return enviarValidacio(reply, 'Alguna de les comandes no existeix', [
+        { camp: 'ids', missatge: `no existeixen: ${noTrobades.join(', ')}` },
+      ]);
+    }
+
+    const client = await pool.connect();
+    const creades: ComandaDuplicadaApi[] = [];
+    try {
+      await client.query('BEGIN');
+
+      for (const idPublic of idsUnics) {
+        const original = perIdSeq.get(idPublic)!;
+        const nova = await client.query<{ id: string; id_seq: string; num: string }>(
+          `INSERT INTO comanda (origen_id, estat, client_id, tarifa_id, transportista_id,
+                                poblacio_desti, adreca_lliurament, obs_lliurament, obs_produccio,
+                                data_comanda)
+           SELECT CASE WHEN o.codi = $2
+                       THEN (SELECT id FROM origen_comanda WHERE codi = 'manual')
+                       ELSE c.origen_id END,
+                  'esborrany', c.client_id, c.tarifa_id, c.transportista_id,
+                  c.poblacio_desti, c.adreca_lliurament, c.obs_lliurament, c.obs_produccio,
+                  (now() AT TIME ZONE 'Europe/Madrid')::date
+           FROM comanda c JOIN origen_comanda o ON o.id = c.origen_id
+           WHERE c.id = $1
+           RETURNING id, id_seq, num`,
+          [original.id, CODI_ORIGEN_WOOCOMMERCE],
+        );
+        const novaUuid = nova.rows[0]!.id;
+
+        const linies = await client.query<{
+          producte_id: string | null;
+          producte_id_seq: string | null;
+          unitats_demanades: string;
+          pes_calculat_kg: string;
+          pes_kg: string | null;
+          preu_venda: string | null;
+          obs_produccio: string | null;
+          obs_empaquetat: string | null;
+        }>(
+          `SELECT cl.producte_id, p.id_seq AS producte_id_seq, cl.unitats_demanades,
+                  cl.pes_calculat_kg, p.pes_kg, p.preu_venda, cl.obs_produccio, cl.obs_empaquetat
+           FROM comanda_linia cl
+           LEFT JOIN producte p ON p.id = cl.producte_id
+           WHERE cl.comanda_id = $1 AND NOT cl.esborrat
+           ORDER BY cl.ordinal`,
+          [original.id],
+        );
+
+        const tarifaEfectivaId = original.tarifa_id ?? original.client_tarifa_id;
+        let ordinal = 0;
+        let liniesOmeses = 0;
+        for (const l of linies.rows) {
+          if (l.producte_id === null) {
+            liniesOmeses++;
+            continue;
+          }
+          const { preuUnitari, sensePreu } = await resolverPreuLinia(
+            pool,
+            tarifaEfectivaId,
+            l.producte_id,
+            l.preu_venda,
+          );
+          // Mismo cálculo que en el alta: con peso de ficha, unidades × peso;
+          // a medida, se conservan los kg de la original (editables).
+          const pesEditable = l.pes_kg === null;
+          const pesCalculatKg = pesEditable
+            ? l.pes_calculat_kg
+            : (Number(l.unitats_demanades) * Number(l.pes_kg)).toFixed(3);
+
+          await client.query(
+            `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
+                                         preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
+                                         obs_produccio, obs_empaquetat)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [
+              novaUuid,
+              ordinal,
+              l.producte_id,
+              l.unitats_demanades,
+              preuUnitari,
+              l.pes_kg,
+              pesCalculatKg,
+              pesEditable,
+              l.obs_produccio,
+              l.obs_empaquetat,
+            ],
+          );
+          if (sensePreu) {
+            await client.query(
+              `INSERT INTO incidencia_comanda (comanda_id, tipus, detall) VALUES ($1, 'sense_preu', $2)`,
+              [
+                novaUuid,
+                `Línia ${ordinal + 1}: el producte ${l.producte_id_seq} no té preu resolt (sense tarifa amb preu ni preu base) — preuUnitari es va deixar en 0.00.`,
+              ],
+            );
+          }
+          ordinal++;
+        }
+        await recalcularTotalComanda(client, novaUuid);
+
+        creades.push({
+          id: Number(nova.rows[0]!.id_seq),
+          num: nova.rows[0]!.num,
+          origen: { id: idPublic, num: original.num },
+          liniesOmeses,
+        });
+      }
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    reply.code(201);
+    return { comandes: creades };
   });
 
   fastify.patch('/comandes/:id', { preHandler: GUARD_COMANDES }, async (req, reply) => {

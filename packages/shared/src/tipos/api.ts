@@ -320,6 +320,18 @@ export interface IncidenciaComandaApi {
   creatA: string;
 }
 
+/**
+ * Respuesta de `POST /comandes/duplicar` (tarea 17): una entrada por
+ * comanda creada, en el mismo orden que los `ids` del body.
+ */
+export interface ComandaDuplicadaApi {
+  id: number;
+  num: string;
+  origen: { id: number; num: string };
+  /** Líneas de la original que no se copiaron por no tener artículo resuelto. */
+  liniesOmeses: number;
+}
+
 export interface ComandaDetallApi {
   id: number;
   num: string;

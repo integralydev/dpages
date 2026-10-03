@@ -82,7 +82,7 @@ Tres criterios de guard, según el endpoint:
   `tarifes`, `categories`, `transportistes`, `tarifes-clients`,
   `rendiments-porcs`, `usuaris`, `rols`, o el `panell-*` correspondiente).
   Aplica a la escritura de todo recurso (incluida toda escritura sobre
-  `comandes`: `POST /comandes`, `PATCH /comandes/:id`,
+  `comandes`: `POST /comandes`, `POST /comandes/duplicar`, `PATCH /comandes/:id`,
   `POST`/`PATCH`/`DELETE .../linies`) y a la lectura de `/panells/*` y
   `/rendiments-porcs`.
 - **De apoyo** — la lectura (`GET`) de `/categories`, `/productes`,
@@ -997,6 +997,32 @@ correo y WhatsApp, que son la mayoría del volumen real.
 > (sólo existen después, vía `PATCH /comandes/:id`), en la práctica ahí sólo
 > pueden dispararse la regla 5 (línea vs. `dataLliurament`) y la regla 7
 > (`dataComanda` vs. `dataLliurament`, ambas siempre presentes en este body).
+
+**`POST /comandes/duplicar`** (tarea 17, 03/10/2026) — duplica una o varias
+comandas. Body: `{ "ids": [142, 143] }` (ids públicos, entre 1 y 100; los
+repetidos cuentan una vez). Respuesta `201`:
+
+```json
+{
+  "comandes": [
+    { "id": 701, "num": "000701", "origen": { "id": 142, "num": "000142" }, "liniesOmeses": 0 }
+  ]
+}
+```
+
+> - Cada copia nace en `esborrany`, con `dataComanda` = hoy (Europe/Madrid)
+>   y el resto de fechas en `null` (cabecera y líneas).
+> - Se copian cliente, tarifa, transportista, población, dirección y
+>   observaciones de cabecera; de las líneas, producto, unidades, kg (sólo
+>   en artículos a medida) y observaciones de producción y empaquetado.
+> - No se copia nada de empaquetado (unidades/kg enviados, confirmación,
+>   bultos) ni la congelación.
+> - Precio y peso de ficha se resuelven de nuevo como en `POST /comandes`
+>   (tarifa y ficha actuales); un precio sin resolver registra la misma
+>   incidencia `sense_preu`.
+> - Una comanda de WooCommerce se duplica con origen `manual` (tarea 11).
+>   Sus líneas sin artículo resuelto no se copian (`liniesOmeses`).
+> - Todo o nada: si algún id no existe, `400 VALIDACIO` y no se crea ninguna.
 
 **`PATCH /comandes/:id`** · **`DELETE /comandes/:id/linies/:liniaId`**
 
