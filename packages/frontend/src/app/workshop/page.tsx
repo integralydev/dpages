@@ -33,7 +33,7 @@ import {
 } from '@/lib/api';
 import { formatData } from '@/lib/dates';
 import { formatDecimal } from '@/lib/decimals';
-import { descarregarPdfObradorNoFetes } from '@/lib/ordersPdf';
+import { descarregarPdfObradorNoFetes, descarregarPdfObradorPantalla } from '@/lib/ordersPdf';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
 
 const ALL = 'Tots';
@@ -523,6 +523,57 @@ export default function WorkshopPage() {
   const [isPrinting, setIsPrinting] = useState(false);
   const [printError, setPrintError] = useState<string | null>(null);
 
+  // Etiquetes llegibles dels filtres actius, per a la capçalera dels PDF.
+  function etiquetesFiltres(ambTreball: boolean): string[] {
+    return [
+      selectedAgrupacions.length > 0 &&
+        `Agrupació: ${selectedAgrupacions.map((item) => item.label).join(', ')}`,
+      categoryFilter !== ALL_FEM && `Categoria: ${categoryFilter}`,
+      selectedProducts.length > 0 &&
+        `Productes: ${selectedProducts.map((item) => item.label).join(', ')}`,
+      selectedClient && `Client: ${selectedClient.label}`,
+      observacionsFilter !== ALL_FEM && observacionsFilter,
+      envasatFilter !== ALL && `Envasat: ${envasatFilter}`,
+      formatFilter !== ALL && `Format: ${formatFilter}`,
+      productionDateFilter && `Data producció: ${formatData(productionDateFilter, false)}`,
+      ambTreball && treballFilter !== ALL_FEM && `Estat línia: ${treballFilter}`,
+    ].filter((etiqueta): etiqueta is string => Boolean(etiqueta));
+  }
+
+  // Tasca 30: els acumulats per producte amb totes les seves línies a sota
+  // (sempre tot desplegat, encara que a pantalla estigui plegat), amb els
+  // mateixos filtres.
+  async function handlePrintScreen() {
+    if (!totals) return;
+    setIsPrinting(true);
+    setPrintError(null);
+    try {
+      const linies = await obtenirTotesLesPagines((pagina) =>
+        api.get<PanellObradorApi>('/panells/obrador', { ...filters, mida: 200, pagina }),
+      );
+      const liniesPerProducte = new Map<number, FilaPanellObradorApi[]>();
+      for (const linia of linies) {
+        const delProducte = liniesPerProducte.get(linia.producte.id) ?? [];
+        delProducte.push(linia);
+        liniesPerProducte.set(linia.producte.id, delProducte);
+      }
+      await descarregarPdfObradorPantalla({
+        grups,
+        liniesPerProducte,
+        totals,
+        filtres: etiquetesFiltres(true),
+      });
+    } catch (caught) {
+      setPrintError(
+        caught instanceof ApiError
+          ? `No s'ha pogut generar el PDF: ${caught.message}`
+          : "No s'ha pogut generar el PDF.",
+      );
+    } finally {
+      setIsPrinting(false);
+    }
+  }
+
   async function handlePrintPending() {
     setIsPrinting(true);
     setPrintError(null);
@@ -535,19 +586,7 @@ export default function WorkshopPage() {
           pagina,
         }),
       );
-      const etiquetes = [
-        selectedAgrupacions.length > 0 &&
-          `Agrupació: ${selectedAgrupacions.map((item) => item.label).join(', ')}`,
-        categoryFilter !== ALL_FEM && `Categoria: ${categoryFilter}`,
-        selectedProducts.length > 0 &&
-          `Productes: ${selectedProducts.map((item) => item.label).join(', ')}`,
-        selectedClient && `Client: ${selectedClient.label}`,
-        observacionsFilter !== ALL_FEM && observacionsFilter,
-        envasatFilter !== ALL && `Envasat: ${envasatFilter}`,
-        formatFilter !== ALL && `Format: ${formatFilter}`,
-        productionDateFilter && `Data producció: ${formatData(productionDateFilter, false)}`,
-      ].filter((etiqueta): etiqueta is string => Boolean(etiqueta));
-      await descarregarPdfObradorNoFetes({ linies, filtres: etiquetes });
+      await descarregarPdfObradorNoFetes({ linies, filtres: etiquetesFiltres(false) });
     } catch (caught) {
       setPrintError(
         caught instanceof ApiError
@@ -622,31 +661,44 @@ export default function WorkshopPage() {
               value={totals?.linies ?? 0}
               secondary={`${totals?.liniesFetes ?? 0} fetes · ${pendents} pendents`}
             />
-            <button
-              type="button"
-              onClick={() => {
-                setMarkAllError(null);
-                setMarkAllNotice(null);
-                setIsConfirmingMarkAll(true);
-              }}
-              disabled={isLoading || pendents === 0}
-              className="flex items-center gap-2 self-center rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <CheckCheck className="h-4 w-4" />
-              Marcar totes com a fetes ({pendents})
-            </button>
-            <button
-              type="button"
-              onClick={handlePrintPending}
-              disabled={isLoading || isPrinting}
-              className="flex items-center gap-2 self-center rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <Printer className="h-4 w-4" />
-              {isPrinting ? 'Generant PDF...' : 'Imprimir no fetes'}
-            </button>
+            {/* Un sota l'altre: en horitzontal ocupaven massa. */}
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setMarkAllError(null);
+                  setMarkAllNotice(null);
+                  setIsConfirmingMarkAll(true);
+                }}
+                disabled={isLoading || pendents === 0}
+                className="flex items-center justify-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <CheckCheck className="h-4 w-4" />
+                Marcar totes com a fetes ({pendents})
+              </button>
+              <button
+                type="button"
+                onClick={handlePrintScreen}
+                disabled={isLoading || isPrinting || grups.length === 0}
+                className="flex items-center justify-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Printer className="h-4 w-4" />
+                Imprimir llista
+              </button>
+              <button
+                type="button"
+                onClick={handlePrintPending}
+                disabled={isLoading || isPrinting}
+                className="flex items-center justify-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Printer className="h-4 w-4" />
+                Imprimir no fetes
+              </button>
+            </div>
           </div>
         }
       />
+      {isPrinting && <p className="-mt-6 mb-6 text-sm text-gray-500">Generant PDF...</p>}
       {printError && <p className="-mt-6 mb-6 text-sm text-red-600">{printError}</p>}
       {markAllNotice && (
         <p className="-mt-6 mb-6 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">

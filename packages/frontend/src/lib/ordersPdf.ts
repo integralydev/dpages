@@ -2,6 +2,7 @@ import type {
   ClientApi,
   ComandaDetallApi,
   ComandaResumApi,
+  FilaPanellObradorAcumulatApi,
   FilaPanellObradorApi,
   FilaPanellOficinaApi,
 } from '@/lib/api';
@@ -37,6 +38,8 @@ type OpcionsLlistat = {
   filtres: string[];
   /** Text quan no hi ha cap filtre actiu. */
   senseFiltres?: string;
+  /** Files (índex de `files`) en negreta i amb fons, p. ex. els acumulats. */
+  filesDestacades?: Set<number>;
   midaLletra?: number;
 };
 
@@ -95,6 +98,7 @@ async function descarregarPdfLlistat({
   resum,
   filtres,
   senseFiltres = 'Filtres: cap (totes les comandes)',
+  filesDestacades,
   midaLletra = 8.5,
 }: OpcionsLlistat): Promise<void> {
   const [{ jsPDF }, { autoTable }, logo] = await Promise.all([
@@ -161,6 +165,11 @@ async function descarregarPdfLlistat({
     didParseCell: (cell) => {
       if (cell.section === 'head') {
         cell.cell.styles.halign = columnes[cell.column.index]?.alineacio ?? 'left';
+      }
+      if (cell.section === 'body' && filesDestacades?.has(cell.row.index)) {
+        cell.cell.styles.fontStyle = 'bold';
+        cell.cell.styles.fillColor = [232, 232, 232];
+        cell.cell.styles.textColor = CARBO;
       }
     },
   });
@@ -342,6 +351,83 @@ export function descarregarPdfObradorNoFetes({
         formatDecimal(linia.kg, 3),
         linia.obsProduccio ?? '',
       ]),
+  });
+}
+
+// ── Panell Obrador tal com es veu (tasca 30) ─────────────────────────────
+
+// 273 mm útils. Les files de producte només omplen agrupació, producte,
+// unitats i pes; les de línia, la resta.
+const COLUMNES_OBRADOR_PANTALLA: ColumnaPdf[] = [
+  { titol: 'Agrupació producció', ample: 30 },
+  { titol: 'Producte', ample: 56 },
+  { titol: 'Envasat', ample: 24 },
+  { titol: 'Format', ample: 18 },
+  { titol: 'Client', ample: 38 },
+  { titol: 'Data producció', ample: 22 },
+  { titol: 'Unitats', ample: 18, alineacio: 'right' },
+  { titol: 'Pes (kg)', ample: 20, alineacio: 'right' },
+  { titol: 'Fet', ample: 12, alineacio: 'center' },
+  { titol: 'Obs. producció', ample: 35 },
+];
+
+/**
+ * El Panell Obrador desplegat sencer: una fila per producte amb els
+ * acumulats i, a sota, totes les seves línies que compleixen els filtres.
+ */
+export function descarregarPdfObradorPantalla({
+  grups,
+  liniesPerProducte,
+  totals,
+  filtres,
+}: {
+  grups: FilaPanellObradorAcumulatApi[];
+  liniesPerProducte: Map<number, FilaPanellObradorApi[]>;
+  totals: { linies: number; totalKg: string; totalUnitats: string };
+  filtres: string[];
+}): Promise<void> {
+  const files: string[][] = [];
+  const destacades = new Set<number>();
+  for (const grup of grups) {
+    destacades.add(files.length);
+    files.push([
+      grup.agrupacioProduccio ?? '-',
+      `${grup.producte.descripcio} (${grup.linies} ${grup.linies === 1 ? 'línia' : 'línies'})`,
+      '',
+      '',
+      '',
+      '',
+      formatDecimal(grup.unitats, 2),
+      formatDecimal(grup.kg, 3),
+      `${grup.liniesFetes}/${grup.linies}`,
+      '',
+    ]);
+    for (const linia of liniesPerProducte.get(grup.producte.id) ?? []) {
+      files.push([
+        '',
+        '',
+        linia.envasat ?? '-',
+        linia.format ?? '-',
+        linia.client ?? '-',
+        dataOGuio(linia.dataProduccio),
+        formatDecimal(linia.unitats, 2),
+        formatDecimal(linia.kg, 3),
+        linia.treballatA ? 'Sí' : '',
+        linia.obsProduccio ?? '',
+      ]);
+    }
+  }
+  const nomProductes = grups.length === 1 ? 'producte' : 'productes';
+  const nomLinies = totals.linies === 1 ? 'línia' : 'línies';
+  return descarregarPdfLlistat({
+    titol: "Panell d'Obrador",
+    nomFitxer: 'panell-obrador',
+    columnes: COLUMNES_OBRADOR_PANTALLA,
+    resum: `${grups.length} ${nomProductes} · ${totals.linies} ${nomLinies} · ${formatDecimal(totals.totalKg, 3)} kg · ${formatDecimal(totals.totalUnitats, 2)} unitats`,
+    filtres,
+    senseFiltres: 'Filtres: cap (totes les línies)',
+    filesDestacades: destacades,
+    files,
   });
 }
 
