@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Copy } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
@@ -13,8 +13,10 @@ import { useNavigationGuard } from '@/hooks/useNavigationGuard';
 import { extractComandaErrorMessage, type OrderLineChanges, useOrders } from '@/hooks/useOrders';
 import { useOrigensComanda } from '@/hooks/useOrigensComanda';
 import { useRates } from '@/hooks/useRates';
-import { api, ApiError, type ComandaDetallApi } from '@/lib/api';
+import { api, ApiError, type ComandaDetallApi, type ComandaDuplicadaApi } from '@/lib/api';
+import { duplicarComandes } from '@/lib/duplicarComandes';
 import { OrderForm, type OrderFormHandle } from '../OrderForm';
+import { ResultatDuplicatDialog } from '../ResultatDuplicatDialog';
 
 // Avís específic quan el "Desar" falla DESPRÉS d'haver-hi hagut algun
 // DELETE de línia real i exitós en aquesta sessió d'edició — el pedido
@@ -40,6 +42,8 @@ export default function OrderDetailPage() {
   const { data: origins } = useOrigensComanda();
   const formRef = useRef<OrderFormHandle>(null);
   const { setIsDirty } = useNavigationGuard();
+  // Còpia local de l'estat "canvis sense desar" per al botó Duplicar.
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   const [order, setOrder] = useState<ComandaDetallApi | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -185,6 +189,29 @@ export default function OrderDetailPage() {
     setReloadToken((token) => token + 1);
   }
 
+  // Tasca 17: duplica la comanda tal com està desada (per això cal desar
+  // abans si hi ha canvis pendents).
+  const [isDuplicating, setIsDuplicating] = useState(false);
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
+  const [duplicades, setDuplicades] = useState<ComandaDuplicadaApi[] | null>(null);
+
+  async function handleDuplicate() {
+    if (!order) return;
+    setIsDuplicating(true);
+    setDuplicateError(null);
+    try {
+      setDuplicades(await duplicarComandes([order.id]));
+    } catch (caught) {
+      setDuplicateError(
+        caught instanceof ApiError
+          ? `No s'ha pogut duplicar la comanda: ${caught.message}`
+          : "No s'ha pogut duplicar la comanda.",
+      );
+    } finally {
+      setIsDuplicating(false);
+    }
+  }
+
   async function handleConfirmIncidence() {
     if (!order) return;
     setIsMarkingIncidence(true);
@@ -241,6 +268,16 @@ export default function OrderDetailPage() {
               )}
             <button
               type="button"
+              onClick={handleDuplicate}
+              disabled={isDuplicating || hasUnsavedChanges}
+              title={hasUnsavedChanges ? 'Desa els canvis abans de duplicar la comanda' : undefined}
+              className="flex items-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Copy className="h-4 w-4" />
+              {isDuplicating ? 'Duplicant...' : 'Duplicar comanda'}
+            </button>
+            <button
+              type="button"
               onClick={() => formRef.current?.submit()}
               disabled={isSaving || order.congelada || hasDateErrors}
               className="rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
@@ -268,6 +305,7 @@ export default function OrderDetailPage() {
       )}
 
       {saveError && <p className="mb-4 text-sm text-red-600">{saveError}</p>}
+      {duplicateError && <p className="mb-4 text-sm text-red-600">{duplicateError}</p>}
       {lineWarning && <p className="mb-4 text-sm text-amber-700">{lineWarning}</p>}
 
       {order && (
@@ -284,9 +322,21 @@ export default function OrderDetailPage() {
           onSave={handleSave}
           onDeleteLine={handleDeleteLine}
           onDateErrorsChange={setHasDateErrors}
-          onDirtyChange={setIsDirty}
+          onDirtyChange={(dirty) => {
+            setIsDirty(dirty);
+            setHasUnsavedChanges(dirty);
+          }}
         />
       )}
+
+      <ResultatDuplicatDialog
+        creades={duplicades}
+        onClose={() => setDuplicades(null)}
+        onOpen={(id) => {
+          setDuplicades(null);
+          router.push(`/orders/${id}`);
+        }}
+      />
 
       <ConfirmDialog
         isOpen={confirmOpen}

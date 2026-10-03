@@ -34,6 +34,7 @@ export type {
   ReferenciaApi,
   ComandaResumApi,
   ComandaDetallApi,
+  ComandaDuplicadaApi,
   ComandaLiniaApi,
   ComandaCreacioApi,
   LiniaCreacioApi,
