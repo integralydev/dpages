@@ -46,9 +46,10 @@ const GUARD_COMANDES = crearGuardaModul('comandes');
 // más.
 const GUARD_COMANDES_LECTURA = crearGuardaModul(['comandes', 'panell-oficina']);
 
-// Únics 5 valors admesos per comanda.estat (mateixa llista que el CHECK
-// constraint de la taula, migracions 0003 i 0021).
+// Únics 6 valors admesos per comanda.estat (mateixa llista que el CHECK
+// constraint de la taula, migracions 0003, 0021 i 0023).
 const ESTATS_COMANDA_VALIDS = [
+  'esborrany',
   'oberta',
   'en_proces',
   'tancada',
@@ -916,7 +917,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           { camp: 'estat', missatge: `ha de ser un de: ${ESTATS_COMANDA_VALIDS.join(', ')}` },
         ]);
       }
-      // Decisión de negocio: transiciones libres entre los 5 estados, sin
+      // Decisión de negocio: transiciones libres entre los 6 estados, sin
       // máquina de estados. Única excepción: pasar a
       // amb_incidencia manualmente exige un motivo (detall), porque a
       // diferencia de las incidencias automáticas (sense_preu, etc.) acá no

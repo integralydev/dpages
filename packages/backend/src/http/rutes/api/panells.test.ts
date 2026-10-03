@@ -1126,6 +1126,69 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
     });
   });
 
+  describe('tasca 33 — estat esborrany', () => {
+    it('no surt a Obrador ni Empaquetat; sí a Oficina (també filtrant per esborrany)', async () => {
+      const fastify = construirServidor();
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [{ dataProduccio: '2026-08-01T00:00:00Z', producteId, unitatsDemanades: 1 }],
+        },
+      });
+      const comandaId = cuerpoJson<{ id: number }>(creada).id;
+      const patch = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comandaId}`,
+        payload: { estat: 'esborrany' },
+      });
+      expect(patch.statusCode).toBe(200);
+      expect(cuerpoJson<ComandaDetallApi>(patch).estat).toBe('esborrany');
+
+      const obrador = cuerpoJson<PanellObradorApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/obrador?mida=200' }),
+      );
+      expect(obrador.dades.some((f) => f.comandaId === comandaId)).toBe(false);
+      const empaquetat = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/empaquetat?mida=200' }),
+      );
+      expect(empaquetat.dades.some((f) => f.comandaId === comandaId)).toBe(false);
+      const oficina = cuerpoJson<PanellOficinaApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/oficina?mida=200' }),
+      );
+      expect(oficina.dades.some((f) => f.comandaId === comandaId)).toBe(true);
+      const nomesEsborranys = cuerpoJson<PanellOficinaApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: '/api/v1/panells/oficina?estat=esborrany&mida=200',
+        }),
+      );
+      expect(nomesEsborranys.dades.map((f) => f.comandaId)).toEqual([comandaId]);
+
+      // Tornar-la a oberta: torna a sortir a Obrador.
+      await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comandaId}`,
+        payload: { estat: 'oberta' },
+      });
+      const obrador2 = cuerpoJson<PanellObradorApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/obrador?mida=200' }),
+      );
+      expect(obrador2.dades.some((f) => f.comandaId === comandaId)).toBe(true);
+      // Neteja: tancada (no cancel·lada: el test de sota compta les cancel·lades).
+      await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comandaId}`,
+        payload: { estat: 'tancada' },
+      });
+
+      await fastify.close();
+    });
+  });
+
   // Petició d'Ari (29/09/2026). Al final del fitxer a propòsit: el pedido
   // cancel·lat no altera els totals que comproven els tests d'abans.
   describe('estat cancellada — fora de tots els panells', () => {

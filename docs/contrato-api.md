@@ -237,7 +237,8 @@ Siempre con esta forma, en cualquier código de estado:
 Todas están en `@dpages/shared`. Importalas, no las escribas a mano.
 
 ```typescript
-type EstatComanda = 'oberta' | 'en_proces' | 'tancada' | 'amb_incidencia' | 'cancellada';
+type EstatComanda =
+  'esborrany' | 'oberta' | 'en_proces' | 'tancada' | 'amb_incidencia' | 'cancellada';
 type TipusProducte = 'simple' | 'variable';
 type Idioma = 'ca' | 'es';
 ```
@@ -255,12 +256,29 @@ Etiquetas para mostrar (el backend no las envía, van en el frontend):
 
 | Valor            | Catalán        | Castellano     |
 | ---------------- | -------------- | -------------- |
+| `esborrany`      | Esborrany      | Borrador       |
 | `oberta`         | Oberta         | Abierta        |
 | `en_proces`      | En procés      | En proceso     |
 | `tancada`        | Tancada        | Cerrada        |
 | `amb_incidencia` | Amb incidència | Con incidencia |
 | `cancellada`     | Cancel·lada    | Cancelada      |
 
+> **`esborrany`** (03/10/2026, tareas 33 y 38): pedido pendiente de
+> revisar. Es el estado con el que se crean los pedidos que entran de
+> WooCommerce. **No cuenta** en `/panells/obrador` ni `/panells/empaquetat`
+> (ni filas ni totales); **sí** en `/panells/oficina` y
+> `/panells/produccio` (que hasta ahora sólo contaba `oberta` y pasa a
+> contar `oberta` y `esborrany`). Se pasa a `oberta` (u otro estado) a mano
+> desde el formulario del pedido. Una incidencia del sync (artículo no
+> resuelto, cliente sin datos…) se registra pero no saca el pedido de
+> `esborrany`.
+>
+> **Fecha de producción de los pedidos de WooCommerce** (tarea 39): al
+> crearse, la cabecera y sus líneas reciben `dataProduccio` = el lunes siguiente
+> (`AAAA-MM-DDT00:00:00Z`) si se crearon entre el martes a las 16:00 y el
+> domingo a las 24:00, hora de Europe/Madrid; si no, `null`. Las
+> actualizaciones posteriores del sync no la tocan.
+>
 > **`cancellada`** (29/09/2026, petición de Ari): el pedido sigue existiendo
 > y se ve en `GET /comandes` (también con `?estat=cancellada`), pero **no
 > cuenta en ningún panel**: `/panells/oficina`, `/panells/obrador`,
@@ -1008,7 +1026,7 @@ correo y WhatsApp, que son la mayoría del volumen real.
 > `409 CONFLICTE`. Mostralo visualmente.
 
 **`estat` en `PATCH /comandes/:id`** (capa 31) — permite mover el pedido a
-mano entre los 5 valores de `EstatComanda`, sin restricción de transición
+mano entre los 6 valores de `EstatComanda`, sin restricción de transición
 (cualquier estado puede pasar a cualquier otro). Pensado para los casos que
 el sistema no puede detectar solo: marcar incidencia por una queja del
 cliente o falta de stock, o volver de `amb_incidencia` a otro estado una vez
@@ -1022,7 +1040,7 @@ Si `estat` es `"amb_incidencia"`, `detall` es **obligatorio en el mismo
 body** — sin eso, `400 VALIDACIO`. Al aplicar, se registra una incidencia
 nueva (`tipus: "manual"`, ver sección 3) en `incidencies[]`, igual que las
 automáticas. Para cualquier otro valor de `estat`, `detall` se ignora si
-viene. Un `estat` que no sea uno de los 5 valores válidos también es
+viene. Un `estat` que no sea uno de los 6 valores válidos también es
 `400 VALIDACIO`. Mismo `409 CONFLICTE` si el pedido está congelado.
 
 **`origen` en `PATCH /comandes/:id`** — reasigna el canal del pedido.

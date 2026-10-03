@@ -119,8 +119,9 @@ export async function construirFiltresObrador(
   reply: FastifyReply,
   query: Record<string, unknown>,
 ): Promise<{ condicions: string[]; valors: unknown[] } | null> {
-  // Pedidos cancelados fuera (ver /panells/oficina).
-  const condicions: string[] = ['NOT cl.esborrat', `c.estat <> 'cancellada'`];
+  // Fora: comandes cancel·lades (ver /panells/oficina) i esborranys
+  // (tasca 33: l'esborrany no compta a Obrador ni Empaquetat).
+  const condicions: string[] = ['NOT cl.esborrat', `c.estat NOT IN ('cancellada', 'esborrany')`];
   const valors: unknown[] = [];
 
   // dataProduccio filtra por la fecha de la LÍNEA (cl.data_produccio), no
@@ -522,8 +523,11 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       const query = req.query as Record<string, unknown>;
       const { pagina, mida, offset } = parsearPaginacio(query);
 
-      // Pedidos cancelados fuera (ver /panells/oficina).
-      const condicions: string[] = ['NOT cl.esborrat', `c.estat <> 'cancellada'`];
+      // Fora: cancel·lades i esborranys (tasca 33), mateix criteri que Obrador.
+      const condicions: string[] = [
+        'NOT cl.esborrat',
+        `c.estat NOT IN ('cancellada', 'esborrany')`,
+      ];
       const valors: unknown[] = [];
 
       if (typeof query.dataExpedicioDes === 'string' && query.dataExpedicioDes !== '') {
@@ -739,8 +743,8 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       }
 
       const condicions: string[] = [
-        // Ya deja fuera los pedidos 'cancellada' (y cualquier otro estado).
-        `c.estat = 'oberta'`,
+        // Oberta i esborrany (tasca 33: l'esborrany sí compta a Producció).
+        `c.estat IN ('oberta', 'esborrany')`,
         'cat.elaborat_porc = true',
         'NOT cl.esborrat',
         // agrupacioProduccio/agrupacioRendiment son NO nulables en
@@ -843,7 +847,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       const condicionsCanals: string[] = [
         `cat.nom = 'CANALS'`,
         'NOT cl.esborrat',
-        `c.estat = 'oberta'`,
+        `c.estat IN ('oberta', 'esborrany')`,
       ];
       const valorsCanals: unknown[] = [];
       if (typeof query.dataDes === 'string' && query.dataDes !== '') {

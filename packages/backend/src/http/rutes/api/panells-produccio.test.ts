@@ -839,4 +839,74 @@ describe('API negoci — GET /panells/produccio (Postgres real, esquema aislado)
       await fastify.close();
     });
   });
+
+  // Tasca 33 (03/10/2026): l'esborrany SÍ compta a Producció (taula i
+  // canals), com l'oberta. Data pròpia perquè no toqui els altres totals.
+  describe('estat esborrany — compta a Producció', () => {
+    const DATA_ESB = '2026-09-15';
+
+    beforeAll(async () => {
+      const categoria = await entorn.poolTest.query<{ id: string }>(
+        `INSERT INTO categoria_producte (nom, elaborat_porc, agrupacio_rendiment)
+         VALUES ('ESB KG', true, 'KG') RETURNING id`,
+      );
+      const producte = await entorn.poolTest.query<{ id: string }>(
+        `INSERT INTO producte (codi, descripcio, tipus, categoria_id, agrupacio_produccio)
+         VALUES ('ESB-01', 'ESB-01', 'simple', $1, 'ESB-AGR') RETURNING id`,
+        [categoria.rows[0]!.id],
+      );
+      let canals = await entorn.poolTest.query<{ id: string }>(
+        `SELECT id FROM categoria_producte WHERE nom = 'CANALS'`,
+      );
+      if (!canals.rows[0]) {
+        canals = await entorn.poolTest.query<{ id: string }>(
+          `INSERT INTO categoria_producte (nom, elaborat_porc) VALUES ('CANALS', false) RETURNING id`,
+        );
+      }
+      const producteCanal = await entorn.poolTest.query<{ id: string }>(
+        `INSERT INTO producte (codi, descripcio, tipus, categoria_id)
+         VALUES ('ESB-CANAL', 'ESB-CANAL', 'simple', $1) RETURNING id`,
+        [canals.rows[0]!.id],
+      );
+      for (const [estat, kg, kgCanal] of [
+        ['esborrany', '7.000', '4.500'],
+        ['tancada', '100.000', '90.000'],
+      ] as const) {
+        const comanda = await entorn.poolTest.query<{ id: string }>(
+          `INSERT INTO comanda (origen_id, estat, data_comanda)
+           VALUES ((SELECT id FROM origen_comanda WHERE codi = 'manual'), $1, '2026-09-01') RETURNING id`,
+          [estat],
+        );
+        await entorn.poolTest.query(
+          `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
+             preu_unitari, pes_calculat_kg, data_produccio)
+           VALUES ($1, 0, $2, 1, '0.00', $3, $5), ($1, 1, $4, 2, '0.00', $6, $5)`,
+          [
+            comanda.rows[0]!.id,
+            producte.rows[0]!.id,
+            kg,
+            producteCanal.rows[0]!.id,
+            DATA_ESB,
+            kgCanal,
+          ],
+        );
+      }
+    });
+
+    it("la línia d'una comanda en esborrany suma a la taula i a canals; la tancada no", async () => {
+      const fastify = construirServidor();
+      const res = await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/panells/produccio?nombrePorcs=1&dataDes=${DATA_ESB}&dataFins=${DATA_ESB}`,
+      });
+      expect(res.statusCode).toBe(200);
+      const cuerpo = cuerpoJson<PanellProduccioApi>(res);
+      expect(cuerpo.dades.find((f) => f.agrupacioProduccio === 'ESB-AGR')?.kgAElaborar).toBe(
+        '7.000',
+      );
+      expect(cuerpo.totals.canals).toEqual({ unitats: '2.00', kg: '4.500' });
+
+      await fastify.close();
+    });
+  });
 });

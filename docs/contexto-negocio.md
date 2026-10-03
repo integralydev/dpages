@@ -80,11 +80,20 @@ Puesta en producción objetivo: **finales de septiembre de 2026**.
   confirmación explícita aunque coincidan con lo pedido (doble confirmación
   — motivo: por mermas se puede enviar menos de lo pedido, y hay que emitir
   abono o cargo).
-- Cinco estados de pedido: `oberta`, `en_proces`, `tancada`,
-  `amb_incidencia`, `cancellada` (añadido el 29/09/2026 a petición de Ari:
+- Seis estados de pedido: `esborrany`, `oberta`, `en_proces`, `tancada`,
+  `amb_incidencia`, `cancellada`. `esborrany` (03/10/2026, tareas 33 y 38):
+  pedido pendiente de revisar — entran así los de WooCommerce; no cuenta en
+  Obrador ni Empaquetat, sí en Oficina y Producció. Si al crearlo el sync
+  detecta una incidencia, se registra igual pero el pedido sigue en
+  `esborrany` (no pasa a `amb_incidencia`). `cancellada` (añadido el 29/09/2026 a petición de Ari:
   los pedidos cancelados quedan fuera de todos los paneles, pero se siguen
   viendo en la pantalla de pedidos; en el Panel Oficina sólo aparecen si se
   filtra explícitamente por ese estado).
+- Fecha de producción de los pedidos nuevos de WooCommerce (tarea 39,
+  03/10/2026): los que entran de martes a las 16:00 a domingo a las 24:00
+  (hora de Cataluña) se producen el lunes siguiente; los que entran el
+  lunes o el martes antes de las 16:00 quedan sin fecha. Sólo al crear el
+  pedido, en la cabecera y en todas sus líneas; después la fecha es del sistema.
 - El sistema sólo lee de WooCommerce. Nunca escribe de vuelta. La credencial
   de API es de sólo lectura.
 

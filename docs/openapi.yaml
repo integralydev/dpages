@@ -664,7 +664,7 @@ paths:
       tags: [Comandes]
       summary: Actualizar cabecera del pedido (parcial)
       description: >-
-        Capa 31. Incluye `estat`: transición libre entre los 5 valores de
+        Capa 31. Incluye `estat`: transición libre entre los 6 valores de
         EstatComanda, sin máquina de estados. Si `estat` es "amb_incidencia",
         `detall` es obligatorio en el mismo body (400 si falta) y se registra
         como una incidencia nueva (tipus "manual"). Capa 34: si cambia
@@ -1567,7 +1567,7 @@ components:
   schemas:
     EstatComanda:
       type: string
-      enum: [oberta, en_proces, tancada, amb_incidencia, cancellada]
+      enum: [esborrany, oberta, en_proces, tancada, amb_incidencia, cancellada]
 
     Error:
       type: object
@@ -2038,7 +2038,7 @@ components:
         estat:
           allOf: [{ $ref: '#/components/schemas/EstatComanda' }]
           description: >-
-            Capa 31. Transición libre entre los 5 estados, sin máquina de
+            Capa 31. Transición libre entre los 6 estados, sin máquina de
             estados. "cancellada" saca el pedido de todos los paneles. Si el valor es "amb_incidencia", `detall` es obligatorio
             en el mismo body y se registra como una incidencia nueva
             (tipus "manual") — a diferencia de las incidencias automáticas

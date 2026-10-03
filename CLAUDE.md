@@ -99,8 +99,13 @@ están documentadas ahí mismo y en el agente `woocommerce-integration`.
   campos SÍ pueden guardarse en 0 (rotura total, artículo agotado): la
   restricción de "mayor que cero" que tenían se sacó a propósito, reabriendo
   y reemplazando una decisión anterior.
-- Cinco estados de pedido: `oberta`, `en_proces`, `tancada`, `amb_incidencia`,
-  `cancellada`. Petición de Ari (29/09/2026): un pedido `cancellada` no cuenta
+- Seis estados de pedido: `esborrany`, `oberta`, `en_proces`, `tancada`,
+  `amb_incidencia`, `cancellada`. `esborrany` (tarea 33, 03/10/2026): no cuenta
+  en los paneles de Obrador ni Empaquetat; sí en Oficina y Producció. Es el
+  estado con el que entran los pedidos de WooCommerce (tarea 38); una
+  incidencia del sync no los saca de `esborrany`. Tarea 39: al crearse, la
+  cabecera y sus líneas reciben fecha de producción = lunes siguiente si entraron de martes
+  16:00 a domingo 24:00 (Europe/Madrid); si no, sin fecha. Petición de Ari (29/09/2026): un pedido `cancellada` no cuenta
   en **ninguno** de los cuatro paneles (ni en filas ni en totales), pero sigue
   visible en la pantalla de pedidos (filtro de estado incluido). Única
   excepción: en el Panel Oficina aparece si se filtra explícitamente por

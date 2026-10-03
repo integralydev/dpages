@@ -3,6 +3,7 @@ import type { WooOrder } from '@dpages/shared';
 import { pool as poolPerDefecte } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
 import { parsearFechaGmt } from '../sync/fechas.js';
+import { calcularDataProduccioWoo } from './data-produccio-woo.js';
 import { calcularPesLinia } from './pes.js';
 import { resolverArticle } from './resolucio-article.js';
 import { ConflicteIdentitatClient, resolverOCrearClient } from './resolucio-client.js';
@@ -46,9 +47,11 @@ async function obtenirComandaExistent(
  * "Se registra como incidencia" (ADR-007 y resolución de artículo): queda
  * un registro consultable, no sólo la marca en `estat`. `estat` se pisa a
  * 'amb_incidencia' aunque la comanda ya estuviera en otro estado — es la
- * señal para oficina de que hay algo que mirar. Excepción: una comanda
- * 'cancellada' sigue cancelada (la incidencia se registra igual), si no el
- * sync la volvería a meter en los paneles.
+ * señal para oficina de que hay algo que mirar. Excepciones (la incidencia
+ * se registra igual): una comanda 'cancellada' sigue cancelada, si no el
+ * sync la volvería a meter en los paneles; y una 'esborrany' sigue en
+ * esborrany (tarea 38), si no entraría en Obrador y Empaquetat antes de que
+ * oficina la revise — al revisarla ya verá la incidencia.
  */
 async function registrarIncidencia(
   client: PoolClient,
@@ -61,7 +64,7 @@ async function registrarIncidencia(
     [comandaId, tipus, detall],
   );
   await client.query(
-    `UPDATE comanda SET estat = 'amb_incidencia' WHERE id = $1 AND estat <> 'cancellada'`,
+    `UPDATE comanda SET estat = 'amb_incidencia' WHERE id = $1 AND estat NOT IN ('cancellada', 'esborrany')`,
     [comandaId],
   );
 }
@@ -144,11 +147,15 @@ async function crearComanda(
   client: PoolClient,
   wooOrder: WooOrder,
   clientId: string | null,
+  dataProduccio: Date | null,
 ): Promise<string> {
+  // Tarea 38 (03/10/2026): toda comanda de WooCommerce nace en esborrany —
+  // oficina la revisa y la pasa a oberta, y sólo entonces cuenta en
+  // Obrador y Empaquetat.
   const origenId = await resolverOrigenWoocommerceUuid(client);
   const res = await client.query<{ id: string }>(
-    `INSERT INTO comanda (woo_order_id, origen_id, estat, estat_web, poblacio_desti, total, data_modificacio_woo, client_id, data_comanda)
-     VALUES ($1, $2, 'oberta', $3, $4, $5, $6, $7, $8)
+    `INSERT INTO comanda (woo_order_id, origen_id, estat, estat_web, poblacio_desti, total, data_modificacio_woo, client_id, data_comanda, data_produccio)
+     VALUES ($1, $2, 'esborrany', $3, $4, $5, $6, $7, $8, $9)
      RETURNING id`,
     [
       wooOrder.id,
@@ -165,6 +172,7 @@ async function crearComanda(
       // actualización posterior) o que "ahora" (el momento del sync, que
       // puede ir minutos u horas detrás del pedido real).
       parsearFechaGmt(wooOrder.date_created_gmt),
+      dataProduccio,
     ],
   );
   return res.rows[0]!.id;
@@ -246,6 +254,7 @@ async function processarLinies(
   client: PoolClient,
   comandaId: string,
   wooOrder: WooOrder,
+  dataProduccioNoves: Date | null,
 ): Promise<{ liniesNoResoltes: number }> {
   const crudas = await client.query<FilaLiniaExistentCruda>(
     `SELECT id, woo_line_item_id, producte_id, ordinal FROM comanda_linia WHERE comanda_id = $1 AND NOT esborrat`,
@@ -316,9 +325,10 @@ async function processarLinies(
         `INSERT INTO comanda_linia (
            comanda_id, ordinal, woo_line_item_id, producte_id, alias_producte_id,
            woo_product_id, woo_variation_id, woo_sku,
-           unitats_demanades, preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-        [comandaId, ...valores],
+           unitats_demanades, preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
+           data_produccio
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+        [comandaId, ...valores, dataProduccioNoves],
       );
     }
   }
@@ -381,10 +391,18 @@ export async function transformarComanda(
     conflicteIdentitat = err.index;
   }
 
+  // Tarea 39: la data de producció sólo se calcula al crear la comanda, y
+  // va en la cabecera y en las líneas. En las actualizaciones posteriores
+  // es del sistema (ADR-005): no se toca, y las líneas que se añadan
+  // entran sin fecha.
+  const dataProduccioNoves = existent
+    ? null
+    : calcularDataProduccioWoo(parsearFechaGmt(wooOrder.date_created_gmt));
+
   let comandaId: string;
 
   if (!existent) {
-    comandaId = await crearComanda(client, wooOrder, clientId);
+    comandaId = await crearComanda(client, wooOrder, clientId, dataProduccioNoves);
   } else {
     comandaId = existent.id;
     await vincularClientSiFalta(client, comandaId, clientId);
@@ -415,7 +433,12 @@ export async function transformarComanda(
     }
   }
 
-  const { liniesNoResoltes } = await processarLinies(client, comandaId, wooOrder);
+  const { liniesNoResoltes } = await processarLinies(
+    client,
+    comandaId,
+    wooOrder,
+    dataProduccioNoves,
+  );
 
   if (liniesNoResoltes > 0) {
     await registrarIncidencia(
