@@ -933,36 +933,45 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       // dataDes/dataFins (mismo criterio "sin fecha = todas", issue #18) — ni
       // agrupacioRendiment ni producte ni la categoria de la tabla principal
       // le aplican.
-      const condicionsCanals: string[] = [
-        `cat.nom = 'CANALS'`,
-        'NOT cl.esborrat',
-        `c.estat IN ('oberta', 'esborrany')`,
-      ];
-      const valorsCanals: unknown[] = [];
-      if (typeof query.dataDes === 'string' && query.dataDes !== '') {
-        condicionsCanals.push(`cl.data_produccio::date >= $${valorsCanals.length + 1}::date`);
-        valorsCanals.push(query.dataDes);
-      }
-      if (typeof query.dataFins === 'string' && query.dataFins !== '') {
-        condicionsCanals.push(`cl.data_produccio::date <= $${valorsCanals.length + 1}::date`);
-        valorsCanals.push(query.dataFins);
-      }
-      const canals = await pool.query<{ unitats: string | null; kg: string | null }>(
-        `SELECT SUM(cl.unitats_demanades) AS unitats, SUM(cl.pes_calculat_kg)::numeric(14,3) AS kg
-       FROM comanda_linia cl
-       JOIN comanda c ON c.id = cl.comanda_id
-       JOIN producte p ON p.id = cl.producte_id
-       JOIN categoria_producte cat ON cat.id = p.categoria_id
-       WHERE ${condicionsCanals.join(' AND ')}`,
-        valorsCanals,
-      );
-      // Sin líneas que matcheen: SUM() de Postgres da NULL, no 0 — se
-      // normaliza acá para que el contrato nunca traiga null (mismo criterio
-      // que el resto de los totales de este panel, todos string siempre).
-      const totalsCanals = {
-        unitats: canals.rows[0]?.unitats ?? '0',
-        kg: canals.rows[0]?.kg ?? '0',
+      // Tasca 36 (03/10/2026): les mitges canals tenen la seva pròpia
+      // categoria ("MITJES CANALS") i el seu propi total, amb exactament el
+      // mateix càlcul que CANALS.
+      const sumarCategoriaCanals = async (
+        nomCategoria: string,
+      ): Promise<{ unitats: string; kg: string }> => {
+        const condicionsCanals: string[] = [
+          `cat.nom = $1`,
+          'NOT cl.esborrat',
+          `c.estat IN ('oberta', 'esborrany')`,
+        ];
+        const valorsCanals: unknown[] = [nomCategoria];
+        if (typeof query.dataDes === 'string' && query.dataDes !== '') {
+          condicionsCanals.push(`cl.data_produccio::date >= $${valorsCanals.length + 1}::date`);
+          valorsCanals.push(query.dataDes);
+        }
+        if (typeof query.dataFins === 'string' && query.dataFins !== '') {
+          condicionsCanals.push(`cl.data_produccio::date <= $${valorsCanals.length + 1}::date`);
+          valorsCanals.push(query.dataFins);
+        }
+        const canals = await pool.query<{ unitats: string | null; kg: string | null }>(
+          `SELECT SUM(cl.unitats_demanades) AS unitats, SUM(cl.pes_calculat_kg)::numeric(14,3) AS kg
+         FROM comanda_linia cl
+         JOIN comanda c ON c.id = cl.comanda_id
+         JOIN producte p ON p.id = cl.producte_id
+         JOIN categoria_producte cat ON cat.id = p.categoria_id
+         WHERE ${condicionsCanals.join(' AND ')}`,
+          valorsCanals,
+        );
+        // Sin líneas que matcheen: SUM() de Postgres da NULL, no 0 — se
+        // normaliza acá para que el contrato nunca traiga null (mismo criterio
+        // que el resto de los totales de este panel, todos string siempre).
+        return {
+          unitats: canals.rows[0]?.unitats ?? '0',
+          kg: canals.rows[0]?.kg ?? '0',
+        };
       };
+      const totalsCanals = await sumarCategoriaCanals('CANALS');
+      const totalsMitgesCanals = await sumarCategoriaCanals('MITJES CANALS');
 
       let totalKgAElaborarNum = 0;
       const dadesCompletes: PanellProduccioFilaApi[] = filas.rows.map((f) => {
@@ -1052,6 +1061,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
           kgRecortes: kgRecortesNum.toFixed(3),
           kgPaletillas: kgPaletillasNum.toFixed(3),
           canals: totalsCanals,
+          mitgesCanals: totalsMitgesCanals,
         },
         dades,
         paginacio: construirPaginacio(pagina, mida, dadesCompletes.length),

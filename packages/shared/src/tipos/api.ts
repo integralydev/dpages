@@ -742,6 +742,15 @@ export interface PanellProduccioApi {
       unitats: string;
       kg: string;
     };
+    /**
+     * Tasca 36 (03/10/2026): mateix càlcul que `canals`, però de la
+     * categoria "MITJES CANALS" (les mitges canals ja no se sumen amb les
+     * senceres). "0" si la categoria no existeix o no té línies.
+     */
+    mitgesCanals: {
+      unitats: string;
+      kg: string;
+    };
   };
   dades: PanellProduccioFilaApi[];
   paginacio: Paginacio;

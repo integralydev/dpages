@@ -1660,12 +1660,22 @@ Filtros: `?nombrePorcs=5&agrupacioRendiment=KG&producte=Llom fresc de porc&dataD
     "diferencia": "0.000",
     "kgJamon": "60.000",
     "kgRecortes": "30.000",
-    "kgPaletillas": "35.000"
+    "kgPaletillas": "35.000",
+    "canals": { "unitats": "3.00", "kg": "285.000" },
+    "mitgesCanals": { "unitats": "2.00", "kg": "110.000" }
   },
   "dades": [],
   "paginacio": { "pagina": 1, "mida": 50, "total": 0, "totalPagines": 0 }
 }
 ```
+
+> **`canals` / `mitgesCanals`** (tareas 35 y 36) — suma de unidades y kg de
+> las líneas de los artículos de la categoría `CANALS` y, aparte, de la
+> categoría `MITJES CANALS` (desde el 03/10/2026 las medias canales ya no
+> se suman con las enteras). Mismo criterio en los dos: líneas no borradas
+> de comandas `oberta` o `esborrany`, con el filtro de fechas de producción
+> (`dataDes`/`dataFins`) si lo hay; ningún otro filtro del panel les afecta.
+> `"0"` si la categoría no existe o no tiene líneas.
 
 > **`kgJamon`/`kgRecortes`/`kgPaletillas`** (capa 24) — rendimiento fijo por
 > cerdo, confirmado por Francesc: de un cerdo salen en promedio 12 kg de

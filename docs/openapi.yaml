@@ -2371,6 +2371,22 @@ components:
             kgPaletillas:
               type: string
               description: Igual que kgJamon — 7 kg/cerdo (Francesc).
+            canals:
+              type: object
+              description: >-
+                Suma de las líneas de la categoría CANALS (oberta y
+                esborrany, filtro de fechas de producción).
+              properties:
+                unitats: { type: string }
+                kg: { type: string }
+            mitgesCanals:
+              type: object
+              description: >-
+                Tarea 36. Igual que canals, para la categoría MITJES
+                CANALS. "0" si la categoría no existe.
+              properties:
+                unitats: { type: string }
+                kg: { type: string }
         dades:
           type: array
           items: { $ref: '#/components/schemas/PanellProduccioFila' }
