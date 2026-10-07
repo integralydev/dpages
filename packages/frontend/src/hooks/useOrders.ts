@@ -13,9 +13,12 @@ import {
   type RespostaPaginada,
 } from '@/lib/api';
 import { usePageClamp } from './usePageClamp';
+import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
 
 export type OrderListFilters = {
   estat?: string;
+  /** `OrigenComandaApi.codi` (GET /comandes?origen=, coincidència exacta). */
+  origen?: string;
   dataDes?: string;
   dataFins?: string;
   dataProduccioDes?: string;
@@ -35,7 +38,8 @@ export type OrderFormValues = {
    * En edición, `PATCH /comandes/:id` SÍ acepta `origen` (nueva
    * funcionalidad): sólo hacia uno de los 3 canales manuales
    * (whatsapp/telefon/correu), nunca "woocommerce" — el backend rechaza con
-   * 400 cualquier otro código, sin importar el origen actual del pedido.
+   * 400 cualquier otro código. Si el pedido ya es de WooCommerce, su
+   * origen no se puede cambiar (tarea 11).
    * `null` en este campo significa "el usuario no tocó el origen" — mismo
    * criterio que `tariffTouched`/`poblacioTouched` en OrderForm.tsx:
    * `editOrder` (más abajo) sólo incluye `origen` en el PATCH cuando viene
@@ -54,18 +58,16 @@ export type OrderFormValues = {
    * Issue #16 — nova, OBLIGATÒRIA als dos modes (POST i PATCH la rebutgen
    * buida). Mai `null` a diferència de les altres 3 dates: OrderForm.tsx
    * bloqueja el submit abans si estigués buida.
-   *
-   * Fusió posterior (decisió de negoci, confirmada per investigació:
-   * `comanda.dataProduccio` de capçalera no s'usa en cap
-   * filtre/pantalla més que la pròpia validació de coherència) —
-   * `OrderFormValues` ja NO té cap camp `dataProduccio` de capçalera
-   * separat. `createOrder`/`editOrder` (més avall) l'envien sempre
-   * idèntic a `dataComanda` en construir el body real, sense que
-   * OrderForm.tsx en sàpiga res. El de cada LÍNIA (`LiniaCreacioApi.
-   * dataProduccio`, dins `linies`) és un concepte real i distint que no
-   * es toca.
    */
   dataComanda: string;
+  /**
+   * Data de producció de CAPÇALERA (tasca 15, 01/10/2026). Revertix la
+   * fusió anterior que l'enviava sempre igual a `dataComanda`: torna a ser
+   * un camp propi del formulari, que s'aplica per defecte a les línies
+   * (OrderForm.tsx) i fa de mínim de les seves dates (regla 4 del backend).
+   * `null` = sense data de producció de capçalera.
+   */
+  dataProduccio: string | null;
   dataExpedicio: string | null;
   dataLliurament: string | null;
   bultos: number | null;
@@ -151,11 +153,11 @@ type UseOrdersResult = {
   ) => Promise<ComandaDetallApi>;
 };
 
-// Paginació real (20/pàgina) — a diferència de catálogos/categorías/
+// Paginació real (MIDA_PAGINA_LLISTATS/pàgina) — a diferència de catálogos/categorías/
 // tarifas, el volumen de comandas crece cada semana, así que ya se
 // filtraba server-side (los filtros de la pantalla tienen soporte real en
 // GET /comandes); ahora también pagina de verdad en vez de traer 200.
-const MIDA_PAGINA = 20;
+const MIDA_PAGINA = MIDA_PAGINA_LLISTATS;
 
 export function useOrders(filters: OrderListFilters = {}): UseOrdersResult {
   const [data, setData] = useState<ComandaResumApi[]>([]);
@@ -260,12 +262,9 @@ export function useOrders(filters: OrderListFilters = {}): UseOrdersResult {
 
       const creada = await api.post<ComandaDetallApi>('/comandes', cos);
 
-      // Fusió Data producció / Data comanda de capçalera (decisió de
-      // negoci) — `dataProduccio` de capçalera ja no és un camp que
-      // l'usuari trii per separat (OrderForm.tsx no en té cap input);
-      // sempre viatja idèntic a `dataComanda`, per això és l'única clau
-      // incondicional d'aquest PATCH.
-      const patchCos: Record<string, unknown> = { dataProduccio: values.dataComanda };
+      // Tasca 15: `dataProduccio` de capçalera torna a ser un camp propi.
+      const patchCos: Record<string, unknown> = {};
+      if (values.dataProduccio !== null) patchCos.dataProduccio = values.dataProduccio;
       if (values.bultos !== null) patchCos.bultos = values.bultos;
       if (values.poblacioDesti !== null) patchCos.poblacioDesti = values.poblacioDesti;
       if (values.adrecaLliurament !== null) patchCos.adrecaLliurament = values.adrecaLliurament;
@@ -300,10 +299,8 @@ export function useOrders(filters: OrderListFilters = {}): UseOrdersResult {
         // rebutja buida, mai null: OrderFormValues.dataComanda ja és
         // `string`, no cal cap guarda acá).
         dataComanda: values.dataComanda,
-        // Fusió Data producció / Data comanda de capçalera — mateix
-        // criteri que createOrder: sempre idèntica a dataComanda, mai un
-        // valor triat per separat.
-        dataProduccio: values.dataComanda,
+        // Tasca 15: camp propi de capçalera (null = buidar-la).
+        dataProduccio: values.dataProduccio,
         dataExpedicio: values.dataExpedicio,
         dataLliurament: values.dataLliurament,
         bultos: values.bultos,

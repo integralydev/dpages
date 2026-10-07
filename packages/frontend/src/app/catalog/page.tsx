@@ -15,13 +15,14 @@ import { useCatalog } from '@/hooks/useCatalog';
 import { useCategories } from '@/hooks/useCategories';
 import type { ProducteApi } from '@/lib/api';
 import { formatDecimal } from '@/lib/decimals';
+import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
 
 const ALL = 'Tots';
 const ALL_FEM = 'Totes';
 
 // Valors fixos del enum real (CHECK constraint, migració 0011) — mateix
 // criteri que workshop/page.tsx: no es deriven de `data` perquè amb
-// paginació real (20/pàgina) la pàgina actual pot no contenir tots els
+// paginació real (MIDA_PAGINA_LLISTATS/pàgina) la pàgina actual pot no contenir tots els
 // valors possibles.
 const FORMAT_OPTIONS = ['SENCER', 'TALLAT', 'LLESCAT'];
 const PACKAGING_OPTIONS = ['NORMAL', 'NORMAL (pes)', 'NORMAL (web)', 'ESPECIAL'];
@@ -93,7 +94,7 @@ export default function CatalogPage() {
   // producció ja no deriven de `data` (paginat a 20) — es
   // resolen contra fonts completes ja disponibles, mateix patró que
   // Format/Envasat/Estat (constants) però per a valors oberts que no ho
-  // poden ser. `useCategories()`/`useCatalog()` acá SENSE `mida: 20` és una
+  // poden ser. `useCategories()`/`useCatalog()` acá SENSE `mida: MIDA_PAGINA_LLISTATS` és una
   // segona crida independent (mida per defecte 200), no la mateixa que
   // alimenta la taula.
   const { data: allCategories } = useCategories();
@@ -144,7 +145,7 @@ export default function CatalogPage() {
     [search, categoriaId, productionGroup, format, packaging, status],
   );
   const { data, paginacio, setPagina, isLoading, error, refetch } = useCatalog(filters, {
-    mida: 20,
+    mida: MIDA_PAGINA_LLISTATS,
   });
 
   return (

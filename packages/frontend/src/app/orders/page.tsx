@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Printer } from 'lucide-react';
+import { Copy, FileText, Printer } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DataCard, DataCardActions, DataCardField, DataCardGrid } from '@/components/ui/DataCard';
@@ -20,12 +20,18 @@ import {
   api,
   ApiError,
   obtenirTotesLesPagines,
+  type ClientApi,
+  type ComandaDetallApi,
+  type ComandaDuplicadaApi,
   type ComandaResumApi,
   type RespostaPaginada,
 } from '@/lib/api';
 import { origenBadgeVariant } from '@/lib/comandaOrigen';
 import { formatData } from '@/lib/dates';
-import { descarregarPdfLlistatComandes } from '@/lib/ordersPdf';
+import { duplicarComandes } from '@/lib/duplicarComandes';
+import { eliminarComanda, potEliminarComanda } from '@/lib/eliminarComanda';
+import { descarregarPdfComandes, descarregarPdfLlistatComandes } from '@/lib/ordersPdf';
+import { ResultatDuplicatDialog } from './ResultatDuplicatDialog';
 
 const ALL = 'Tots';
 
@@ -36,21 +42,36 @@ function productionDates(order: ComandaResumApi): string {
 function OrderCard({
   order,
   originLabel,
+  isSelected,
+  onToggleSelected,
   onOpen,
   onMarkIncidence,
+  onDelete,
 }: {
   order: ComandaResumApi;
   originLabel: (codi: string) => string;
+  isSelected: boolean;
+  onToggleSelected: () => void;
   onOpen: () => void;
   onMarkIncidence: () => void;
+  onDelete: () => void;
 }) {
   return (
     <DataCard>
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="font-semibold text-gray-900">{order.num}</p>
-          <p className="text-sm text-gray-500">{order.client?.nom ?? '—'}</p>
-        </div>
+        <label className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={onToggleSelected}
+            aria-label={`Seleccionar la comanda ${order.num}`}
+            className="mt-1 h-4 w-4 accent-ink"
+          />
+          <span>
+            <span className="block font-semibold text-gray-900">{order.num}</span>
+            <span className="block text-sm text-gray-500">{order.client?.nom ?? '—'}</span>
+          </span>
+        </label>
         <div className="flex flex-col items-end gap-1">
           <Badge variant={estatBadgeVariant(order.estat)}>
             {ESTAT_LABELS[order.estat] ?? order.estat}
@@ -92,6 +113,15 @@ function OrderCard({
             Marcar incidència
           </button>
         )}
+        {potEliminarComanda(order) && (
+          <button
+            type="button"
+            onClick={onDelete}
+            className="flex-1 rounded-full border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+          >
+            Eliminar
+          </button>
+        )}
       </DataCardActions>
     </DataCard>
   );
@@ -102,6 +132,17 @@ export default function OrdersPage() {
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(ALL);
+  // Filtre d'origen: tots els orígens (també WooCommerce i l'històric
+  // "manual"), encara que a mà només es puguin triar els 3 canals manuals.
+  const { data: origins } = useOrigensComanda();
+  const [originFilter, setOriginFilter] = useState(ALL);
+  const originCode = useMemo(
+    () =>
+      originFilter !== ALL
+        ? origins.find((origin) => origin.nom === originFilter)?.codi
+        : undefined,
+    [originFilter, origins],
+  );
   const [productionDateFilter, setProductionDateFilter] = useState('');
   const [orderDateFilter, setOrderDateFilter] = useState('');
   const [deliveryDateFilter, setDeliveryDateFilter] = useState('');
@@ -133,6 +174,7 @@ export default function OrdersPage() {
   const filters = useMemo(
     () => ({
       ...(statusCode ? { estat: statusCode } : {}),
+      ...(originCode ? { origen: originCode } : {}),
       ...(orderDateFilter ? { dataDes: orderDateFilter, dataFins: orderDateFilter } : {}),
       ...(productionDateFilter
         ? { dataProduccioDes: productionDateFilter, dataProduccioFins: productionDateFilter }
@@ -142,19 +184,18 @@ export default function OrdersPage() {
         : {}),
       ...(search.trim() ? { cerca: search.trim() } : {}),
     }),
-    [statusCode, orderDateFilter, productionDateFilter, deliveryDateFilter, search],
+    [statusCode, originCode, orderDateFilter, productionDateFilter, deliveryDateFilter, search],
   );
 
   const { data, paginacio, setPagina, isLoading, error, refetch, markIncidence } =
     useOrders(filters);
-  const { data: origins } = useOrigensComanda();
   const originLabel = useMemo(() => {
     const byCodi = new Map(origins.map((origin) => [origin.codi, origin.nom]));
     return (codi: string) => byCodi.get(codi) ?? codi;
   }, [origins]);
 
   // Llistat en PDF (petició del client, 29/09/2026): TOTES les comandes
-  // que compleixen els filtres actius, no només la pàgina de 20 visible —
+  // que compleixen els filtres actius, no només la pàgina visible —
   // es tornen a demanar totes a GET /comandes amb els mateixos filtres.
   const [isPrinting, setIsPrinting] = useState(false);
   const [printError, setPrintError] = useState<string | null>(null);
@@ -162,6 +203,7 @@ export default function OrdersPage() {
   const activeFilterLabels = [
     search.trim() && `Cerca: ${search.trim()}`,
     statusFilter !== ALL && `Estat: ${statusFilter}`,
+    originFilter !== ALL && `Origen: ${originFilter}`,
     productionDateFilter && `Data producció: ${formatData(productionDateFilter, false)}`,
     orderDateFilter && `Data comanda: ${formatData(orderDateFilter, false)}`,
     deliveryDateFilter && `Data lliurament: ${formatData(deliveryDateFilter, false)}`,
@@ -187,6 +229,97 @@ export default function OrdersPage() {
       );
     } finally {
       setIsPrinting(false);
+    }
+  }
+
+  // Tasca 17: selecció per duplicar. Només compten les comandes visibles a
+  // la pàgina actual (si canvien els filtres o la pàgina, les altres no es
+  // dupliquen per sorpresa).
+  const [seleccio, setSeleccio] = useState<Set<number>>(() => new Set());
+  const seleccionades = data.filter((order) => seleccio.has(order.id));
+  const totesSeleccionades = data.length > 0 && seleccionades.length === data.length;
+  const [isDuplicating, setIsDuplicating] = useState(false);
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
+  const [duplicades, setDuplicades] = useState<ComandaDuplicadaApi[] | null>(null);
+
+  function toggleSeleccio(id: number) {
+    setSeleccio((actual) => {
+      const nova = new Set(actual);
+      if (nova.has(id)) nova.delete(id);
+      else nova.add(id);
+      return nova;
+    });
+  }
+
+  async function handleDuplicate() {
+    setIsDuplicating(true);
+    setDuplicateError(null);
+    try {
+      const creades = await duplicarComandes(seleccionades.map((order) => order.id));
+      setSeleccio(new Set());
+      setDuplicades(creades);
+      refetch();
+    } catch (caught) {
+      setDuplicateError(
+        caught instanceof ApiError
+          ? `No s'han pogut duplicar les comandes: ${caught.message}`
+          : "No s'han pogut duplicar les comandes.",
+      );
+    } finally {
+      setIsDuplicating(false);
+    }
+  }
+
+  // Tasca 13: detall de les comandes seleccionades en PDF (una per pàgina).
+  const [isPrintingOrders, setIsPrintingOrders] = useState(false);
+
+  async function handlePrintOrders() {
+    setIsPrintingOrders(true);
+    setPrintError(null);
+    try {
+      const [comandes, clients] = await Promise.all([
+        Promise.all(
+          seleccionades.map((order) => api.get<ComandaDetallApi>(`/comandes/${order.id}`)),
+        ),
+        obtenirTotesLesPagines((pagina) =>
+          api.get<RespostaPaginada<ClientApi>>('/clients', { mida: 200, pagina }),
+        ),
+      ]);
+      await descarregarPdfComandes({
+        comandes,
+        clients: new Map(clients.map((client) => [client.id, client])),
+        originLabel,
+      });
+    } catch (caught) {
+      setPrintError(
+        caught instanceof ApiError
+          ? `No s'han pogut imprimir les comandes: ${caught.message}`
+          : "No s'han pogut imprimir les comandes.",
+      );
+    } finally {
+      setIsPrintingOrders(false);
+    }
+  }
+
+  // Tasca 14: eliminar una comanda des de la llista.
+  const [deleteTarget, setDeleteTarget] = useState<ComandaResumApi | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleConfirmDelete() {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await eliminarComanda(deleteTarget.id);
+      setDeleteTarget(null);
+      refetch();
+    } catch (caught) {
+      setDeleteError(
+        caught instanceof ApiError ? caught.message : "No s'ha pogut eliminar la comanda.",
+      );
+    } finally {
+      setIsDeleting(false);
     }
   }
 
@@ -216,6 +349,34 @@ export default function OrdersPage() {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
+              onClick={handleDuplicate}
+              disabled={isDuplicating || seleccionades.length === 0}
+              title={seleccionades.length === 0 ? 'Selecciona les comandes a duplicar' : undefined}
+              className="flex items-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Copy className="h-4 w-4" />
+              {isDuplicating
+                ? 'Duplicant...'
+                : seleccionades.length > 1
+                  ? `Duplicar comanda (${seleccionades.length})`
+                  : 'Duplicar comanda'}
+            </button>
+            <button
+              type="button"
+              onClick={handlePrintOrders}
+              disabled={isPrintingOrders || seleccionades.length === 0}
+              title={seleccionades.length === 0 ? 'Selecciona les comandes a imprimir' : undefined}
+              className="flex items-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <FileText className="h-4 w-4" />
+              {isPrintingOrders
+                ? 'Generant PDF...'
+                : seleccionades.length > 1
+                  ? `Imprimir comanda (${seleccionades.length})`
+                  : 'Imprimir comanda'}
+            </button>
+            <button
+              type="button"
               onClick={handlePrint}
               disabled={isPrinting || isLoading || !paginacio || paginacio.total === 0}
               className="flex items-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
@@ -236,6 +397,7 @@ export default function OrdersPage() {
         }
       />
       {printError && <p className="-mt-6 mb-6 text-sm text-red-600">{printError}</p>}
+      {duplicateError && <p className="-mt-6 mb-6 text-sm text-red-600">{duplicateError}</p>}
 
       <FilterBar>
         <SearchInput label="Cerca (núm. comanda o client)" value={search} onChange={setSearch} />
@@ -244,6 +406,13 @@ export default function OrdersPage() {
           options={Object.values(ESTAT_LABELS)}
           value={statusFilter}
           onChange={setStatusFilter}
+          allLabel={ALL}
+        />
+        <SimpleDropdown
+          label="Origen"
+          options={origins.map((origin) => origin.nom)}
+          value={originFilter}
+          onChange={setOriginFilter}
           allLabel={ALL}
         />
         <DateInput
@@ -283,11 +452,17 @@ export default function OrdersPage() {
                 key={order.id}
                 order={order}
                 originLabel={originLabel}
+                isSelected={seleccio.has(order.id)}
+                onToggleSelected={() => toggleSeleccio(order.id)}
                 onOpen={() => router.push(`/orders/${order.id}`)}
                 onMarkIncidence={() => {
                   setIncidenceError(null);
                   setIncidenceDetall('');
                   setIncidenceTarget(order);
+                }}
+                onDelete={() => {
+                  setDeleteError(null);
+                  setDeleteTarget(order);
                 }}
               />
             ))}
@@ -297,13 +472,26 @@ export default function OrdersPage() {
             <table className="w-full table-fixed text-sm">
               <thead className="border-b border-gray-200">
                 <tr>
-                  <th className="w-[8%] px-2 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[4%] px-2 py-2 text-left">
+                    <input
+                      type="checkbox"
+                      checked={totesSeleccionades}
+                      onChange={() =>
+                        setSeleccio(
+                          totesSeleccionades ? new Set() : new Set(data.map((order) => order.id)),
+                        )
+                      }
+                      aria-label="Seleccionar totes les comandes de la pàgina"
+                      className="h-4 w-4 accent-ink"
+                    />
+                  </th>
+                  <th className="w-[7%] px-2 py-2 text-left font-medium text-gray-500 break-words">
                     Núm.
                   </th>
-                  <th className="w-[13%] px-2 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[11%] px-2 py-2 text-left font-medium text-gray-500 break-words">
                     Client
                   </th>
-                  <th className="w-[9%] px-2 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[8%] px-2 py-2 text-left font-medium text-gray-500 break-words">
                     Origen
                   </th>
                   <th className="hidden w-[8%] px-2 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
@@ -315,7 +503,7 @@ export default function OrdersPage() {
                   <th className="hidden w-[9%] px-2 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
                     Data producció
                   </th>
-                  <th className="w-[9%] px-2 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[8%] px-2 py-2 text-left font-medium text-gray-500 break-words">
                     Data lliurament
                   </th>
                   <th className="hidden w-[9%] px-2 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
@@ -324,10 +512,10 @@ export default function OrdersPage() {
                   <th className="hidden w-[6%] px-2 py-2 text-right font-medium text-gray-500 break-words xl:table-cell">
                     Bultos
                   </th>
-                  <th className="w-[9%] px-2 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[8%] px-2 py-2 text-left font-medium text-gray-500 break-words">
                     Estat
                   </th>
-                  <th className="w-[11%] px-2 py-2 text-right font-medium text-gray-500 break-words">
+                  <th className="w-[13%] px-2 py-2 text-right font-medium text-gray-500 break-words">
                     Accions
                   </th>
                 </tr>
@@ -339,6 +527,15 @@ export default function OrdersPage() {
                     onClick={() => router.push(`/orders/${order.id}`)}
                     className="cursor-pointer border-b border-gray-100 last:border-0 hover:bg-gray-50"
                   >
+                    <td className="px-2 py-3" onClick={(event) => event.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={seleccio.has(order.id)}
+                        onChange={() => toggleSeleccio(order.id)}
+                        aria-label={`Seleccionar la comanda ${order.num}`}
+                        className="h-4 w-4 accent-ink"
+                      />
+                    </td>
                     <td className="px-2 py-3 break-words">
                       <span className="font-semibold text-gray-900">{order.num}</span>
                     </td>
@@ -386,6 +583,16 @@ export default function OrdersPage() {
                           label="Editar comanda"
                           onClick={() => router.push(`/orders/${order.id}`)}
                         />
+                        {potEliminarComanda(order) && (
+                          <IconButton
+                            variant="delete"
+                            label="Eliminar comanda"
+                            onClick={() => {
+                              setDeleteError(null);
+                              setDeleteTarget(order);
+                            }}
+                          />
+                        )}
                         {order.estat !== 'amb_incidencia' && order.estat !== 'cancellada' && (
                           <IconButton
                             variant="warning"
@@ -408,6 +615,27 @@ export default function OrdersPage() {
           {paginacio && <Pagination paginacio={paginacio} onPageChange={setPagina} />}
         </>
       )}
+
+      <ConfirmDialog
+        isOpen={deleteTarget !== null}
+        title="Eliminar comanda"
+        message={`Vols eliminar la comanda ${deleteTarget?.num ?? ''}? S'esborrarà amb totes les seves línies i no es pot desfer.`}
+        confirmLabel="Eliminar"
+        cancelLabel="Cancel·lar"
+        errorMessage={deleteError}
+        isConfirming={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => {
+          setDeleteTarget(null);
+          setDeleteError(null);
+        }}
+      />
+
+      <ResultatDuplicatDialog
+        creades={duplicades}
+        onClose={() => setDuplicades(null)}
+        onOpen={(id) => router.push(`/orders/${id}`)}
+      />
 
       <ConfirmDialog
         isOpen={incidenceTarget !== null}

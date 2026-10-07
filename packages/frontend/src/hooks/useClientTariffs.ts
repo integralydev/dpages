@@ -28,7 +28,7 @@ export type ClientTariffsFilters = { cerca?: string };
  * servir com a taula de consulta completa en 5 llocs fora de la seva
  * pròpia pantalla (packaging, office, orders/page, orders/new, orders/[id])
  * per resoldre nom/codi de client — necessiten TOTS els clients, no una
- * pàgina de 20. Només `app/client-tariffs/page.tsx` passa `mida: 20`
+ * pàgina. Només `app/client-tariffs/page.tsx` passa `mida: MIDA_PAGINA_LLISTATS`
  * explícit per paginar de veritat la seva pròpia llista.
  *
  * BUG real corregit: amb 1291 clients reals, "sense `mida`" no
@@ -37,7 +37,7 @@ export type ClientTariffsFilters = { cerca?: string };
  * en silenci amb només els primers 200. Quan `params.mida` no es passa,
  * l'efecte de sota demana totes les pàgines i les combina (ver
  * `obtenirTotesLesPagines`, lib/api.ts) — `app/client-tariffs/page.tsx`
- * (que sí passa `mida: 20`) no entra per aquest camí, segueix paginant una
+ * (que sí passa `mida: MIDA_PAGINA_LLISTATS`) no entra per aquest camí, segueix paginant una
  * sola pàgina real com sempre.
  */
 export type UseClientTariffsParams = { mida?: number };

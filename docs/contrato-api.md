@@ -82,7 +82,7 @@ Tres criterios de guard, según el endpoint:
   `tarifes`, `categories`, `transportistes`, `tarifes-clients`,
   `rendiments-porcs`, `usuaris`, `rols`, o el `panell-*` correspondiente).
   Aplica a la escritura de todo recurso (incluida toda escritura sobre
-  `comandes`: `POST /comandes`, `PATCH /comandes/:id`,
+  `comandes`: `POST /comandes`, `POST /comandes/duplicar`, `PATCH /comandes/:id`, `DELETE /comandes/:id`,
   `POST`/`PATCH`/`DELETE .../linies`) y a la lectura de `/panells/*` y
   `/rendiments-porcs`.
 - **De apoyo** — la lectura (`GET`) de `/categories`, `/productes`,
@@ -237,7 +237,8 @@ Siempre con esta forma, en cualquier código de estado:
 Todas están en `@dpages/shared`. Importalas, no las escribas a mano.
 
 ```typescript
-type EstatComanda = 'oberta' | 'en_proces' | 'tancada' | 'amb_incidencia' | 'cancellada';
+type EstatComanda =
+  'esborrany' | 'oberta' | 'en_proces' | 'tancada' | 'amb_incidencia' | 'cancellada';
 type TipusProducte = 'simple' | 'variable';
 type Idioma = 'ca' | 'es';
 ```
@@ -255,12 +256,29 @@ Etiquetas para mostrar (el backend no las envía, van en el frontend):
 
 | Valor            | Catalán        | Castellano     |
 | ---------------- | -------------- | -------------- |
+| `esborrany`      | Esborrany      | Borrador       |
 | `oberta`         | Oberta         | Abierta        |
 | `en_proces`      | En procés      | En proceso     |
 | `tancada`        | Tancada        | Cerrada        |
 | `amb_incidencia` | Amb incidència | Con incidencia |
 | `cancellada`     | Cancel·lada    | Cancelada      |
 
+> **`esborrany`** (03/10/2026, tareas 33 y 38): pedido pendiente de
+> revisar. Es el estado con el que se crean los pedidos que entran de
+> WooCommerce. **No cuenta** en `/panells/obrador` ni `/panells/empaquetat`
+> (ni filas ni totales); **sí** en `/panells/oficina` y
+> `/panells/produccio` (que hasta ahora sólo contaba `oberta` y pasa a
+> contar `oberta` y `esborrany`). Se pasa a `oberta` (u otro estado) a mano
+> desde el formulario del pedido. Una incidencia del sync (artículo no
+> resuelto, cliente sin datos…) se registra pero no saca el pedido de
+> `esborrany`.
+>
+> **Fecha de producción de los pedidos de WooCommerce** (tarea 39): al
+> crearse, la cabecera y sus líneas reciben `dataProduccio` = el lunes siguiente
+> (`AAAA-MM-DDT00:00:00Z`) si se crearon entre el martes a las 16:00 y el
+> domingo a las 24:00, hora de Europe/Madrid; si no, `null`. Las
+> actualizaciones posteriores del sync no la tocan.
+>
 > **`cancellada`** (29/09/2026, petición de Ari): el pedido sigue existiendo
 > y se ve en `GET /comandes` (también con `?estat=cancellada`), pero **no
 > cuenta en ningún panel**: `/panells/oficina`, `/panells/obrador`,
@@ -380,9 +398,13 @@ Filtros: `?categoriaId=1&tipus=simple&actiu=true&cerca=llom&agrupacioProduccio=L
 
 > **`agrupacioProduccio` (capa 45, corrección de Michel)**: coincidencia
 > EXACTA, case-insensitive (`LOWER(...) = LOWER(...)`, regla 3.1
-> transversal) — hasta esta capa quedó case-sensitive por descuido. No
-> confundir con `cerca`, que sí es substring (`ILIKE`) sobre
-> descripció/descripcioVenda/codi.
+> transversal) — hasta esta capa quedó case-sensitive por descuido.
+>
+> **`cerca` (tarea 18, 01/10/2026): "empieza por"**, case-insensitive,
+> sobre descripció/descripcioVenda/codi: `cerca=llom` trae "Llom fresc" y
+> "Llom sencer" pero no "Cap de llom". Antes era coincidencia exacta y la
+> pantalla de Catàleg no filtraba mientras se escribía. Los comodines de
+> `LIKE` que escriba el usuario (`%`, `_`) se tratan como texto literal.
 
 ```json
 {
@@ -454,6 +476,9 @@ en celda.
 **`GET /tarifes/matriu`**
 
 Filtros: `?categoriaId=1&cerca=llom`
+
+> `cerca`: "empieza por" sobre descripció/codi (tarea 18), mismo criterio
+> que `GET /productes`.
 
 ```json
 {
@@ -833,6 +858,12 @@ Filtros: `?estat=oberta&clientId=45&origen=web&dataDes=2026-08-01&dataFins=2026-
 > que es del pedido completo). El prototipo muestra ambas como editables por
 > separado.
 >
+> **Tarea 15 (01/10/2026):** el formulario vuelve a tener la fecha de
+> producción de **cabecera** como campo propio (antes se enviaba siempre
+> igual a `dataComanda`). Se copia por defecto a las líneas nuevas y a las
+> que la seguían; cada línea la puede cambiar, pero no a una fecha anterior
+> (regla 4). Sin cambios en la API: `dataProduccio` de cabecera ya existía.
+>
 > **`linies[].categoria`/`format`/`envasat`** (capa 20): mismos tres campos
 > que ya devuelve `GET /panells/obrador` para esta misma línea (sección
 > 4.7), resueltos igual — `categoria` es el nombre de la categoría del
@@ -967,6 +998,40 @@ correo y WhatsApp, que son la mayoría del volumen real.
 > pueden dispararse la regla 5 (línea vs. `dataLliurament`) y la regla 7
 > (`dataComanda` vs. `dataLliurament`, ambas siempre presentes en este body).
 
+**`POST /comandes/duplicar`** (tarea 17, 03/10/2026) — duplica una o varias
+comandas. Body: `{ "ids": [142, 143] }` (ids públicos, entre 1 y 100; los
+repetidos cuentan una vez). Respuesta `201`:
+
+```json
+{
+  "comandes": [
+    { "id": 701, "num": "000701", "origen": { "id": 142, "num": "000142" }, "liniesOmeses": 0 }
+  ]
+}
+```
+
+> - Cada copia nace en `esborrany`, con `dataComanda` = hoy (Europe/Madrid)
+>   y el resto de fechas en `null` (cabecera y líneas).
+> - Se copian cliente, tarifa, transportista, población, dirección y
+>   observaciones de cabecera; de las líneas, producto, unidades, kg (sólo
+>   en artículos a medida) y observaciones de producción y empaquetado.
+> - No se copia nada de empaquetado (unidades/kg enviados, confirmación,
+>   bultos) ni la congelación.
+> - Precio y peso de ficha se resuelven de nuevo como en `POST /comandes`
+>   (tarifa y ficha actuales); un precio sin resolver registra la misma
+>   incidencia `sense_preu`.
+> - Una comanda de WooCommerce se duplica con origen `manual` (tarea 11).
+>   Sus líneas sin artículo resuelto no se copian (`liniesOmeses`).
+> - Todo o nada: si algún id no existe, `400 VALIDACIO` y no se crea ninguna.
+
+**`DELETE /comandes/:id`** (tarea 14, 03/10/2026) — elimina una comanda que
+no tiene nada generado. Borrado físico: sus líneas e incidencias se borran
+con ella. `204` si se elimina; `409 CONFLICTE` (con el motivo en el
+mensaje) si es de WooCommerce (el sync la volvería a crear: se cancela en
+su lugar), si está congelada o si alguna línea, también borrada, está
+hecha en el Obrador (`treballatA`) o tiene datos de empaquetado (unidades
+o kg enviados, confirmación). `404` si no existe.
+
 **`PATCH /comandes/:id`** · **`DELETE /comandes/:id/linies/:liniaId`**
 
 > **Issue #16 (Francesc) — `dataComanda` es editable acá**, a diferencia de
@@ -995,7 +1060,7 @@ correo y WhatsApp, que son la mayoría del volumen real.
 > `409 CONFLICTE`. Mostralo visualmente.
 
 **`estat` en `PATCH /comandes/:id`** (capa 31) — permite mover el pedido a
-mano entre los 5 valores de `EstatComanda`, sin restricción de transición
+mano entre los 6 valores de `EstatComanda`, sin restricción de transición
 (cualquier estado puede pasar a cualquier otro). Pensado para los casos que
 el sistema no puede detectar solo: marcar incidencia por una queja del
 cliente o falta de stock, o volver de `amb_incidencia` a otro estado una vez
@@ -1009,24 +1074,29 @@ Si `estat` es `"amb_incidencia"`, `detall` es **obligatorio en el mismo
 body** — sin eso, `400 VALIDACIO`. Al aplicar, se registra una incidencia
 nueva (`tipus: "manual"`, ver sección 3) en `incidencies[]`, igual que las
 automáticas. Para cualquier otro valor de `estat`, `detall` se ignora si
-viene. Un `estat` que no sea uno de los 5 valores válidos también es
+viene. Un `estat` que no sea uno de los 6 valores válidos también es
 `400 VALIDACIO`. Mismo `409 CONFLICTE` si el pedido está congelado.
 
-**`origen` en `PATCH /comandes/:id`** — reasigna el canal del pedido, sin
-importar cuál sea el origen actual (incluye pedidos hoy en `"woocommerce"`
-o en el valor histórico `"manual"`: cualquiera de los dos se puede mover a
-uno de los 4 canales elegibles).
+**`origen` en `PATCH /comandes/:id`** — reasigna el canal del pedido.
 
 ```json
 { "origen": "whatsapp" }
 ```
 
-Sólo acepta uno de estos 4 códigos — `"whatsapp"`, `"telefon"`,
-`"correu"`, `"woocommerce"` — **nunca** `"manual"` (valor histórico):
+Sólo acepta uno de estos 3 códigos — `"whatsapp"`, `"telefon"`,
+`"correu"` — **nunca** `"manual"` (valor histórico) **ni `"woocommerce"`**:
 cualquier otro valor es `400 VALIDACIO`, con el mensaje indicando los
-códigos válidos. `"woocommerce"` es a la vez el valor que asigna la
-sincronización automática y un destino elegible a mano — las dos cosas
-coexisten sin conflicto. Un código bien formado pero inexistente en
+códigos válidos.
+
+> **`"woocommerce"` bloqueado en los dos sentidos** (tarea 11, 01/10/2026,
+> revierte la decisión anterior que lo hacía elegible a mano): sólo lo
+> asigna la sincronización automática. No se puede elegir al crear un
+> pedido a mano (`POST /comandes` con `origen: "woocommerce"` →
+> `400 VALIDACIO`) ni cambiar el origen de un pedido que ya es de
+> WooCommerce (`400 VALIDACIO`). Reenviar `"woocommerce"` a un pedido que ya
+> lo es no es un error: se ignora.
+
+Un código bien formado pero inexistente en
 `origen_comanda` también es `400 VALIDACIO` (chequeo defensivo — los
 canales están sembrados de fábrica). Mismo `409 CONFLICTE` que el resto de
 los campos si el pedido está congelado — sin ninguna excepción especial
@@ -1184,7 +1254,63 @@ líneas individuales visibles.
 
 **`GET /panells/obrador`**
 
-Filtros: `?dataProduccioDes=&dataProduccioFins=&categoriaId=&tipus=&producte=&format=&envasat=`
+Filtros: `?dataProduccioDes=&dataProduccioFins=&categoriaId=&tipus=&producte=&format=&envasat=&clientId=&agrupacioProduccio=&observacions=&treball=`
+
+> **Filtros nuevos (01/10/2026):**
+>
+> - `clientId` (tarea 25): cliente del pedido.
+> - `agrupacioProduccio` (tarea 28): repetible, coincidencia exacta con
+>   `producte.agrupacio_produccio`; varios valores = cualquiera de ellos.
+> - `observacions` (tarea 31): `si` / `no` — línea con observaciones de
+>   producción **de la propia línea** (las de cabecera no cuentan: el panel
+>   muestra datos de línea).
+> - `treball` (tarea 26): `pendents` (`treballatA` null) o `fets`.
+>
+> Otro valor de `observacions`/`treball` es `400 VALIDACIO`. Los `totals`
+> traen además `liniesFetes` y `liniesPendents`.
+>
+> - `producteId` (tarea 29, 03/10/2026): las líneas de un solo producto
+>   (id público). Es lo que usa la pantalla para desplegar una fila de la
+>   vista acumulada. No numérico: `400 VALIDACIO`.
+
+**`GET /panells/obrador/acumulat`** (tarea 29, 03/10/2026) — vista por
+defecto de la pantalla: una fila por producto con la suma de las líneas que
+cumplen los filtros (los mismos de `GET /panells/obrador`, incluido
+`treball`). Ordenada por `agrupacioProduccio` (las nulas al final) y
+descripción. Sin paginar: como mucho, una fila por artículo. Los `totals`
+son los mismos que los de `GET /panells/obrador` con esos filtros.
+
+```json
+{
+  "totals": {
+    "linies": 572,
+    "liniesFetes": 0,
+    "liniesPendents": 572,
+    "totalUnitats": "2015.90",
+    "totalKg": "1044.265"
+  },
+  "dades": [
+    {
+      "producte": { "id": 348, "codi": "CAPLLSN", "descripcio": "CAP LLOM SENCER NORMAL" },
+      "agrupacioProduccio": "CAP LLOM",
+      "unitats": "14.00",
+      "kg": "28.000",
+      "linies": 5,
+      "liniesFetes": 0
+    }
+  ]
+}
+```
+
+> Cada fila trae además `agrupacioProduccio` (`producte.agrupacio_produccio`,
+> `null` si el producto no tiene), que el panel muestra antes del producto.
+>
+> **`POST /panells/obrador/marcar-fets`** (tarea 26) — acepta **los mismos
+> filtros** como query string y marca como trabajadas (`treballatA` =
+> ahora, `treballatPer` = el usuario) **todas** las líneas pendientes que
+> los cumplen, no sólo una página. Las de pedidos congelados se dejan
+> igual. Respuesta: `{ "marcades": 12, "congeladesOmeses": 1 }`. Exige el
+> mòdul `panell-obrador`.
 
 > **`producte` repetible (petición del cliente, 29/09/2026):**
 > `?producte=Llom%20fresc&producte=Botifarra` devuelve las líneas de
@@ -1323,6 +1449,11 @@ Respuesta `200`:
 
 Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&producte=&categoriaId=&confirmacio=`
 
+> **`transportistaId` repetible** (tarea 22, 01/10/2026):
+> `?transportistaId=1&transportistaId=4` devuelve las líneas de cualquiera
+> de esos transportistas. Un solo valor funciona igual que antes; un id no
+> numérico es `400 VALIDACIO`.
+
 > **Peticiones de Ari (29/09/2026):**
 >
 > - `categoriaId`: categoría del artículo de la línea, mismo criterio que
@@ -1334,6 +1465,16 @@ Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramen
 >   `confirmades` (ya enviadas: se guardaron unidades y kilos
 >   enviados). Sin el parámetro, todas. Cualquier otro valor es
 >   `400 VALIDACIO`. Los `totals` respetan el filtro, como todos los demás.
+> - `observacions` (tarea 23, 01/10/2026): `si` / `no` — línea con
+>   **observación de empaquetado** (`obsEmpaquetat`, ver abajo).
+>
+> **`obsEmpaquetat`** (tarea 7, 01/10/2026, migración `0022`): observación
+> de empaquetado a nivel de **línea** de pedido (por ejemplo, la unidad
+> familiar a la que va el producto). Cada fila del panel la trae (`null` si
+> no hay). Se informa al crear el pedido (`linies[].obsEmpaquetat` en
+> `POST /comandes`), al añadir una línea (`POST .../linies`) y al editarla
+> (`PATCH .../linies/:liniaId`); `GET /comandes/:id` la devuelve en
+> `linies[]`. Vacía o sólo espacios = `null`.
 
 > `dataExpedicioFins`/`dataLliuramentFins` incluyen el día completo — ver
 > "Filtros de rango de fecha" en la sección 2 (capa 36).
@@ -1519,12 +1660,22 @@ Filtros: `?nombrePorcs=5&agrupacioRendiment=KG&producte=Llom fresc de porc&dataD
     "diferencia": "0.000",
     "kgJamon": "60.000",
     "kgRecortes": "30.000",
-    "kgPaletillas": "35.000"
+    "kgPaletillas": "35.000",
+    "canals": { "unitats": "3.00", "kg": "285.000" },
+    "mitgesCanals": { "unitats": "2.00", "kg": "110.000" }
   },
   "dades": [],
   "paginacio": { "pagina": 1, "mida": 50, "total": 0, "totalPagines": 0 }
 }
 ```
+
+> **`canals` / `mitgesCanals`** (tareas 35 y 36) — suma de unidades y kg de
+> las líneas de los artículos de la categoría `CANALS` y, aparte, de la
+> categoría `MITJES CANALS` (desde el 03/10/2026 las medias canales ya no
+> se suman con las enteras). Mismo criterio en los dos: líneas no borradas
+> de comandas `oberta` o `esborrany`, con el filtro de fechas de producción
+> (`dataDes`/`dataFins`) si lo hay; ningún otro filtro del panel les afecta.
+> `"0"` si la categoría no existe o no tiene líneas.
 
 > **`kgJamon`/`kgRecortes`/`kgPaletillas`** (capa 24) — rendimiento fijo por
 > cerdo, confirmado por Francesc: de un cerdo salen en promedio 12 kg de
@@ -2000,6 +2151,13 @@ bueno, porque el visto bueno se convierte en automatismo.
 
 **No se puede guardar sin confirmar.** Rellenar los campos y no marcar la
 confirmación no es un estado válido.
+
+**Cierre automático (tarea 16, 03/10/2026).** Al confirmar la última línea
+activa (no borrada) de una comanda en `oberta` o `en_proces`, la comanda
+pasa sola a `tancada`. Las de otros estados (`esborrany`, `amb_incidencia`,
+`cancellada`) no se tocan. Al revés, `PATCH .../lliurament/desfer` sobre una
+línea de una comanda `tancada` la devuelve a `oberta`. La respuesta de los
+dos endpoints no cambia: el estado nuevo se ve en `GET /comandes/:id`.
 
 **Por qué existe todo esto:** por mermas se envía menos de lo pedido —una
 longaniza sale más corta, falta materia prima— y la diferencia entre lo pedido

@@ -1,4 +1,11 @@
-import type { ComandaResumApi, FilaPanellOficinaApi } from '@/lib/api';
+import type {
+  ClientApi,
+  ComandaDetallApi,
+  ComandaResumApi,
+  FilaPanellObradorAcumulatApi,
+  FilaPanellObradorApi,
+  FilaPanellOficinaApi,
+} from '@/lib/api';
 import { ESTAT_LABELS } from '@/lib/comandaEstat';
 import { formatData } from '@/lib/dates';
 import { formatDecimal } from '@/lib/decimals';
@@ -29,6 +36,10 @@ type OpcionsLlistat = {
   resum: string;
   /** Resum llegible dels filtres actius ("Estat: Oberta"...); buit = cap. */
   filtres: string[];
+  /** Text quan no hi ha cap filtre actiu. */
+  senseFiltres?: string;
+  /** Files (índex de `files`) en negreta i amb fons, p. ex. els acumulats. */
+  filesDestacades?: Set<number>;
   midaLletra?: number;
 };
 
@@ -46,7 +57,8 @@ const LOGO_RATIO = 313 / 112; // amplada/alçada del PNG
  * Helvetica (la font estàndard de jsPDF) només cobreix Latin-1: el català
  * hi cap sencer (à, ç, ï, ·...), però la tipografia "intel·ligent" que pot
  * portar un nom de client o de tarifa (’ “ ” – …) sortiria com a
- * caràcters estranys. Es passa a l'equivalent ASCII.
+ * caràcters estranys. Es passa a l'equivalent ASCII. El símbol € sí que
+ * hi és (codificació WinAnsi de jsPDF).
  */
 function textPdf(text: string): string {
   return text
@@ -54,7 +66,7 @@ function textPdf(text: string): string {
     .replace(/[“”„″]/g, '"')
     .replace(/[–—−]/g, '-')
     .replace(/…/g, '...')
-    .replace(/[^\u0000-ÿ]/g, '?');
+    .replace(/[^\u0000-ÿ€]/g, '?');
 }
 
 async function carregarLogo(): Promise<string | null> {
@@ -85,6 +97,8 @@ async function descarregarPdfLlistat({
   files,
   resum,
   filtres,
+  senseFiltres = 'Filtres: cap (totes les comandes)',
+  filesDestacades,
   midaLletra = 8.5,
 }: OpcionsLlistat): Promise<void> {
   const [{ jsPDF }, { autoTable }, logo] = await Promise.all([
@@ -113,7 +127,7 @@ async function descarregarPdfLlistat({
   doc.setTextColor(...GRIS_TEXT);
   doc.text(textPdf(`${resum} · Generat el ${formatData(ara.toISOString(), true)}`), MARGE, 29);
   const liniaFiltres = textPdf(
-    filtres.length > 0 ? `Filtres: ${filtres.join(' · ')}` : 'Filtres: cap (totes les comandes)',
+    filtres.length > 0 ? `Filtres: ${filtres.join(' · ')}` : senseFiltres,
   );
   const filtresPartits = doc.splitTextToSize(liniaFiltres, ample - 2 * MARGE) as string[];
   doc.text(filtresPartits, MARGE, 34);
@@ -151,6 +165,11 @@ async function descarregarPdfLlistat({
     didParseCell: (cell) => {
       if (cell.section === 'head') {
         cell.cell.styles.halign = columnes[cell.column.index]?.alineacio ?? 'left';
+      }
+      if (cell.section === 'body' && filesDestacades?.has(cell.row.index)) {
+        cell.cell.styles.fontStyle = 'bold';
+        cell.cell.styles.fillColor = [232, 232, 232];
+        cell.cell.styles.textColor = CARBO;
       }
     },
   });
@@ -277,4 +296,360 @@ export function descarregarPdfPanellOficina({
       (comanda.obsLliurament ?? '').trim().length > 0 ? 'Sí' : '-',
     ]),
   });
+}
+
+// ── Panell Obrador: línies no fetes (tasca 27) ───────────────────────────
+
+// 273 mm útils.
+const COLUMNES_OBRADOR: ColumnaPdf[] = [
+  { titol: 'Agrupació producció', ample: 30 },
+  { titol: 'Producte', ample: 56, negreta: true },
+  { titol: 'Envasat', ample: 25 },
+  { titol: 'Format', ample: 18 },
+  { titol: 'Client', ample: 40 },
+  { titol: 'Data producció', ample: 22 },
+  { titol: 'Unitats', ample: 18, alineacio: 'right' },
+  { titol: 'Pes (kg)', ample: 20, alineacio: 'right' },
+  { titol: 'Obs. producció', ample: 44 },
+];
+
+export function descarregarPdfObradorNoFetes({
+  linies,
+  filtres,
+}: {
+  linies: FilaPanellObradorApi[];
+  filtres: string[];
+}): Promise<void> {
+  const kg = linies.reduce((total, linia) => total + Number(linia.kg), 0);
+  const unitats = linies.reduce((total, linia) => total + Number(linia.unitats), 0);
+  const nomLinies = linies.length === 1 ? 'línia' : 'línies';
+  return descarregarPdfLlistat({
+    titol: 'Obrador: línies no fetes',
+    nomFitxer: 'obrador-no-fetes',
+    columnes: COLUMNES_OBRADOR,
+    resum: `${linies.length} ${nomLinies} · ${formatDecimal(kg.toFixed(3), 3)} kg · ${formatDecimal(unitats.toFixed(2), 2)} unitats`,
+    filtres,
+    senseFiltres: 'Filtres: cap (totes les línies no fetes)',
+    // Ordenades per agrupació de producció i producte (les que no tenen
+    // agrupació, al final).
+    files: [...linies]
+      .sort(
+        (a, b) =>
+          (a.agrupacioProduccio ?? '\uffff').localeCompare(
+            b.agrupacioProduccio ?? '\uffff',
+            'ca',
+          ) || a.producte.descripcio.localeCompare(b.producte.descripcio, 'ca'),
+      )
+      .map((linia) => [
+        linia.agrupacioProduccio ?? '-',
+        linia.producte.descripcio,
+        linia.envasat ?? '-',
+        linia.format ?? '-',
+        linia.client ?? '-',
+        dataOGuio(linia.dataProduccio),
+        formatDecimal(linia.unitats, 2),
+        formatDecimal(linia.kg, 3),
+        linia.obsProduccio ?? '',
+      ]),
+  });
+}
+
+// ── Panell Obrador tal com es veu (tasca 30) ─────────────────────────────
+
+// 273 mm útils. Les files de producte només omplen agrupació, producte,
+// unitats i pes; les de línia, la resta.
+const COLUMNES_OBRADOR_PANTALLA: ColumnaPdf[] = [
+  { titol: 'Agrupació producció', ample: 30 },
+  { titol: 'Producte', ample: 56 },
+  { titol: 'Envasat', ample: 24 },
+  { titol: 'Format', ample: 18 },
+  { titol: 'Client', ample: 38 },
+  { titol: 'Data producció', ample: 22 },
+  { titol: 'Unitats', ample: 18, alineacio: 'right' },
+  { titol: 'Pes (kg)', ample: 20, alineacio: 'right' },
+  { titol: 'Fet', ample: 12, alineacio: 'center' },
+  { titol: 'Obs. producció', ample: 35 },
+];
+
+/**
+ * El Panell Obrador desplegat sencer: una fila per producte amb els
+ * acumulats i, a sota, totes les seves línies que compleixen els filtres.
+ */
+export function descarregarPdfObradorPantalla({
+  grups,
+  liniesPerProducte,
+  totals,
+  filtres,
+}: {
+  grups: FilaPanellObradorAcumulatApi[];
+  liniesPerProducte: Map<number, FilaPanellObradorApi[]>;
+  totals: { linies: number; totalKg: string; totalUnitats: string };
+  filtres: string[];
+}): Promise<void> {
+  const files: string[][] = [];
+  const destacades = new Set<number>();
+  for (const grup of grups) {
+    destacades.add(files.length);
+    files.push([
+      grup.agrupacioProduccio ?? '-',
+      `${grup.producte.descripcio} (${grup.linies} ${grup.linies === 1 ? 'línia' : 'línies'})`,
+      '',
+      '',
+      '',
+      '',
+      formatDecimal(grup.unitats, 2),
+      formatDecimal(grup.kg, 3),
+      `${grup.liniesFetes}/${grup.linies}`,
+      '',
+    ]);
+    for (const linia of liniesPerProducte.get(grup.producte.id) ?? []) {
+      files.push([
+        '',
+        '',
+        linia.envasat ?? '-',
+        linia.format ?? '-',
+        linia.client ?? '-',
+        dataOGuio(linia.dataProduccio),
+        formatDecimal(linia.unitats, 2),
+        formatDecimal(linia.kg, 3),
+        linia.treballatA ? 'Sí' : '',
+        linia.obsProduccio ?? '',
+      ]);
+    }
+  }
+  const nomProductes = grups.length === 1 ? 'producte' : 'productes';
+  const nomLinies = totals.linies === 1 ? 'línia' : 'línies';
+  return descarregarPdfLlistat({
+    titol: "Panell d'Obrador",
+    nomFitxer: 'panell-obrador',
+    columnes: COLUMNES_OBRADOR_PANTALLA,
+    resum: `${grups.length} ${nomProductes} · ${totals.linies} ${nomLinies} · ${formatDecimal(totals.totalKg, 3)} kg · ${formatDecimal(totals.totalUnitats, 2)} unitats`,
+    filtres,
+    senseFiltres: 'Filtres: cap (totes les línies)',
+    filesDestacades: destacades,
+    files,
+  });
+}
+
+// ── Detall de comanda (tasca 13) ─────────────────────────────────────────
+
+/**
+ * Una o més comandes, cadascuna començant en pàgina nova (A4 vertical),
+ * amb un format semblant al correu de comanda de WooCommerce: capçalera
+ * amb el logotip, número i data, client i lliurament, taula de productes
+ * i totals. El client complet (NIF, telèfon, email) surt de `clients`;
+ * si no hi és, només el nom que porta la comanda.
+ */
+export async function descarregarPdfComandes({
+  comandes,
+  clients,
+  originLabel,
+}: {
+  comandes: ComandaDetallApi[];
+  clients: Map<number, ClientApi>;
+  originLabel: (codi: string) => string;
+}): Promise<void> {
+  const [{ jsPDF }, { autoTable }, logo] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+    carregarLogo(),
+  ]);
+
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const ample = doc.internal.pageSize.getWidth();
+  const alt = doc.internal.pageSize.getHeight();
+  const util = ample - 2 * MARGE;
+  // Per al peu: a quina comanda pertany cada pàgina.
+  const trams: { num: string; primera: number; darrera: number }[] = [];
+
+  comandes.forEach((comanda, index) => {
+    if (index > 0) doc.addPage();
+    const primera = doc.getNumberOfPages();
+
+    // Franja grafit amb el logotip, com el correu de la web.
+    doc.setFillColor(...GRAFIT);
+    doc.rect(0, 0, ample, 22, 'F');
+    if (logo) doc.addImage(logo, 'PNG', MARGE, 6, 10 * LOGO_RATIO, 10);
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    doc.text('Comanda', ample - MARGE, 13.5, { align: 'right' });
+
+    doc.setTextColor(...CARBO);
+    doc.setFontSize(14);
+    doc.text(textPdf(`Comanda ${comanda.num}`), MARGE, 33);
+    doc.text(formatData(comanda.dataComanda, false), ample - MARGE, 33, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(...GRIS_TEXT);
+    const estat = ESTAT_LABELS[comanda.estat] ?? comanda.estat;
+    doc.text(
+      textPdf(
+        [
+          `Origen: ${originLabel(comanda.origen)}`,
+          `Estat: ${estat}`,
+          comanda.tarifa && `Tarifa: ${comanda.tarifa.nom}`,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      ),
+      MARGE,
+      39,
+    );
+
+    // Dues columnes: client i lliurament.
+    const client = comanda.client ? clients.get(comanda.client.id) : undefined;
+    const liniesClient = [
+      comanda.client?.nom ?? 'Sense client',
+      client?.nif && `NIF: ${client.nif}`,
+      client?.telefon && `Telèfon: ${client.telefon}`,
+      client?.email,
+      (client?.poblacio ?? comanda.client?.poblacio) || null,
+    ].filter((linia): linia is string => Boolean(linia));
+    const liniesLliurament = [
+      comanda.adrecaLliurament,
+      comanda.poblacioDesti,
+      comanda.transportista && `Transportista: ${comanda.transportista.nom}`,
+      comanda.dataLliurament && `Data lliurament: ${formatData(comanda.dataLliurament, false)}`,
+      comanda.dataProduccio && `Data producció: ${formatData(comanda.dataProduccio, false)}`,
+      comanda.bultos !== null && `Bultos: ${comanda.bultos}`,
+    ].filter((linia): linia is string => Boolean(linia));
+    if (liniesLliurament.length === 0) liniesLliurament.push('-');
+
+    const ampleColumna = util / 2 - 4;
+    const columnaClient = doc.splitTextToSize(
+      textPdf(liniesClient.join('\n')),
+      ampleColumna,
+    ) as string[];
+    const columnaLliurament = doc.splitTextToSize(
+      textPdf(liniesLliurament.join('\n')),
+      ampleColumna,
+    ) as string[];
+
+    let y = 49;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(...GRIS_TEXT);
+    doc.text('Client', MARGE, y);
+    doc.text('Lliurament', MARGE + util / 2, y);
+    doc.setDrawColor(220, 220, 220);
+    doc.line(MARGE, y + 2, ample - MARGE, y + 2);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    doc.setTextColor(51, 51, 51);
+    doc.text(columnaClient, MARGE, y + 7);
+    doc.text(columnaLliurament, MARGE + util / 2, y + 7);
+    y += 7 + Math.max(columnaClient.length, columnaLliurament.length) * 4.6;
+
+    for (const [titol, valor] of [
+      ['Obs. lliurament', comanda.obsLliurament],
+      ['Obs. producció', comanda.obsProduccio],
+    ] as const) {
+      if (!valor?.trim()) continue;
+      const text = doc.splitTextToSize(textPdf(`${titol}: ${valor.trim()}`), util) as string[];
+      doc.text(text, MARGE, y);
+      y += text.length * 4.6;
+    }
+
+    const linies = comanda.linies.filter((linia) => !linia.esborrat);
+    autoTable(doc, {
+      startY: y + 3,
+      margin: { top: MARGE, right: MARGE, bottom: 14, left: MARGE },
+      head: [['Producte', 'Unitats', 'Kg', 'Preu', 'Import']],
+      body: linies.map((linia) => {
+        const producte = linia.producte
+          ? `${linia.producte.descripcio}${linia.producte.codi ? ` (#${linia.producte.codi})` : ''}`
+          : 'Article no resolt';
+        const notes = [
+          linia.obsProduccio && `Obs. producció: ${linia.obsProduccio}`,
+          linia.obsEmpaquetat && `Obs. empaquetat: ${linia.obsEmpaquetat}`,
+        ].filter(Boolean);
+        return [
+          [producte, ...notes].join('\n'),
+          formatUnitats(linia.unitatsDemanades),
+          formatDecimal(linia.kgDemanats, 3),
+          `${formatDecimal(linia.preuUnitari, 2)} €`,
+          `${formatDecimal(linia.totalLinia, 2)} €`,
+        ].map(textPdf);
+      }),
+      theme: 'grid',
+      rowPageBreak: 'avoid',
+      styles: {
+        font: 'helvetica',
+        fontSize: 9.5,
+        cellPadding: 2.5,
+        textColor: [51, 51, 51],
+        lineColor: [210, 210, 210],
+        overflow: 'linebreak',
+        valign: 'middle',
+      },
+      headStyles: { fillColor: GRIS_FONS, textColor: CARBO, fontStyle: 'bold' },
+      columnStyles: {
+        0: { cellWidth: 96 },
+        1: { cellWidth: 20, halign: 'right' },
+        2: { cellWidth: 22, halign: 'right' },
+        3: { cellWidth: 22, halign: 'right' },
+        4: { cellWidth: util - 160, halign: 'right' },
+      },
+      didParseCell: (cell) => {
+        if (cell.section === 'head' && cell.column.index > 0) cell.cell.styles.halign = 'right';
+      },
+    });
+
+    // Totals a la dreta, sota la taula (com Subtotal/Total del correu).
+    const finalTaula = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable
+      .finalY;
+    let yTotals = finalTaula + 3;
+    if (yTotals + 18 > alt - 14) {
+      doc.addPage();
+      yTotals = MARGE;
+    }
+    autoTable(doc, {
+      startY: yTotals,
+      margin: { left: ample - MARGE - 80, right: MARGE },
+      body: [
+        ['Total kg', formatDecimal(comanda.totalKg, 3)],
+        ['Total', `${formatDecimal(comanda.totalEur, 2)} €`],
+      ],
+      theme: 'grid',
+      styles: {
+        font: 'helvetica',
+        fontSize: 10,
+        cellPadding: 2.5,
+        textColor: [51, 51, 51],
+        lineColor: [210, 210, 210],
+      },
+      columnStyles: {
+        0: { cellWidth: 40, fontStyle: 'bold' },
+        1: { cellWidth: 40, halign: 'right' },
+      },
+    });
+
+    trams.push({ num: comanda.num, primera, darrera: doc.getNumberOfPages() });
+  });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(...GRIS_TEXT);
+  for (const tram of trams) {
+    const total = tram.darrera - tram.primera + 1;
+    for (let pagina = tram.primera; pagina <= tram.darrera; pagina++) {
+      doc.setPage(pagina);
+      doc.text(textPdf(`dpagès · Comanda ${tram.num}`), MARGE, alt - 7);
+      doc.text(`Pàgina ${pagina - tram.primera + 1} de ${total}`, ample - MARGE, alt - 7, {
+        align: 'right',
+      });
+    }
+  }
+
+  const nomFitxer =
+    comandes.length === 1
+      ? `comanda-${comandes[0]!.num}`
+      : `comandes-${new Date().toISOString().slice(0, 10)}`;
+  doc.save(`${nomFitxer}.pdf`);
+}
+
+/** Unitats sense decimals quan són enteres (3, no 3,00). */
+function formatUnitats(unitats: string): string {
+  return Number.isInteger(Number(unitats)) ? String(Number(unitats)) : formatDecimal(unitats, 2);
 }

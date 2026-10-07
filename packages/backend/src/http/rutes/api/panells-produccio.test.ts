@@ -297,6 +297,7 @@ describe('API negoci — GET /panells/produccio (Postgres real, esquema aislado)
       kgPaletillas: '35.000',
       // Sin líneas de categoria CANALS en este dataset de prueba.
       canals: { unitats: '0', kg: '0' },
+      mitgesCanals: { unitats: '0', kg: '0' },
     });
 
     await fastify.close();
@@ -422,6 +423,7 @@ describe('API negoci — GET /panells/produccio (Postgres real, esquema aislado)
       kgPaletillas: '35.000',
       // Fuera del rango de fechas — tampoco hay líneas CANALS que sumar.
       canals: { unitats: '0', kg: '0' },
+      mitgesCanals: { unitats: '0', kg: '0' },
     });
 
     await fastify.close();
@@ -835,6 +837,129 @@ describe('API negoci — GET /panells/produccio (Postgres real, esquema aislado)
       expect(cuerpo.totals.kgRecortes).toBe('60.000');
       expect(cuerpo.totals.kgPaletillas).toBe('70.000');
       expect(cuerpo.totals.totalKgMagro).toBe('250.000');
+
+      await fastify.close();
+    });
+  });
+
+  // Tasca 33 (03/10/2026): l'esborrany SÍ compta a Producció (taula i
+  // canals), com l'oberta. Data pròpia perquè no toqui els altres totals.
+  describe('estat esborrany — compta a Producció', () => {
+    const DATA_ESB = '2026-09-15';
+
+    beforeAll(async () => {
+      const categoria = await entorn.poolTest.query<{ id: string }>(
+        `INSERT INTO categoria_producte (nom, elaborat_porc, agrupacio_rendiment)
+         VALUES ('ESB KG', true, 'KG') RETURNING id`,
+      );
+      const producte = await entorn.poolTest.query<{ id: string }>(
+        `INSERT INTO producte (codi, descripcio, tipus, categoria_id, agrupacio_produccio)
+         VALUES ('ESB-01', 'ESB-01', 'simple', $1, 'ESB-AGR') RETURNING id`,
+        [categoria.rows[0]!.id],
+      );
+      let canals = await entorn.poolTest.query<{ id: string }>(
+        `SELECT id FROM categoria_producte WHERE nom = 'CANALS'`,
+      );
+      if (!canals.rows[0]) {
+        canals = await entorn.poolTest.query<{ id: string }>(
+          `INSERT INTO categoria_producte (nom, elaborat_porc) VALUES ('CANALS', false) RETURNING id`,
+        );
+      }
+      const producteCanal = await entorn.poolTest.query<{ id: string }>(
+        `INSERT INTO producte (codi, descripcio, tipus, categoria_id)
+         VALUES ('ESB-CANAL', 'ESB-CANAL', 'simple', $1) RETURNING id`,
+        [canals.rows[0]!.id],
+      );
+      for (const [estat, kg, kgCanal] of [
+        ['esborrany', '7.000', '4.500'],
+        ['tancada', '100.000', '90.000'],
+      ] as const) {
+        const comanda = await entorn.poolTest.query<{ id: string }>(
+          `INSERT INTO comanda (origen_id, estat, data_comanda)
+           VALUES ((SELECT id FROM origen_comanda WHERE codi = 'manual'), $1, '2026-09-01') RETURNING id`,
+          [estat],
+        );
+        await entorn.poolTest.query(
+          `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
+             preu_unitari, pes_calculat_kg, data_produccio)
+           VALUES ($1, 0, $2, 1, '0.00', $3, $5), ($1, 1, $4, 2, '0.00', $6, $5)`,
+          [
+            comanda.rows[0]!.id,
+            producte.rows[0]!.id,
+            kg,
+            producteCanal.rows[0]!.id,
+            DATA_ESB,
+            kgCanal,
+          ],
+        );
+      }
+    });
+
+    it("la línia d'una comanda en esborrany suma a la taula i a canals; la tancada no", async () => {
+      const fastify = construirServidor();
+      const res = await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/panells/produccio?nombrePorcs=1&dataDes=${DATA_ESB}&dataFins=${DATA_ESB}`,
+      });
+      expect(res.statusCode).toBe(200);
+      const cuerpo = cuerpoJson<PanellProduccioApi>(res);
+      expect(cuerpo.dades.find((f) => f.agrupacioProduccio === 'ESB-AGR')?.kgAElaborar).toBe(
+        '7.000',
+      );
+      expect(cuerpo.totals.canals).toEqual({ unitats: '2.00', kg: '4.500' });
+
+      await fastify.close();
+    });
+  });
+
+  // Tasca 36 (03/10/2026): les mitges canals, a la seva categoria, tenen el
+  // seu propi total i no se sumen a CANALS.
+  describe('mitges canals — total propi, separat de canals', () => {
+    const DATA_MITGES = '2026-09-25';
+
+    beforeAll(async () => {
+      for (const [categoria, codi, unitats, kg] of [
+        ['MITJES CANALS', 'MITJCAN-TEST', '2', '110.000'],
+        ['CANALS', 'CANALS-T36', '1', '95.000'],
+      ] as const) {
+        let cat = await entorn.poolTest.query<{ id: string }>(
+          `SELECT id FROM categoria_producte WHERE nom = $1`,
+          [categoria],
+        );
+        if (!cat.rows[0]) {
+          cat = await entorn.poolTest.query<{ id: string }>(
+            `INSERT INTO categoria_producte (nom, elaborat_porc) VALUES ($1, false) RETURNING id`,
+            [categoria],
+          );
+        }
+        const producte = await entorn.poolTest.query<{ id: string }>(
+          `INSERT INTO producte (codi, descripcio, tipus, categoria_id)
+           VALUES ($1, $1, 'simple', $2) RETURNING id`,
+          [codi, cat.rows[0]!.id],
+        );
+        const comanda = await entorn.poolTest.query<{ id: string }>(
+          `INSERT INTO comanda (origen_id, estat, data_comanda)
+           VALUES ((SELECT id FROM origen_comanda WHERE codi = 'manual'), 'oberta', '2026-09-01') RETURNING id`,
+        );
+        await entorn.poolTest.query(
+          `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
+             preu_unitari, pes_calculat_kg, data_produccio)
+           VALUES ($1, 0, $2, $3, '0.00', $4, $5)`,
+          [comanda.rows[0]!.id, producte.rows[0]!.id, unitats, kg, DATA_MITGES],
+        );
+      }
+    });
+
+    it('MITJES CANALS té el seu total i CANALS no les inclou', async () => {
+      const fastify = construirServidor();
+      const res = await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/panells/produccio?nombrePorcs=1&dataDes=${DATA_MITGES}&dataFins=${DATA_MITGES}`,
+      });
+      expect(res.statusCode).toBe(200);
+      const { totals } = cuerpoJson<PanellProduccioApi>(res);
+      expect(totals.canals).toEqual({ unitats: '1.00', kg: '95.000' });
+      expect(totals.mitgesCanals).toEqual({ unitats: '2.00', kg: '110.000' });
 
       await fastify.close();
     });

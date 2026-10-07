@@ -11,6 +11,7 @@ import {
   type TotalsPanellEmpaquetatApi,
 } from '@/lib/api';
 import { usePageClamp } from './usePageClamp';
+import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
 
 /**
  * Els filtres reals de GET /panells/empaquetat (confirmat contra
@@ -20,7 +21,8 @@ import { usePageClamp } from './usePageClamp';
 export type PackagingPanelFilters = {
   dataExpedicioDes?: string;
   dataExpedicioFins?: string;
-  transportistaId?: number;
+  /** Un o més transportistes (tasca 22); el backend en fa un OR. */
+  transportistaId?: number[];
   clientId?: number;
   dataLliuramentDes?: string;
   dataLliuramentFins?: string;
@@ -29,6 +31,8 @@ export type PackagingPanelFilters = {
   categoriaId?: number;
   /** Sense valor = totes les línies. */
   confirmacio?: 'pendents' | 'confirmades';
+  /** Tasca 23: amb / sense observacions de la línia. */
+  observacions?: 'si' | 'no';
 };
 
 /**
@@ -58,8 +62,8 @@ type UsePanellEmpaquetatResult = {
   undoLliurament: (comandaId: number, liniaId: number) => Promise<LliuramentSaveResult>;
 };
 
-// Paginació real (20/pàgina), mateix criteri que usePanellOficina.ts/usePanellObrador.ts.
-const MIDA_PAGINA = 20;
+// Paginació real (MIDA_PAGINA_LLISTATS/pàgina), mateix criteri que usePanellOficina.ts/usePanellObrador.ts.
+const MIDA_PAGINA = MIDA_PAGINA_LLISTATS;
 
 export function usePanellEmpaquetat(
   filters: PackagingPanelFilters = {},

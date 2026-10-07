@@ -1,5 +1,6 @@
 import type {
   ComandaDetallApi,
+  ComandaDuplicadaApi,
   ComandaLiniaApi,
   ComandaResumApi,
   IncidenciaComandaApi,
@@ -46,9 +47,10 @@ const GUARD_COMANDES = crearGuardaModul('comandes');
 // más.
 const GUARD_COMANDES_LECTURA = crearGuardaModul(['comandes', 'panell-oficina']);
 
-// Únics 5 valors admesos per comanda.estat (mateixa llista que el CHECK
-// constraint de la taula, migracions 0003 i 0021).
+// Únics 6 valors admesos per comanda.estat (mateixa llista que el CHECK
+// constraint de la taula, migracions 0003, 0021 i 0023).
 const ESTATS_COMANDA_VALIDS = [
+  'esborrany',
   'oberta',
   'en_proces',
   'tancada',
@@ -57,12 +59,13 @@ const ESTATS_COMANDA_VALIDS = [
 ] as const;
 
 // Mateix criteri que CODIS_ORIGEN_ELEGIBLES al frontend (OrderForm.tsx):
-// "manual" (valor històric) és l'únic codi que mai es pot triar a mà, ni en
-// alta ni en edició. "woocommerce" SÍ és triable a mà (decisió de negoci
-// actualitzada) tant per a alta com per a reassignar l'origen d'un pedido ja
-// creat — coexisteix amb el fet que també sigui el valor que posa la
-// sincronització automàtica.
-const CODIS_ORIGEN_EDITABLES = ['whatsapp', 'telefon', 'correu', 'woocommerce'] as const;
+// només els 3 canals manuals es poden triar a mà. "manual" és un valor
+// històric. "woocommerce" queda BLOQUEJAT en els dos sentits (tasca 11,
+// 01/10/2026, reverteix la decisió anterior que el feia triable): només el
+// posa la sincronització automàtica, no es pot triar en crear una comanda
+// a mà ni canviar-lo en una comanda que ja ve de WooCommerce.
+const CODIS_ORIGEN_EDITABLES = ['whatsapp', 'telefon', 'correu'] as const;
+const CODI_ORIGEN_WOOCOMMERCE = 'woocommerce';
 
 interface FilaComandaResum {
   id_seq: string;
@@ -198,6 +201,7 @@ interface FilaComandaLinia {
   total_linia: string;
   data_produccio: Date | null;
   obs_produccio: string | null;
+  obs_empaquetat: string | null;
   esborrat: boolean;
 }
 
@@ -226,6 +230,7 @@ function aApiLinia(fila: FilaComandaLinia): ComandaLiniaApi {
     totalLinia: fila.total_linia,
     dataProduccio: formatearDataApi(fila.data_produccio),
     obsProduccio: fila.obs_produccio,
+    obsEmpaquetat: fila.obs_empaquetat,
     esborrat: fila.esborrat,
   };
 }
@@ -236,7 +241,7 @@ const SELECT_COMANDA_LINIA = `
          cl.unitats_demanades, cl.pes_calculat_kg AS kg_demanats,
          cl.pes_editable, cl.unitats_lliurades, cl.kg_lliurats, cl.confirmat_a, cl.preu_unitari,
          (cl.unitats_demanades * cl.preu_unitari)::numeric(14,2) AS total_linia,
-         cl.data_produccio, cl.obs_produccio, cl.esborrat
+         cl.data_produccio, cl.obs_produccio, cl.obs_empaquetat, cl.esborrat
   FROM comanda_linia cl
   LEFT JOIN producte p ON p.id = cl.producte_id
   LEFT JOIN categoria_producte cat ON cat.id = p.categoria_id
@@ -475,6 +480,9 @@ async function resolverComandaOResponder(
   return uuid;
 }
 
+/** Tarea 17: tope de comandas por petición de duplicado (una página de la lista son 100). */
+const MAX_COMANDES_DUPLICAR = 100;
+
 export function registrarRutesComandes(fastify: FastifyInstance): void {
   fastify.get('/comandes', { preHandler: GUARD_COMANDES_LECTURA }, async (req, reply) => {
     const query = req.query as Record<string, unknown>;
@@ -598,6 +606,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         unitatsDemanades: number;
         kgDemanats?: string;
         dataProduccio?: string | null;
+        obsEmpaquetat?: string | null;
       }[];
     }>;
 
@@ -643,6 +652,13 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
     );
     if (violacioCreacio) {
       return enviarValidacio(reply, 'Les dates no són coherents', [violacioCreacio]);
+    }
+
+    // Tasca 11: una comanda creada a mà mai pot dir que ve de WooCommerce.
+    if (cos.origen === CODI_ORIGEN_WOOCOMMERCE) {
+      return enviarValidacio(reply, "L'origen WooCommerce no es pot triar a mà", [
+        { camp: 'origen', missatge: 'woocommerce només el posa la sincronització automàtica' },
+      ]);
     }
 
     // origen ja no és un enum fix (migració 0013): és el codi d'una fila
@@ -711,6 +727,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       pesCalculatKg: string;
       pesEditable: boolean;
       dataProduccio: string | null;
+      obsEmpaquetat: string | null;
     }[] = [];
 
     for (let i = 0; i < cos.linies!.length; i++) {
@@ -779,6 +796,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         // null (mateix criteri que cos.obsLliurament ?? null, més avall) en
         // comptes de deixar passar `undefined` cru al paràmetre de l'INSERT.
         dataProduccio: linia.dataProduccio ?? null,
+        // Tasca 7: buida = sense observació.
+        obsEmpaquetat: linia.obsEmpaquetat?.trim() || null,
       });
     }
 
@@ -820,8 +839,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         await client.query(
           `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                        preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-                                       data_produccio)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                                       data_produccio, obs_empaquetat)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
           [
             comandaUuid,
             i,
@@ -832,6 +851,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             l.pesCalculatKg,
             l.pesEditable,
             l.dataProduccio,
+            l.obsEmpaquetat,
           ],
         );
         if (l.sensePreu) {
@@ -855,6 +875,174 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
 
     reply.code(201);
     return carregarDetallPerUuid(comandaUuid);
+  });
+
+  /**
+   * Tarea 17 (03/10/2026): duplicar una o varias comandas. Cada copia nace
+   * en `esborrany`, con data_comanda = hoy (Europe/Madrid) y el resto de
+   * fechas en blanco (cabecera y líneas). Se copian cliente, tarifa,
+   * transportista, dirección y observaciones de cabecera; de las líneas,
+   * producto, unidades y observaciones. No se copia nada de empaquetado
+   * (unidades/kg enviados, confirmación, bultos) ni la congelación.
+   *
+   * Precio y peso se resuelven de nuevo como en POST /comandes (tarifa y
+   * peso de ficha actuales), no se copian: una copia es una comanda nueva.
+   * Una comanda de WooCommerce se duplica con origen `manual` (tarea 11:
+   * woocommerce sólo lo pone el sync). Las líneas sin artículo resuelto no
+   * se copian (se informa en `liniesOmeses`). Todo o nada: una transacción.
+   */
+  fastify.post('/comandes/duplicar', { preHandler: GUARD_COMANDES }, async (req, reply) => {
+    const cos = req.body as Partial<{ ids: unknown }>;
+    const ids = Array.isArray(cos?.ids) ? cos.ids : [];
+    if (
+      ids.length === 0 ||
+      ids.length > MAX_COMANDES_DUPLICAR ||
+      !ids.every((id) => typeof id === 'number' && Number.isSafeInteger(id) && id > 0)
+    ) {
+      return enviarValidacio(reply, 'Cal indicar les comandes a duplicar', [
+        { camp: 'ids', missatge: `entre 1 i ${MAX_COMANDES_DUPLICAR} identificadors de comanda` },
+      ]);
+    }
+    const idsUnics = [...new Set(ids as number[])];
+
+    const originals = await pool.query<{
+      id: string;
+      id_seq: string;
+      num: string;
+      origen_codi: string;
+      client_id: string | null;
+      tarifa_id: string | null;
+      client_tarifa_id: string | null;
+    }>(
+      `SELECT c.id, c.id_seq, c.num, o.codi AS origen_codi, c.client_id, c.tarifa_id,
+              cl.tarifa_id AS client_tarifa_id
+       FROM comanda c
+       JOIN origen_comanda o ON o.id = c.origen_id
+       LEFT JOIN client cl ON cl.id = c.client_id
+       WHERE c.id_seq = ANY($1::bigint[])`,
+      [idsUnics],
+    );
+    const perIdSeq = new Map(originals.rows.map((f) => [Number(f.id_seq), f]));
+    const noTrobades = idsUnics.filter((id) => !perIdSeq.has(id));
+    if (noTrobades.length > 0) {
+      return enviarValidacio(reply, 'Alguna de les comandes no existeix', [
+        { camp: 'ids', missatge: `no existeixen: ${noTrobades.join(', ')}` },
+      ]);
+    }
+
+    const client = await pool.connect();
+    const creades: ComandaDuplicadaApi[] = [];
+    try {
+      await client.query('BEGIN');
+
+      for (const idPublic of idsUnics) {
+        const original = perIdSeq.get(idPublic)!;
+        const nova = await client.query<{ id: string; id_seq: string; num: string }>(
+          `INSERT INTO comanda (origen_id, estat, client_id, tarifa_id, transportista_id,
+                                poblacio_desti, adreca_lliurament, obs_lliurament, obs_produccio,
+                                data_comanda)
+           SELECT CASE WHEN o.codi = $2
+                       THEN (SELECT id FROM origen_comanda WHERE codi = 'manual')
+                       ELSE c.origen_id END,
+                  'esborrany', c.client_id, c.tarifa_id, c.transportista_id,
+                  c.poblacio_desti, c.adreca_lliurament, c.obs_lliurament, c.obs_produccio,
+                  (now() AT TIME ZONE 'Europe/Madrid')::date
+           FROM comanda c JOIN origen_comanda o ON o.id = c.origen_id
+           WHERE c.id = $1
+           RETURNING id, id_seq, num`,
+          [original.id, CODI_ORIGEN_WOOCOMMERCE],
+        );
+        const novaUuid = nova.rows[0]!.id;
+
+        const linies = await client.query<{
+          producte_id: string | null;
+          producte_id_seq: string | null;
+          unitats_demanades: string;
+          pes_calculat_kg: string;
+          pes_kg: string | null;
+          preu_venda: string | null;
+          obs_produccio: string | null;
+          obs_empaquetat: string | null;
+        }>(
+          `SELECT cl.producte_id, p.id_seq AS producte_id_seq, cl.unitats_demanades,
+                  cl.pes_calculat_kg, p.pes_kg, p.preu_venda, cl.obs_produccio, cl.obs_empaquetat
+           FROM comanda_linia cl
+           LEFT JOIN producte p ON p.id = cl.producte_id
+           WHERE cl.comanda_id = $1 AND NOT cl.esborrat
+           ORDER BY cl.ordinal`,
+          [original.id],
+        );
+
+        const tarifaEfectivaId = original.tarifa_id ?? original.client_tarifa_id;
+        let ordinal = 0;
+        let liniesOmeses = 0;
+        for (const l of linies.rows) {
+          if (l.producte_id === null) {
+            liniesOmeses++;
+            continue;
+          }
+          const { preuUnitari, sensePreu } = await resolverPreuLinia(
+            pool,
+            tarifaEfectivaId,
+            l.producte_id,
+            l.preu_venda,
+          );
+          // Mismo cálculo que en el alta: con peso de ficha, unidades × peso;
+          // a medida, se conservan los kg de la original (editables).
+          const pesEditable = l.pes_kg === null;
+          const pesCalculatKg = pesEditable
+            ? l.pes_calculat_kg
+            : (Number(l.unitats_demanades) * Number(l.pes_kg)).toFixed(3);
+
+          await client.query(
+            `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
+                                         preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
+                                         obs_produccio, obs_empaquetat)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [
+              novaUuid,
+              ordinal,
+              l.producte_id,
+              l.unitats_demanades,
+              preuUnitari,
+              l.pes_kg,
+              pesCalculatKg,
+              pesEditable,
+              l.obs_produccio,
+              l.obs_empaquetat,
+            ],
+          );
+          if (sensePreu) {
+            await client.query(
+              `INSERT INTO incidencia_comanda (comanda_id, tipus, detall) VALUES ($1, 'sense_preu', $2)`,
+              [
+                novaUuid,
+                `Línia ${ordinal + 1}: el producte ${l.producte_id_seq} no té preu resolt (sense tarifa amb preu ni preu base) — preuUnitari es va deixar en 0.00.`,
+              ],
+            );
+          }
+          ordinal++;
+        }
+        await recalcularTotalComanda(client, novaUuid);
+
+        creades.push({
+          id: Number(nova.rows[0]!.id_seq),
+          num: nova.rows[0]!.num,
+          origen: { id: idPublic, num: original.num },
+          liniesOmeses,
+        });
+      }
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    reply.code(201);
+    return { comandes: creades };
   });
 
   fastify.patch('/comandes/:id', { preHandler: GUARD_COMANDES }, async (req, reply) => {
@@ -901,7 +1089,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           { camp: 'estat', missatge: `ha de ser un de: ${ESTATS_COMANDA_VALIDS.join(', ')}` },
         ]);
       }
-      // Decisión de negocio: transiciones libres entre los 5 estados, sin
+      // Decisión de negocio: transiciones libres entre los 6 estados, sin
       // máquina de estados. Única excepción: pasar a
       // amb_incidencia manualmente exige un motivo (detall), porque a
       // diferencia de las incidencias automáticas (sense_preu, etc.) acá no
@@ -913,12 +1101,26 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       }
     }
 
-    // Reassignació d'origen: cap a qualsevol dels 4 canals triables a mà
-    // (CODIS_ORIGEN_EDITABLES) — mai "manual", sense importar quin sigui
-    // l'origen actual (inclou pedidos avui en 'woocommerce' o 'manual'). Es
-    // resol igual que a POST /comandes (codi → UUID), amb el mateix criteri
-    // de "no existeix" per si el codi no estigués sembrat.
+    // Reassignació d'origen: cap a qualsevol dels 3 canals triables a mà
+    // (CODIS_ORIGEN_EDITABLES). Tasca 11: si la comanda ve de WooCommerce,
+    // el seu origen ja no es pot canviar (reenviar el mateix valor és un
+    // no-op, no un error). Es resol igual que a POST /comandes (codi →
+    // UUID), amb el mateix criteri de "no existeix".
     let origenUuid: string | undefined;
+    if (cos.origen !== undefined) {
+      const origenActual = await pool.query<{ codi: string }>(
+        `SELECT oc.codi FROM comanda c JOIN origen_comanda oc ON oc.id = c.origen_id WHERE c.id = $1`,
+        [comandaUuid],
+      );
+      const esWoocommerce = origenActual.rows[0]?.codi === CODI_ORIGEN_WOOCOMMERCE;
+      if (esWoocommerce && cos.origen === CODI_ORIGEN_WOOCOMMERCE) {
+        cos.origen = undefined;
+      } else if (esWoocommerce) {
+        return enviarValidacio(reply, "L'origen d'una comanda de WooCommerce no es pot canviar", [
+          { camp: 'origen', missatge: 'la comanda ve de WooCommerce' },
+        ]);
+      }
+    }
     if (cos.origen !== undefined) {
       if (!CODIS_ORIGEN_EDITABLES.includes(cos.origen as (typeof CODIS_ORIGEN_EDITABLES)[number])) {
         return enviarValidacio(reply, "L'origen indicat no es pot triar a mà", [
@@ -1149,6 +1351,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         unitatsDemanades: number;
         kgDemanats: string;
         dataProduccio: string | null;
+        obsEmpaquetat: string | null;
       }>;
 
       if (cos.producteId === undefined) {
@@ -1247,8 +1450,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         await client.query(
           `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                      preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-                                     data_produccio)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                                     data_produccio, obs_empaquetat)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
           [
             comandaUuid,
             ordinal,
@@ -1262,6 +1465,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             // (cos.obsLliurament ?? null): dataProduccio ya no es obligatoria,
             // pero el parámetro no debe recibir `undefined` crudo.
             cos.dataProduccio ?? null,
+            // Tasca 7: buida = sense observació.
+            cos.obsEmpaquetat?.trim() || null,
           ],
         );
 
@@ -1328,6 +1533,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         kgDemanats: string;
         dataProduccio: string | null;
         obsProduccio: string | null;
+        obsEmpaquetat: string | null;
       }>;
 
       // Ver nota equivalente en POST /comandes.
@@ -1411,7 +1617,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
            unitats_demanades = CASE WHEN $3 THEN $4 ELSE unitats_demanades END,
            pes_calculat_kg = CASE WHEN $5 THEN $6 ELSE pes_calculat_kg END,
            data_produccio = CASE WHEN $7 THEN $8 ELSE data_produccio END,
-           obs_produccio = CASE WHEN $9 THEN $10 ELSE obs_produccio END
+           obs_produccio = CASE WHEN $9 THEN $10 ELSE obs_produccio END,
+           obs_empaquetat = CASE WHEN $11 THEN $12 ELSE obs_empaquetat END
          WHERE id_seq = $1 AND comanda_id = $2
          RETURNING id`,
           [
@@ -1425,6 +1632,9 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             cos.dataProduccio ?? null,
             cos.obsProduccio !== undefined,
             cos.obsProduccio ?? null,
+            // Tasca 7: buida = sense observació.
+            cos.obsEmpaquetat !== undefined,
+            cos.obsEmpaquetat?.trim() || null,
           ],
         );
         if (!resultat.rows[0]) {
@@ -1445,6 +1655,66 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       return carregarDetallPerUuid(comandaUuid);
     },
   );
+
+  /**
+   * Tarea 14 (03/10/2026): eliminar una comanda que no tiene nada generado.
+   * Borrado físico (las líneas y las incidencias caen por ON DELETE
+   * CASCADE). Sólo si:
+   * - no es de WooCommerce: el sync la volvería a crear; se cancela en su
+   *   lugar (decisión del cliente);
+   * - no está congelada;
+   * - ninguna línea (tampoco las borradas) está marcada como hecha en el
+   *   Obrador ni tiene nada de empaquetado (unidades/kg enviados o
+   *   confirmación).
+   * Las condiciones van en el propio DELETE para que sea atómico; si no
+   * borra nada, se averigua el motivo para el mensaje.
+   */
+  fastify.delete('/comandes/:id', { preHandler: GUARD_COMANDES }, async (req, reply) => {
+    const comandaUuid = await resolverComandaOResponder(reply, (req.params as { id: string }).id);
+    if (comandaUuid === null) return;
+
+    const esborrada = await pool.query(
+      `DELETE FROM comanda c
+       WHERE c.id = $1
+         AND c.woo_order_id IS NULL
+         AND c.origen_id <> (SELECT id FROM origen_comanda WHERE codi = $2)
+         AND c.congelat_a IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM comanda_linia cl
+           WHERE cl.comanda_id = c.id
+             AND (cl.treballat_a IS NOT NULL OR cl.confirmat_a IS NOT NULL
+                  OR cl.unitats_lliurades <> 0 OR cl.kg_lliurats <> 0)
+         )`,
+      [comandaUuid, CODI_ORIGEN_WOOCOMMERCE],
+    );
+    if ((esborrada.rowCount ?? 0) > 0) {
+      reply.code(204);
+      return;
+    }
+
+    const motiu = await pool.query<{ woo: boolean; congelada: boolean }>(
+      `SELECT (c.woo_order_id IS NOT NULL OR o.codi = $2) AS woo,
+              c.congelat_a IS NOT NULL AS congelada
+       FROM comanda c JOIN origen_comanda o ON o.id = c.origen_id
+       WHERE c.id = $1`,
+      [comandaUuid, CODI_ORIGEN_WOOCOMMERCE],
+    );
+    const fila = motiu.rows[0];
+    if (!fila) return enviarNoTrobat(reply, 'Comanda no trobada');
+    if (fila.woo) {
+      return enviarConflicte(
+        reply,
+        "Les comandes de WooCommerce no es poden eliminar: si no s'ha de servir, cancel·la-la",
+      );
+    }
+    if (fila.congelada) {
+      return enviarConflicte(reply, 'La comanda està congelada i no es pot eliminar');
+    }
+    return enviarConflicte(
+      reply,
+      "La comanda no es pot eliminar: ja té línies fetes a l'Obrador o amb dades d'empaquetat",
+    );
+  });
 
   fastify.delete(
     '/comandes/:comandaId/linies/:liniaId',

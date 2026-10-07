@@ -34,6 +34,7 @@ export type {
   ReferenciaApi,
   ComandaResumApi,
   ComandaDetallApi,
+  ComandaDuplicadaApi,
   ComandaLiniaApi,
   ComandaCreacioApi,
   LiniaCreacioApi,
@@ -54,6 +55,8 @@ export type {
   PanellOficinaApi,
   FilaPanellOficinaApi,
   TotalsPanellOficinaApi,
+  PanellObradorAcumulatApi,
+  FilaPanellObradorAcumulatApi,
   PanellObradorApi,
   FilaPanellObradorApi,
   TotalsPanellObradorApi,
@@ -161,7 +164,7 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
-type QueryValue = string | number | boolean | string[] | undefined;
+type QueryValue = string | number | boolean | (string | number)[] | undefined;
 
 // Un array es manda com a paràmetre repetit (`?producte=A&producte=B`),
 // que és com el backend rep els filtres de valor múltiple.
@@ -170,7 +173,7 @@ function withQuery(path: string, params?: Record<string, QueryValue>): string {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (Array.isArray(value)) {
-      for (const item of value) query.append(key, item);
+      for (const item of value) query.append(key, String(item));
     } else if (value !== undefined) {
       query.set(key, String(value));
     }
@@ -182,7 +185,8 @@ function withQuery(path: string, params?: Record<string, QueryValue>): string {
 export const api = {
   get: <T>(path: string, params?: Record<string, QueryValue>) =>
     request<T>('GET', withQuery(path, params)),
-  post: <T>(path: string, body?: unknown) => request<T>('POST', path, body ?? {}),
+  post: <T>(path: string, body?: unknown, params?: Record<string, QueryValue>) =>
+    request<T>('POST', withQuery(path, params), body ?? {}),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body ?? {}),
   delete: <T>(path: string) => request<T>('DELETE', path),
 };

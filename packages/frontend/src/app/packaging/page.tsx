@@ -27,7 +27,6 @@ import { formatData } from '@/lib/dates';
 import { formatDecimal, parseDecimalInput } from '@/lib/decimals';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
 
-const ALL = 'Tots';
 const ALL_FEM = 'Totes';
 
 // Petició d'Ari (29/09/2026): una línia és "enviada" quan s'hi han desat
@@ -37,6 +36,9 @@ const CONFIRMACIO_OPTIONS = {
   Pendents: 'pendents',
   Enviades: 'confirmades',
 } as const satisfies Record<string, 'pendents' | 'confirmades'>;
+
+// Tasca 23 (01/10/2026): amb / sense observacions de la línia.
+const OBSERVACIONS_OPTIONS = { 'Amb observacions': 'si', 'Sense observacions': 'no' } as const;
 
 function clientLabel(client: ClientApi) {
   return `${client.codi ?? client.id} · ${client.nom ?? ''}`;
@@ -166,6 +168,8 @@ function PackagingRow({
       <td className="hidden px-3 py-3 break-words text-gray-900 xl:table-cell">
         {line.client ?? '—'}
       </td>
+      {/* Tasca 7: observació d'empaquetat de la línia (ve de l'entrada de comandes). */}
+      <td className="px-3 py-3 break-words text-gray-900">{line.obsEmpaquetat ?? ''}</td>
       <td className="px-3 py-3 text-right text-gray-900">
         {formatDecimal(line.unitatsDemanades, 2)}
       </td>
@@ -283,6 +287,7 @@ function PackagingCard({
             <DataCardField label="Kilos demanats">
               {formatDecimal(line.kgDemanats, 3)}
             </DataCardField>
+            <DataCardField label="Obs. empaquetat">{line.obsEmpaquetat ?? '—'}</DataCardField>
           </DataCardGrid>
         </div>
 
@@ -337,7 +342,8 @@ export default function PackagingPage() {
   const { data: categories } = useCategories();
 
   const [shippingDateFilter, setShippingDateFilter] = useState('');
-  const [carrierFilter, setCarrierFilter] = useState(ALL);
+  // Un o més transportistes (tasca 22, 01/10/2026), mateix patró que Productes.
+  const [selectedCarriers, setSelectedCarriers] = useState<ComboboxOption[]>([]);
   // Client ja no ve d'un <select> amb els clients de useClientTariffs()
   // precarregats (per defecte només 200, i n'hi ha 1291 reals — el filtre
   // ja quedava incomplet abans d'aquest canvi) — AsyncCombobox el resol via
@@ -349,13 +355,14 @@ export default function PackagingPage() {
   // o més, mateix patró que Obrador) ja tenen suport real al backend. Mateix patró que
   // "Data d'expedició" (un sol camp, enviat com Des=Fins=mateix valor).
   // Producte segueix en mode LOCAL (filtrant `catalog` ja carregat, mateix
-  // criteri que Producte a OrderForm.tsx): GET /productes?cerca= fa
-  // coincidència EXACTA a propòsit (regla 3.1), no serveix per a cerca
-  // incremental — veure lib/productSearch.ts.
+  // criteri que Producte a OrderForm.tsx) — veure lib/productSearch.ts.
   const [deliveryDateFilter, setDeliveryDateFilter] = useState('');
   const [selectedProducts, setSelectedProducts] = useState<ComboboxOption[]>([]);
   const [categoryFilter, setCategoryFilter] = useState(ALL_FEM);
   const [confirmacioFilter, setConfirmacioFilter] = useState(ALL_FEM);
+  const [observacionsFilter, setObservacionsFilter] = useState(ALL_FEM);
+  const observacions =
+    OBSERVACIONS_OPTIONS[observacionsFilter as keyof typeof OBSERVACIONS_OPTIONS] ?? undefined;
 
   const categoriaId = useMemo(
     () =>
@@ -367,10 +374,15 @@ export default function PackagingPage() {
   const confirmacio =
     CONFIRMACIO_OPTIONS[confirmacioFilter as keyof typeof CONFIRMACIO_OPTIONS] ?? undefined;
 
-  const carrierId = useMemo(
-    () =>
-      carrierFilter !== ALL ? carriers.find((item) => item.nom === carrierFilter)?.id : undefined,
-    [carrierFilter, carriers],
+  const loadCarrierOptions = useMemo(
+    () => (query: string) =>
+      Promise.resolve(
+        carriers
+          .filter((item) => item.nom.toLowerCase().includes(query.toLowerCase()))
+          .map((item) => ({ id: item.id, label: item.nom }))
+          .sort((a, b) => a.label.localeCompare(b.label, 'ca')),
+      ),
+    [carriers],
   );
   const loadProductOptions = useMemo(
     () => (query: string) =>
@@ -388,7 +400,9 @@ export default function PackagingPage() {
       ...(shippingDateFilter
         ? { dataExpedicioDes: shippingDateFilter, dataExpedicioFins: shippingDateFilter }
         : {}),
-      ...(carrierId !== undefined ? { transportistaId: carrierId } : {}),
+      ...(selectedCarriers.length > 0
+        ? { transportistaId: selectedCarriers.map((item) => item.id) }
+        : {}),
       ...(selectedClient !== null ? { clientId: selectedClient.id } : {}),
       ...(deliveryDateFilter
         ? { dataLliuramentDes: deliveryDateFilter, dataLliuramentFins: deliveryDateFilter }
@@ -398,15 +412,17 @@ export default function PackagingPage() {
         : {}),
       ...(categoriaId !== undefined ? { categoriaId } : {}),
       ...(confirmacio !== undefined ? { confirmacio } : {}),
+      ...(observacions !== undefined ? { observacions } : {}),
     }),
     [
       shippingDateFilter,
-      carrierId,
+      selectedCarriers,
       selectedClient,
       deliveryDateFilter,
       selectedProducts,
       categoriaId,
       confirmacio,
+      observacions,
     ],
   );
 
@@ -460,12 +476,13 @@ export default function PackagingPage() {
 
   function clearFilters() {
     setShippingDateFilter('');
-    setCarrierFilter(ALL);
+    setSelectedCarriers([]);
     setSelectedClient(null);
     setDeliveryDateFilter('');
     setSelectedProducts([]);
     setCategoryFilter(ALL_FEM);
     setConfirmacioFilter(ALL_FEM);
+    setObservacionsFilter(ALL_FEM);
   }
 
   async function handleSave(
@@ -506,6 +523,13 @@ export default function PackagingPage() {
           allLabel={ALL_FEM}
         />
         <SimpleDropdown
+          label="Observacions"
+          options={Object.keys(OBSERVACIONS_OPTIONS)}
+          value={observacionsFilter}
+          onChange={setObservacionsFilter}
+          allLabel={ALL_FEM}
+        />
+        <SimpleDropdown
           label="Categoria"
           options={categories.map((item) => item.nom)}
           value={categoryFilter}
@@ -522,12 +546,14 @@ export default function PackagingPage() {
           value={deliveryDateFilter}
           onChange={setDeliveryDateFilter}
         />
-        <SimpleDropdown
-          label="Transportista"
-          options={carriers.map((item) => item.nom)}
-          value={carrierFilter}
-          onChange={setCarrierFilter}
-          allLabel={ALL}
+        <MultiCombobox
+          label="Transportistes"
+          selected={selectedCarriers}
+          onChange={setSelectedCarriers}
+          placeholder="Cercar transportista..."
+          addMorePlaceholder="Afegir un altre transportista..."
+          debounceMs={0}
+          loadOptions={loadCarrierOptions}
         />
         <MultiCombobox
           label="Productes"
@@ -582,40 +608,43 @@ export default function PackagingPage() {
             <table className="w-full table-fixed text-sm">
               <thead className="border-b border-gray-200">
                 <tr>
-                  <th className="w-[8%] px-3 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[7%] px-3 py-2 text-left font-medium text-gray-500 break-words">
                     Categoria
                   </th>
                   <th className="hidden w-[4%] px-3 py-2 text-center font-medium text-gray-500 break-words xl:table-cell">
                     <span className="sr-only">Treballada</span>
                   </th>
-                  <th className="hidden w-[9%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
+                  <th className="hidden w-[7%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
                     Data d&apos;expedició
                   </th>
-                  <th className="hidden w-[8%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
+                  <th className="hidden w-[7%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
                     Data de lliurament
                   </th>
-                  <th className="hidden w-[9%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
+                  <th className="hidden w-[8%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
                     Transportista
                   </th>
-                  <th className="w-[12%] px-3 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[11%] px-3 py-2 text-left font-medium text-gray-500 break-words">
                     Producte
                   </th>
                   <th className="hidden w-[8%] px-3 py-2 text-left font-medium text-gray-500 break-words xl:table-cell">
                     Client
                   </th>
-                  <th className="w-[9%] px-3 py-2 text-right font-medium text-gray-500 break-words">
+                  <th className="w-[10%] px-3 py-2 text-left font-medium text-gray-500 break-words">
+                    Obs. empaquetat
+                  </th>
+                  <th className="w-[8%] px-3 py-2 text-right font-medium text-gray-500 break-words">
                     Unitats demanades
                   </th>
                   <th className="w-[8%] px-3 py-2 text-right font-medium text-gray-500 break-words">
                     Unitats lliurades
                   </th>
-                  <th className="w-[8%] px-3 py-2 text-right font-medium text-gray-500 break-words">
+                  <th className="w-[7%] px-3 py-2 text-right font-medium text-gray-500 break-words">
                     Kilos demanats
                   </th>
                   <th className="w-[8%] px-3 py-2 text-right font-medium text-gray-500 break-words">
                     Kilos lliurats
                   </th>
-                  <th className="w-[9%] px-3 py-2 text-center font-medium text-gray-500 break-words">
+                  <th className="w-[7%] px-3 py-2 text-center font-medium text-gray-500 break-words">
                     Desar
                   </th>
                 </tr>

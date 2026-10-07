@@ -10,6 +10,7 @@ import {
   type TotalsPanellOficinaApi,
 } from '@/lib/api';
 import { usePageClamp } from './usePageClamp';
+import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
 
 /**
  * Els 8 filtres reals de GET /panells/oficina (contrato §4.6, confirmat
@@ -41,9 +42,9 @@ type UsePanellOficinaResult = {
   refetch: () => void;
 };
 
-// Paginació real (20/pàgina) — el volum es controla amb els filtres
+// Paginació real (MIDA_PAGINA_LLISTATS/pàgina) — el volum es controla amb els filtres
 // server-side, mateix criteri que useOrders.ts.
-const MIDA_PAGINA = 20;
+const MIDA_PAGINA = MIDA_PAGINA_LLISTATS;
 
 export function usePanellOficina(filters: OfficePanelFilters = {}): UsePanellOficinaResult {
   const [data, setData] = useState<FilaPanellOficinaApi[]>([]);

@@ -1,9 +1,12 @@
 /**
- * Los cinco estados de pedido, cerrados con el cliente. No renombrar sin
+ * Los seis estados de pedido, cerrados con el cliente. No renombrar sin
  * actualizar también las pantallas que los muestran. `cancellada` (petición
  * de Ari, 29/09/2026) saca el pedido de todos los paneles.
  */
 export const ESTATS_COMANDA = [
+  // Tasques 33 i 38 (03/10/2026): pendent de revisar; entren així les de
+  // WooCommerce. No compta a Obrador ni Empaquetat.
+  'esborrany',
   'oberta',
   'en_proces',
   'tancada',

@@ -9,6 +9,7 @@ import {
   formatearDataApi,
   parsearIdPublic,
 } from './comu.js';
+import { tancarSiTotLliurat } from './estat-automatic.js';
 
 /**
  * El endpoint más delicado del sistema (contrato, sección 5): unitats i kg
@@ -91,6 +92,9 @@ export function registrarRutaLliurament(fastify: FastifyInstance): void {
         [liniaIdPublic, comanda.rows[0].id, cos.unitatsLliurades, cos.kgLliurats, usuari.uid],
       );
       if (!resultat.rows[0]) return enviarNoTrobat(reply, 'Línia no trobada');
+
+      // Tarea 16: si era la última línea pendiente, la comanda se cierra.
+      await tancarSiTotLliurat(pool, comanda.rows[0].id);
 
       // El middleware (resoldre-usuari.ts) deja el usuario real resuelto en
       // req.usuariResolt, así que id/nom no son un marcador.

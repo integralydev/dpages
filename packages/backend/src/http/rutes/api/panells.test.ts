@@ -1,6 +1,7 @@
 import type {
   ComandaDetallApi,
   PanellEmpaquetatApi,
+  PanellObradorAcumulatApi,
   PanellObradorApi,
   PanellOficinaApi,
 } from '@dpages/shared';
@@ -934,6 +935,357 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
       const invalid = await fastify.inject({
         method: 'GET',
         url: '/api/v1/panells/empaquetat?confirmacio=totes',
+      });
+      expect(invalid.statusCode).toBe(400);
+
+      await fastify.close();
+    });
+  });
+
+  describe("tasca 22 — GET /panells/empaquetat amb més d'un transportista", () => {
+    it('?transportistaId= repetible: línies de qualsevol dels transportistes indicats', async () => {
+      const fastify = construirServidor();
+
+      const transportistes = await entorn.poolTest.query<{ id: string; id_seq: string }>(
+        `INSERT INTO transportista (nom) VALUES ('T22-A'), ('T22-B'), ('T22-C') RETURNING id, id_seq`,
+      );
+      const [tA, tB, tC] = transportistes.rows;
+      const comandes: number[] = [];
+      for (const t of [tA!, tB!, tC!]) {
+        const creada = await fastify.inject({
+          method: 'POST',
+          url: '/api/v1/comandes',
+          payload: {
+            dataComanda: '2026-08-01',
+            dataLliurament: '2026-08-30T00:00:00Z',
+            origen: 'manual',
+            linies: [{ dataProduccio: '2026-08-01T00:00:00Z', producteId, unitatsDemanades: 1 }],
+          },
+        });
+        const id = cuerpoJson<{ id: number }>(creada).id;
+        comandes.push(id);
+        await entorn.poolTest.query(`UPDATE comanda SET transportista_id = $1 WHERE id_seq = $2`, [
+          t.id,
+          id,
+        ]);
+      }
+
+      const dos = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: `/api/v1/panells/empaquetat?transportistaId=${tA!.id_seq}&transportistaId=${tB!.id_seq}&mida=200`,
+        }),
+      );
+      expect(new Set(dos.dades.map((f) => f.comandaId))).toEqual(
+        new Set([comandes[0], comandes[1]]),
+      );
+      expect(new Set(dos.dades.map((f) => f.transportista))).toEqual(new Set(['T22-A', 'T22-B']));
+
+      // Un sol transportista segueix funcionant igual que abans.
+      const un = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: `/api/v1/panells/empaquetat?transportistaId=${tC!.id_seq}`,
+        }),
+      );
+      expect(un.dades.map((f) => f.comandaId)).toEqual([comandes[2]]);
+
+      const invalid = await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/panells/empaquetat?transportistaId=${tA!.id_seq}&transportistaId=abc`,
+      });
+      expect(invalid.statusCode).toBe(400);
+
+      await fastify.close();
+    });
+  });
+
+  describe("tasques 23, 25, 26, 28 i 31 — filtres nous d'Obrador i Empaquetat", () => {
+    // Escenari propi: 3 comandes d'un client nou, amb un producte d'una
+    // agrupació de producció única, perquè cap altre test hi interfereixi.
+    let numPreparacio = 0;
+    async function preparar(fastify: ReturnType<typeof construirServidor>) {
+      // Codi de producte únic per crida (producte.codi té índex únic).
+      numPreparacio += 1;
+      const client = await entorn.poolTest.query<{ id: string; id_seq: string }>(
+        `INSERT INTO client (nom) VALUES ('Client T25') RETURNING id, id_seq`,
+      );
+      const producte = await entorn.poolTest.query<{ id_seq: string }>(
+        `INSERT INTO producte (codi, descripcio, pes_kg, preu_venda, tipus, agrupacio_produccio)
+         VALUES ($1, $2, '1.000', '5.00', 'simple', 'AGRUP-T28')
+         RETURNING id_seq`,
+        [`AGR28-${numPreparacio}`, `Producte agrupació T28 ${numPreparacio}`],
+      );
+      const producteT28 = Number(producte.rows[0]!.id_seq);
+      const comandes: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        const creada = await fastify.inject({
+          method: 'POST',
+          url: '/api/v1/comandes',
+          payload: {
+            dataComanda: '2026-08-01',
+            dataLliurament: '2026-08-30T00:00:00Z',
+            origen: 'manual',
+            clientId: Number(client.rows[0]!.id_seq),
+            linies: [
+              {
+                dataProduccio: '2026-08-01T00:00:00Z',
+                producteId: producteT28,
+                unitatsDemanades: 1,
+              },
+            ],
+          },
+        });
+        comandes.push(cuerpoJson<{ id: number }>(creada).id);
+      }
+      // Observacions: la 1a a la línia, la 2a a la capçalera (producció), la 3a cap.
+      await entorn.poolTest.query(
+        `UPDATE comanda_linia SET obs_produccio = 'Tallar fi'
+         WHERE comanda_id = (SELECT id FROM comanda WHERE id_seq = $1)`,
+        [comandes[0]],
+      );
+      await entorn.poolTest.query(`UPDATE comanda SET obs_produccio = 'Urgent' WHERE id_seq = $1`, [
+        comandes[1],
+      ]);
+      return { clientId: Number(client.rows[0]!.id_seq), comandes };
+    }
+
+    it('Obrador: client, agrupació repetible, observacions, treball i marcar-fets massiu', async () => {
+      const fastify = construirServidor();
+      const { clientId, comandes } = await preparar(fastify);
+      const base = `/api/v1/panells/obrador?agrupacioProduccio=AGRUP-T28&mida=200`;
+      const get = async (q: string) =>
+        cuerpoJson<PanellObradorApi>(await fastify.inject({ method: 'GET', url: `${base}${q}` }));
+
+      // 28: agrupació (també repetida amb un valor que no existeix).
+      expect((await get('')).totals.linies).toBe(3);
+      expect((await get('&agrupacioProduccio=NO-EXISTEIX')).totals.linies).toBe(3);
+      // 25: client.
+      const perClient = await get(`&clientId=${clientId}`);
+      expect(new Set(perClient.dades.map((f) => f.comandaId))).toEqual(new Set(comandes));
+      // 31: només les observacions de la LÍNIA (la 2a les té a la capçalera: no compta).
+      expect((await get('&observacions=si')).dades.map((f) => f.comandaId)).toEqual([comandes[0]]);
+      expect(new Set((await get('&observacions=no')).dades.map((f) => f.comandaId))).toEqual(
+        new Set([comandes[1], comandes[2]]),
+      );
+
+      // 26: totals de fetes/pendents i acció massiva sobre els filtres actius.
+      const abans = await get('');
+      expect(abans.totals).toMatchObject({ liniesFetes: 0, liniesPendents: 3 });
+      await entorn.poolTest.query(`UPDATE comanda SET congelat_a = now() WHERE id_seq = $1`, [
+        comandes[2],
+      ]);
+      const res = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/panells/obrador/marcar-fets?agrupacioProduccio=AGRUP-T28',
+      });
+      expect(res.statusCode).toBe(200);
+      // 2 marcades; la de la comanda congelada s'omet.
+      expect(res.json()).toEqual({ marcades: 2, congeladesOmeses: 1 });
+
+      const despres = await get('');
+      expect(despres.totals).toMatchObject({ liniesFetes: 2, liniesPendents: 1 });
+      expect((await get('&treball=pendents')).dades.map((f) => f.comandaId)).toEqual([comandes[2]]);
+      expect((await get('&treball=fets')).totals.linies).toBe(2);
+      expect((await get('&treball=fets')).dades.every((f) => f.treballatA !== null)).toBe(true);
+
+      const invalid = await fastify.inject({ method: 'GET', url: `${base}&treball=tots` });
+      expect(invalid.statusCode).toBe(400);
+
+      await fastify.close();
+    });
+
+    it("Empaquetat: filtre observacions d'empaquetat (tasques 7 i 23) i columna", async () => {
+      const fastify = construirServidor();
+      const { clientId, comandes } = await preparar(fastify);
+      // La 1a té observació d'empaquetat a la línia; la 2a només de
+      // producció (preparar) i la 3a d'entrega: cap de les dues compta.
+      await entorn.poolTest.query(
+        `UPDATE comanda_linia SET obs_empaquetat = 'Unitat familiar 2'
+         WHERE comanda_id = (SELECT id FROM comanda WHERE id_seq = $1)`,
+        [comandes[0]],
+      );
+      await entorn.poolTest.query(
+        `UPDATE comanda SET obs_lliurament = 'Deixar a la porta' WHERE id_seq = $1`,
+        [comandes[2]],
+      );
+      const get = async (q: string) =>
+        cuerpoJson<PanellEmpaquetatApi>(
+          await fastify.inject({
+            method: 'GET',
+            url: `/api/v1/panells/empaquetat?clientId=${clientId}&mida=200${q}`,
+          }),
+        );
+      const amb = await get('&observacions=si');
+      expect(amb.dades.map((f) => f.comandaId)).toEqual([comandes[0]]);
+      expect(amb.dades[0]?.obsEmpaquetat).toBe('Unitat familiar 2');
+      expect(new Set((await get('&observacions=no')).dades.map((f) => f.comandaId))).toEqual(
+        new Set([comandes[1], comandes[2]]),
+      );
+
+      await fastify.close();
+    });
+  });
+
+  describe('tasca 33 — estat esborrany', () => {
+    it('no surt a Obrador ni Empaquetat; sí a Oficina (també filtrant per esborrany)', async () => {
+      const fastify = construirServidor();
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [{ dataProduccio: '2026-08-01T00:00:00Z', producteId, unitatsDemanades: 1 }],
+        },
+      });
+      const comandaId = cuerpoJson<{ id: number }>(creada).id;
+      const patch = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comandaId}`,
+        payload: { estat: 'esborrany' },
+      });
+      expect(patch.statusCode).toBe(200);
+      expect(cuerpoJson<ComandaDetallApi>(patch).estat).toBe('esborrany');
+
+      const obrador = cuerpoJson<PanellObradorApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/obrador?mida=200' }),
+      );
+      expect(obrador.dades.some((f) => f.comandaId === comandaId)).toBe(false);
+      const empaquetat = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/empaquetat?mida=200' }),
+      );
+      expect(empaquetat.dades.some((f) => f.comandaId === comandaId)).toBe(false);
+      const oficina = cuerpoJson<PanellOficinaApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/oficina?mida=200' }),
+      );
+      expect(oficina.dades.some((f) => f.comandaId === comandaId)).toBe(true);
+      const nomesEsborranys = cuerpoJson<PanellOficinaApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: '/api/v1/panells/oficina?estat=esborrany&mida=200',
+        }),
+      );
+      expect(nomesEsborranys.dades.map((f) => f.comandaId)).toEqual([comandaId]);
+
+      // Tornar-la a oberta: torna a sortir a Obrador.
+      await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comandaId}`,
+        payload: { estat: 'oberta' },
+      });
+      const obrador2 = cuerpoJson<PanellObradorApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/obrador?mida=200' }),
+      );
+      expect(obrador2.dades.some((f) => f.comandaId === comandaId)).toBe(true);
+      // Neteja: tancada (no cancel·lada: el test de sota compta les cancel·lades).
+      await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comandaId}`,
+        payload: { estat: 'tancada' },
+      });
+
+      await fastify.close();
+    });
+  });
+
+  describe('tasca 29 — Obrador acumulat per producte', () => {
+    it('suma només les línies que compleixen els filtres, i producteId en desplega el detall', async () => {
+      const fastify = construirServidor();
+      const productes: number[] = [];
+      for (const [codi, descripcio] of [
+        ['T29-B', 'T29 Producte B'],
+        ['T29-A', 'T29 Producte A'],
+      ]) {
+        const fila = await entorn.poolTest.query<{ id_seq: string }>(
+          `INSERT INTO producte (codi, descripcio, pes_kg, preu_venda, tipus, agrupacio_produccio)
+           VALUES ($1, $2, '0.500', '5.00', 'simple', 'AGRUP-T29') RETURNING id_seq`,
+          [codi, descripcio],
+        );
+        productes.push(Number(fila.rows[0]!.id_seq));
+      }
+      const [producteB, producteA] = productes as [number, number];
+      // B: dues línies (2 i 3 unitats); A: una línia (4 unitats) d'un altre dia.
+      for (const [producteId, unitatsDemanades, dia] of [
+        [producteB, 2, '2026-08-11'],
+        [producteB, 3, '2026-08-11'],
+        [producteA, 4, '2026-08-12'],
+      ] as const) {
+        await fastify.inject({
+          method: 'POST',
+          url: '/api/v1/comandes',
+          payload: {
+            dataComanda: '2026-08-01',
+            dataLliurament: '2026-08-30T00:00:00Z',
+            origen: 'manual',
+            linies: [{ dataProduccio: `${dia}T00:00:00Z`, producteId, unitatsDemanades }],
+          },
+        });
+      }
+      // Una línia de B ja feta.
+      await entorn.poolTest.query(
+        `UPDATE comanda_linia SET treballat_a = now()
+         WHERE id = (SELECT cl.id FROM comanda_linia cl JOIN producte p ON p.id = cl.producte_id
+                     WHERE p.id_seq = $1 AND cl.unitats_demanades = 2)`,
+        [producteB],
+      );
+
+      const acumulat = async (q: string) =>
+        cuerpoJson<PanellObradorAcumulatApi>(
+          await fastify.inject({
+            method: 'GET',
+            url: `/api/v1/panells/obrador/acumulat?agrupacioProduccio=AGRUP-T29${q}`,
+          }),
+        );
+
+      const tot = await acumulat('');
+      // Ordenat per agrupació i producte: A abans que B.
+      expect(tot.dades).toEqual([
+        {
+          producte: { id: producteA, codi: 'T29-A', descripcio: 'T29 Producte A' },
+          agrupacioProduccio: 'AGRUP-T29',
+          unitats: '4.00',
+          kg: '2.000',
+          linies: 1,
+          liniesFetes: 0,
+        },
+        {
+          producte: { id: producteB, codi: 'T29-B', descripcio: 'T29 Producte B' },
+          agrupacioProduccio: 'AGRUP-T29',
+          unitats: '5.00',
+          kg: '2.500',
+          linies: 2,
+          liniesFetes: 1,
+        },
+      ]);
+      expect(tot.totals).toEqual({
+        linies: 3,
+        totalUnitats: '9.00',
+        totalKg: '4.500',
+        liniesFetes: 1,
+        liniesPendents: 2,
+      });
+
+      // Filtres: només les pendents del dia 11 → només B, amb una línia.
+      const filtrat = await acumulat(
+        '&treball=pendents&dataProduccioDes=2026-08-11&dataProduccioFins=2026-08-11',
+      );
+      expect(filtrat.dades).toHaveLength(1);
+      expect(filtrat.dades[0]).toMatchObject({ unitats: '3.00', linies: 1, liniesFetes: 0 });
+
+      // Desplegar B amb els mateixos filtres: només la línia que els compleix.
+      const detall = cuerpoJson<PanellObradorApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: `/api/v1/panells/obrador?producteId=${producteB}&treball=pendents`,
+        }),
+      );
+      expect(detall.dades.map((f) => [f.producte.id, f.unitats])).toEqual([[producteB, '3.00']]);
+
+      const invalid = await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/obrador/acumulat?producteId=abc',
       });
       expect(invalid.statusCode).toBe(400);
 

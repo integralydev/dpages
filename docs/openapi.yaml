@@ -647,6 +647,53 @@ paths:
               schema: { $ref: '#/components/schemas/ComandaDetall' }
         '400': { $ref: '#/components/responses/Validacio' }
 
+  /api/v1/comandes/duplicar:
+    post:
+      tags: [Comandes]
+      summary: Duplicar una o varias comandas (tarea 17)
+      description: >-
+        Cada copia nace en esborrany, con dataComanda = hoy (Europe/Madrid)
+        y el resto de fechas en null. Copia cabecera (cliente, tarifa,
+        transportista, dirección, observaciones) y líneas (producto,
+        unidades, observaciones), sin datos de empaquetado. Precio y peso de
+        ficha se resuelven de nuevo. Una comanda de WooCommerce se duplica
+        con origen manual, sin sus líneas sin artículo. Todo o nada.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { type: integer }
+      responses:
+        '201':
+          description: Comandas creadas, en el orden de los ids
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comandes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        num: { type: string }
+                        origen:
+                          type: object
+                          properties:
+                            id: { type: integer }
+                            num: { type: string }
+                        liniesOmeses: { type: integer }
+        '400': { $ref: '#/components/responses/Validacio' }
+
   /api/v1/comandes/{id}:
     get:
       tags: [Comandes]
@@ -664,7 +711,7 @@ paths:
       tags: [Comandes]
       summary: Actualizar cabecera del pedido (parcial)
       description: >-
-        Capa 31. Incluye `estat`: transición libre entre los 5 valores de
+        Capa 31. Incluye `estat`: transición libre entre los 6 valores de
         EstatComanda, sin máquina de estados. Si `estat` es "amb_incidencia",
         `detall` es obligatorio en el mismo body (400 si falta) y se registra
         como una incidencia nueva (tipus "manual"). Capa 34: si cambia
@@ -686,6 +733,19 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ComandaDetall' }
         '400': { $ref: '#/components/responses/Validacio' }
+        '404': { $ref: '#/components/responses/NoTrobat' }
+        '409': { $ref: '#/components/responses/Conflicte' }
+    delete:
+      tags: [Comandes]
+      summary: Eliminar una comanda sin nada generado (tarea 14)
+      description: >-
+        Borrado físico, con sus líneas e incidencias. 409 si es de
+        WooCommerce, si está congelada o si alguna línea (también borrada)
+        está hecha en el Obrador o tiene datos de empaquetado.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204': { description: Comanda eliminada }
         '404': { $ref: '#/components/responses/NoTrobat' }
         '409': { $ref: '#/components/responses/Conflicte' }
 
@@ -1016,6 +1076,28 @@ paths:
           in: query
           description: Filtra por producte.envasat — coincidencia exacta. Capa 20.
           schema: { type: string }
+        - name: clientId
+          in: query
+          description: Tarea 25 (01/10/2026). Cliente del pedido.
+          schema: { type: integer }
+        - name: agrupacioProduccio
+          in: query
+          description: >-
+            Tarea 28. Repetible, coincidencia exacta con
+            producte.agrupacio_produccio; varios valores = cualquiera.
+          style: form
+          explode: true
+          schema: { type: array, items: { type: string } }
+        - name: observacions
+          in: query
+          description: >-
+            Tarea 31. Con / sin observaciones de producción de la propia
+            línea (las de cabecera no cuentan).
+          schema: { type: string, enum: [si, 'no'] }
+        - name: treball
+          in: query
+          description: Tarea 26. Líneas pendientes o ya trabajadas.
+          schema: { type: string, enum: [pendents, fets] }
         - $ref: '#/components/parameters/Pagina'
         - $ref: '#/components/parameters/Mida'
       responses:
@@ -1087,6 +1169,64 @@ paths:
               schema: { $ref: '#/components/schemas/PanellProduccio' }
         '400': { $ref: '#/components/responses/Validacio' }
 
+  /api/v1/panells/obrador/acumulat:
+    get:
+      tags: [Panells]
+      summary: Panel de obrador acumulado por producto (tarea 29)
+      description: >-
+        Una fila por producto con la suma de unidades y kg de las líneas
+        que cumplen los filtros, que son los mismos de GET
+        /panells/obrador. Ordenado por agrupación de producción (nulas al
+        final) y descripción. Sin paginar. El detalle de un producto se
+        pide a GET /panells/obrador con producteId.
+      responses:
+        '200':
+          description: Filas acumuladas y totales
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totals: { type: object }
+                  dades:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        producte:
+                          type: object
+                          properties:
+                            id: { type: integer }
+                            codi: { type: string, nullable: true }
+                            descripcio: { type: string }
+                        agrupacioProduccio: { type: string, nullable: true }
+                        unitats: { type: string }
+                        kg: { type: string }
+                        linies: { type: integer }
+                        liniesFetes: { type: integer }
+        '400': { $ref: '#/components/responses/Validacio' }
+
+  /api/v1/panells/obrador/marcar-fets:
+    post:
+      tags: [Panells]
+      summary: Marcar como trabajadas todas las líneas pendientes filtradas (tarea 26)
+      description: >-
+        Acepta los mismos filtros que GET /panells/obrador (query string) y
+        marca como trabajadas todas las líneas pendientes que los cumplen,
+        no sólo una página. Las líneas de pedidos congelados se dejan igual
+        y se cuentan en congeladesOmeses. Exige el mòdul panell-obrador.
+      responses:
+        '200':
+          description: Resultado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  marcades: { type: integer }
+                  congeladesOmeses: { type: integer }
+        '400': { $ref: '#/components/responses/Validacio' }
+
   /api/v1/panells/empaquetat:
     get:
       tags: [Panells]
@@ -1117,7 +1257,12 @@ paths:
           schema: { type: string, format: date }
         - name: transportistaId
           in: query
-          schema: { type: integer }
+          description: >-
+            Repetible (tarea 22, 01/10/2026): varios valores = líneas de
+            cualquiera de esos transportistas.
+          style: form
+          explode: true
+          schema: { type: array, items: { type: integer } }
         - name: clientId
           in: query
           schema: { type: integer }
@@ -1145,6 +1290,12 @@ paths:
             (confirmatA null); "confirmades" = ya enviadas. Sin el
             parámetro, todas. Otro valor = 400.
           schema: { type: string, enum: [pendents, confirmades] }
+        - name: observacions
+          in: query
+          description: >-
+            Tarea 23 (01/10/2026). Con / sin observación de empaquetado de
+            la línea (obsEmpaquetat, tarea 7).
+          schema: { type: string, enum: [si, 'no'] }
         - $ref: '#/components/parameters/Pagina'
         - $ref: '#/components/parameters/Mida'
       responses:
@@ -1513,7 +1664,7 @@ components:
   schemas:
     EstatComanda:
       type: string
-      enum: [oberta, en_proces, tancada, amb_incidencia, cancellada]
+      enum: [esborrany, oberta, en_proces, tancada, amb_incidencia, cancellada]
 
     Error:
       type: object
@@ -1901,8 +2052,10 @@ components:
         origen:
           type: string
           description: >-
-            Codi de origen_comanda (ej. "woocommerce", "manual") — ya no es
+            Codi de origen_comanda (ej. "telefon", "whatsapp") — ya no es
             un enum fijo, ver el schema OrigenComanda y GET /origens-comanda.
+            "woocommerce" no se puede elegir a mano (tarea 11): 400.
+            Sólo lo asigna la sincronización.
         clientId: { type: integer }
         tarifaId:
           type: integer
@@ -1982,7 +2135,7 @@ components:
         estat:
           allOf: [{ $ref: '#/components/schemas/EstatComanda' }]
           description: >-
-            Capa 31. Transición libre entre los 5 estados, sin máquina de
+            Capa 31. Transición libre entre los 6 estados, sin máquina de
             estados. "cancellada" saca el pedido de todos los paneles. Si el valor es "amb_incidencia", `detall` es obligatorio
             en el mismo body y se registra como una incidencia nueva
             (tipus "manual") — a diferencia de las incidencias automáticas
@@ -2218,6 +2371,22 @@ components:
             kgPaletillas:
               type: string
               description: Igual que kgJamon — 7 kg/cerdo (Francesc).
+            canals:
+              type: object
+              description: >-
+                Suma de las líneas de la categoría CANALS (oberta y
+                esborrany, filtro de fechas de producción).
+              properties:
+                unitats: { type: string }
+                kg: { type: string }
+            mitgesCanals:
+              type: object
+              description: >-
+                Tarea 36. Igual que canals, para la categoría MITJES
+                CANALS. "0" si la categoría no existe.
+              properties:
+                unitats: { type: string }
+                kg: { type: string }
         dades:
           type: array
           items: { $ref: '#/components/schemas/PanellProduccioFila' }

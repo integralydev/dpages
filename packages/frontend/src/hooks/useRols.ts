@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, type Paginacio, type RolApi } from '@/lib/api';
+import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
 
 export type CreateRoleInput = { nom: string; modulsPermesos: string[] };
 export type EditRoleInput = Partial<{ nom: string; modulsPermesos: string[] }>;
@@ -22,7 +23,7 @@ type UseRolsResult = {
 // confirmado contra rols.ts: parsearPaginacio/construirPaginacio). No hi ha
 // DELETE /rols — aquest hook no en té cap funció equivalent, la UI tampoc
 // ofereix l'acció.
-const MIDA_PAGINA = 20;
+const MIDA_PAGINA = MIDA_PAGINA_LLISTATS;
 
 export function useRols(): UseRolsResult {
   const [data, setData] = useState<RolApi[]>([]);

@@ -285,7 +285,7 @@ export default function RatesPage() {
   }, [catalog]);
 
   // Efecte col·lateral de la paginació ja resolt: abans es derivava de
-  // `data` (les 20 files de tarifes de la pàgina actual) — ara
+  // `data` (les files de tarifes de la pàgina actual) — ara
   // ve de `catalog`, que ja és la font completa (useCatalog() sense `mida`,
   // per defecte 200) que aquesta mateixa pantalla ja carregava per resoldre
   // categoria/format de cada fila. Format segueix hardcodejat (enum tancat).

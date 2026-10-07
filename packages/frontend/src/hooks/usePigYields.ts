@@ -10,6 +10,7 @@ import {
   type RespostaPaginada,
 } from '@/lib/api';
 import { usePageClamp } from './usePageClamp';
+import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
 
 export type PigYieldPatch = Partial<Pick<RendimentPorcApi, 'unitatsPerPorc' | 'kgPerUnitat'>>;
 
@@ -30,7 +31,7 @@ type UsePigYieldsResult = {
   deletePigYield: (id: number) => Promise<void>;
 };
 
-const MIDA_PAGINA = 20;
+const MIDA_PAGINA = MIDA_PAGINA_LLISTATS;
 
 export function usePigYields(filters: PigYieldFilters = {}): UsePigYieldsResult {
   const [data, setData] = useState<RendimentPorcApi[]>([]);

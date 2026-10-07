@@ -308,6 +308,8 @@ export interface ComandaLiniaApi {
   /** Editable por línea (prototipo /pedidos), distinta de comanda.dataProduccio (cabecera). */
   dataProduccio: string | null;
   obsProduccio: string | null;
+  /** Tasca 7 (01/10/2026): observació d'empaquetat de la línia. */
+  obsEmpaquetat: string | null;
   esborrat: boolean;
 }
 
@@ -316,6 +318,18 @@ export interface IncidenciaComandaApi {
   tipus: string;
   detall: string;
   creatA: string;
+}
+
+/**
+ * Respuesta de `POST /comandes/duplicar` (tarea 17): una entrada por
+ * comanda creada, en el mismo orden que los `ids` del body.
+ */
+export interface ComandaDuplicadaApi {
+  id: number;
+  num: string;
+  origen: { id: number; num: string };
+  /** Líneas de la original que no se copiaron por no tener artículo resuelto. */
+  liniesOmeses: number;
 }
 
 export interface ComandaDetallApi {
@@ -361,6 +375,8 @@ export interface LiniaCreacioApi {
    * opcional del contrato).
    */
   dataProduccio?: string | null;
+  /** Tasca 7 (01/10/2026): observació d'empaquetat de la línia. */
+  obsEmpaquetat?: string | null;
 }
 
 export interface ComandaCreacioApi {
@@ -428,6 +444,8 @@ export interface LiniaEdicioApi {
   kgDemanats?: string;
   dataProduccio?: string | null;
   obsProduccio?: string | null;
+  /** Tasca 7 (01/10/2026). */
+  obsEmpaquetat?: string | null;
 }
 
 // ── 5 · Empaquetado ──────────────────────────────────────────────────────
@@ -546,6 +564,9 @@ export interface PanellOficinaApi {
 
 export interface TotalsPanellObradorApi {
   linies: number;
+  /** Línies amb `treballatA` (tasca 26, 01/10/2026). */
+  liniesFetes: number;
+  liniesPendents: number;
   /** BREAKING: pasó de `number` a `string`, mismo motivo/criterio que `totalKg` (SUM de NUMERIC(10,2), ver ComandaLiniaApi.unitatsDemanades). */
   totalUnitats: string;
   totalKg: string;
@@ -562,6 +583,8 @@ export interface FilaPanellObradorApi {
   liniaId: number;
   comandaId: number;
   producte: { id: number; codi: string | null; descripcio: string };
+  /** `producte.agrupacio_produccio` (01/10/2026); `null` si el producte no en té. */
+  agrupacioProduccio: string | null;
   categoria: string | null;
   format: string | null;
   envasat: string | null;
@@ -574,6 +597,29 @@ export interface FilaPanellObradorApi {
   /** Ver TreballLiniaRespostaApi. `null` si nadie marcó la línea como trabajada (o se desmarcó). */
   treballatA: string | null;
   treballatPer: ReferenciaApi | null;
+}
+
+/**
+ * Tasca 29 (03/10/2026): una fila per producte a `GET /panells/obrador/acumulat`,
+ * amb la suma de les línies que compleixen els filtres (els mateixos de
+ * `GET /panells/obrador`). El detall es demana a `GET /panells/obrador`
+ * amb `producteId`.
+ */
+export interface FilaPanellObradorAcumulatApi {
+  producte: { id: number; codi: string | null; descripcio: string };
+  agrupacioProduccio: string | null;
+  /** SUM de `unitats_demanades`, NUMERIC(10,2) com a string. */
+  unitats: string;
+  /** SUM de `pes_calculat_kg`, NUMERIC(14,3) com a string. */
+  kg: string;
+  linies: number;
+  liniesFetes: number;
+}
+
+export interface PanellObradorAcumulatApi {
+  totals: TotalsPanellObradorApi;
+  /** Sense paginar: com a molt, una fila per article del catàleg. */
+  dades: FilaPanellObradorAcumulatApi[];
 }
 
 export interface PanellObradorApi {
@@ -616,6 +662,8 @@ export interface FilaPanellEmpaquetatApi {
   kgLliurats: string;
   confirmatA: string | null;
   confirmatPer: string | null;
+  /** Tasca 7 (01/10/2026): observació d'empaquetat de la línia. */
+  obsEmpaquetat: string | null;
 }
 
 export interface PanellEmpaquetatApi {
@@ -691,6 +739,15 @@ export interface PanellProduccioApi {
      * líneas que matcheen, mismo criterio que el resto de `totals`.
      */
     canals: {
+      unitats: string;
+      kg: string;
+    };
+    /**
+     * Tasca 36 (03/10/2026): mateix càlcul que `canals`, però de la
+     * categoria "MITJES CANALS" (les mitges canals ja no se sumen amb les
+     * senceres). "0" si la categoria no existeix o no té línies.
+     */
+    mitgesCanals: {
       unitats: string;
       kg: string;
     };

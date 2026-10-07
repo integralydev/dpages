@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Copy, FileText } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
@@ -13,8 +13,12 @@ import { useNavigationGuard } from '@/hooks/useNavigationGuard';
 import { extractComandaErrorMessage, type OrderLineChanges, useOrders } from '@/hooks/useOrders';
 import { useOrigensComanda } from '@/hooks/useOrigensComanda';
 import { useRates } from '@/hooks/useRates';
-import { api, ApiError, type ComandaDetallApi } from '@/lib/api';
+import { api, ApiError, type ComandaDetallApi, type ComandaDuplicadaApi } from '@/lib/api';
+import { duplicarComandes } from '@/lib/duplicarComandes';
+import { eliminarComanda, potEliminarComanda } from '@/lib/eliminarComanda';
+import { descarregarPdfComandes } from '@/lib/ordersPdf';
 import { OrderForm, type OrderFormHandle } from '../OrderForm';
+import { ResultatDuplicatDialog } from '../ResultatDuplicatDialog';
 
 // Avís específic quan el "Desar" falla DESPRÉS d'haver-hi hagut algun
 // DELETE de línia real i exitós en aquesta sessió d'edició — el pedido
@@ -40,6 +44,8 @@ export default function OrderDetailPage() {
   const { data: origins } = useOrigensComanda();
   const formRef = useRef<OrderFormHandle>(null);
   const { setIsDirty } = useNavigationGuard();
+  // Còpia local de l'estat "canvis sense desar" per al botó Duplicar.
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   const [order, setOrder] = useState<ComandaDetallApi | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -113,17 +119,32 @@ export default function OrderDetailPage() {
     setIsSaving(true);
 
     let headerFailed = false;
-    try {
-      await editOrder(order.id, values);
-    } catch (caught) {
-      headerFailed = true;
-      setSaveError(
-        ambAvisSiCal(
-          extractComandaErrorMessage(caught, "No s'ha pogut desar la comanda."),
-          hasDeletedLineThisSession,
-        ),
-      );
+    async function desarCapcalera() {
+      if (!order) return;
+      try {
+        await editOrder(order.id, values);
+      } catch (caught) {
+        headerFailed = true;
+        setSaveError(
+          ambAvisSiCal(
+            extractComandaErrorMessage(caught, "No s'ha pogut desar la comanda."),
+            hasDeletedLineThisSession,
+          ),
+        );
+      }
     }
+
+    // Tasca 15: el backend valida la capçalera contra les línies TAL COM
+    // ESTAN guardades (regla 4: cap línia anterior a la data de producció
+    // de capçalera). Si la data de producció de capçalera s'avança, les
+    // línies que la seguien s'han d'avançar ABANS (si no, la capçalera
+    // xocaria amb les dates velles); si s'endarrereix, la capçalera va
+    // primer (si no, les línies noves xocarien amb la capçalera vella).
+    const capcaleraDespres =
+      values.dataProduccio !== null &&
+      order.dataProduccio !== null &&
+      values.dataProduccio.slice(0, 10) > order.dataProduccio.slice(0, 10);
+    if (!capcaleraDespres) await desarCapcalera();
 
     // Una llamada por línia nova/editada (el backend no ofereix un
     // endpoint batch). Cap error interromp les altres: es guarden totes
@@ -148,6 +169,7 @@ export default function OrderDetailPage() {
         lineErrors.push(extractComandaErrorMessage(caught, "No s'ha pogut editar una línia."));
       }
     }
+    if (capcaleraDespres) await desarCapcalera();
     if (lineErrors.length > 0) {
       setLineWarning(ambAvisSiCal(lineErrors.join(' '), hasDeletedLineThisSession));
     }
@@ -167,6 +189,70 @@ export default function OrderDetailPage() {
     // marca el flag quan el DELETE ha estat realment exitós.
     setHasDeletedLineThisSession(true);
     setReloadToken((token) => token + 1);
+  }
+
+  // Tasca 17: duplica la comanda tal com està desada (per això cal desar
+  // abans si hi ha canvis pendents).
+  const [isDuplicating, setIsDuplicating] = useState(false);
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
+  const [duplicades, setDuplicades] = useState<ComandaDuplicadaApi[] | null>(null);
+
+  async function handleDuplicate() {
+    if (!order) return;
+    setIsDuplicating(true);
+    setDuplicateError(null);
+    try {
+      setDuplicades(await duplicarComandes([order.id]));
+    } catch (caught) {
+      setDuplicateError(
+        caught instanceof ApiError
+          ? `No s'ha pogut duplicar la comanda: ${caught.message}`
+          : "No s'ha pogut duplicar la comanda.",
+      );
+    } finally {
+      setIsDuplicating(false);
+    }
+  }
+
+  // Tasca 13: la comanda desada, en PDF.
+  const [isPrinting, setIsPrinting] = useState(false);
+
+  async function handlePrint() {
+    if (!order) return;
+    setIsPrinting(true);
+    setDuplicateError(null);
+    try {
+      await descarregarPdfComandes({
+        comandes: [order],
+        clients: new Map(clients.map((client) => [client.id, client])),
+        originLabel: (codi) => origins.find((origin) => origin.codi === codi)?.nom ?? codi,
+      });
+    } catch {
+      setDuplicateError("No s'ha pogut generar el PDF de la comanda.");
+    } finally {
+      setIsPrinting(false);
+    }
+  }
+
+  // Tasca 14: eliminar la comanda (només si no té res generat).
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleConfirmDelete() {
+    if (!order) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await eliminarComanda(order.id);
+      setIsDirty(false);
+      router.push('/orders');
+    } catch (caught) {
+      setDeleteError(
+        caught instanceof ApiError ? caught.message : "No s'ha pogut eliminar la comanda.",
+      );
+      setIsDeleting(false);
+    }
   }
 
   async function handleConfirmIncidence() {
@@ -207,7 +293,19 @@ export default function OrderDetailPage() {
           {order?.congelada && <Badge variant="neutral">Congelada</Badge>}
         </div>
         {order && (
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {potEliminarComanda(order) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteError(null);
+                  setDeleteOpen(true);
+                }}
+                className="rounded-full border border-red-300 px-5 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50"
+              >
+                Eliminar comanda
+              </button>
+            )}
             {order.estat !== 'amb_incidencia' &&
               order.estat !== 'cancellada' &&
               !order.congelada && (
@@ -223,6 +321,26 @@ export default function OrderDetailPage() {
                   Marcar com a incidència
                 </button>
               )}
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={isPrinting || hasUnsavedChanges}
+              title={hasUnsavedChanges ? "Desa els canvis abans d'imprimir la comanda" : undefined}
+              className="flex items-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <FileText className="h-4 w-4" />
+              {isPrinting ? 'Generant PDF...' : 'Imprimir comanda'}
+            </button>
+            <button
+              type="button"
+              onClick={handleDuplicate}
+              disabled={isDuplicating || hasUnsavedChanges}
+              title={hasUnsavedChanges ? 'Desa els canvis abans de duplicar la comanda' : undefined}
+              className="flex items-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Copy className="h-4 w-4" />
+              {isDuplicating ? 'Duplicant...' : 'Duplicar comanda'}
+            </button>
             <button
               type="button"
               onClick={() => formRef.current?.submit()}
@@ -252,6 +370,7 @@ export default function OrderDetailPage() {
       )}
 
       {saveError && <p className="mb-4 text-sm text-red-600">{saveError}</p>}
+      {duplicateError && <p className="mb-4 text-sm text-red-600">{duplicateError}</p>}
       {lineWarning && <p className="mb-4 text-sm text-amber-700">{lineWarning}</p>}
 
       {order && (
@@ -268,9 +387,36 @@ export default function OrderDetailPage() {
           onSave={handleSave}
           onDeleteLine={handleDeleteLine}
           onDateErrorsChange={setHasDateErrors}
-          onDirtyChange={setIsDirty}
+          onDirtyChange={(dirty) => {
+            setIsDirty(dirty);
+            setHasUnsavedChanges(dirty);
+          }}
         />
       )}
+
+      <ConfirmDialog
+        isOpen={deleteOpen}
+        title="Eliminar comanda"
+        message={`Vols eliminar la comanda ${order?.num ?? ''}? S'esborrarà amb totes les seves línies i no es pot desfer.`}
+        confirmLabel="Eliminar"
+        cancelLabel="Cancel·lar"
+        errorMessage={deleteError}
+        isConfirming={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => {
+          setDeleteOpen(false);
+          setDeleteError(null);
+        }}
+      />
+
+      <ResultatDuplicatDialog
+        creades={duplicades}
+        onClose={() => setDuplicades(null)}
+        onOpen={(id) => {
+          setDuplicades(null);
+          router.push(`/orders/${id}`);
+        }}
+      />
 
       <ConfirmDialog
         isOpen={confirmOpen}

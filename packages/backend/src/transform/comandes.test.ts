@@ -86,18 +86,21 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
     expect(resultado.liniesNoResoltes).toBe(0);
 
     const comanda = await poolTest.query(
-      `SELECT estat, estat_web, poblacio_desti, total FROM comanda WHERE id = $1`,
+      `SELECT estat, estat_web, poblacio_desti, total, data_produccio FROM comanda WHERE id = $1`,
       [resultado.comandaId],
     );
+    // Tarea 38: las de WooCommerce nacen en esborrany.
     expect(comanda.rows[0]).toEqual({
-      estat: 'oberta',
+      estat: 'esborrany',
       estat_web: comandaSimple.status,
       poblacio_desti: comandaSimple.shipping.city,
       total: comandaSimple.total,
+      data_produccio: null, // Tarea 39: dimarts abans de les 16:00.
     });
 
     const linia = await poolTest.query(
-      `SELECT producte_id, unitats_demanades, pes_fitxa_kg, pes_calculat_kg, pes_editable
+      `SELECT producte_id, unitats_demanades, pes_fitxa_kg, pes_calculat_kg, pes_editable,
+              data_produccio
        FROM comanda_linia WHERE comanda_id = $1`,
       [resultado.comandaId],
     );
@@ -107,6 +110,8 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
       pes_fitxa_kg: '1.250',
       pes_calculat_kg: '1.250',
       pes_editable: false,
+      // Tarea 39: creada en dimarts 12/05 a les 10:15 (hora local) → sense data.
+      data_produccio: null,
     });
   });
 
@@ -120,13 +125,29 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
       `SELECT estat FROM comanda WHERE id = $1`,
       [resultado.comandaId],
     );
-    expect(comanda.rows[0]?.estat).toBe('amb_incidencia');
+    // Tarea 38: la incidencia se registra, pero sigue en esborrany hasta
+    // que oficina la revise.
+    expect(comanda.rows[0]?.estat).toBe('esborrany');
 
     const incidencies = await poolTest.query<{ tipus: string }>(
       `SELECT tipus FROM incidencia_comanda WHERE comanda_id = $1`,
       [resultado.comandaId],
     );
     expect(incidencies.rows.map((r) => r.tipus)).toContain('article_no_resolt');
+
+    // Tarea 39: creada en dimecres 03/06 → dilluns 08/06, en todas las líneas.
+    const linies = await poolTest.query<{ data_produccio: Date | null }>(
+      `SELECT data_produccio FROM comanda_linia WHERE comanda_id = $1`,
+      [resultado.comandaId],
+    );
+    expect(linies.rows.map((l) => l.data_produccio?.toISOString())).toEqual(
+      Array(linies.rows.length).fill('2026-06-08T00:00:00.000Z'),
+    );
+    const capcalera = await poolTest.query<{ data_produccio: Date | null }>(
+      `SELECT data_produccio FROM comanda WHERE id = $1`,
+      [resultado.comandaId],
+    );
+    expect(capcalera.rows[0]?.data_produccio?.toISOString()).toBe('2026-06-08T00:00:00.000Z');
 
     const liniaNoResolta = await poolTest.query(
       `SELECT producte_id, woo_sku, pes_calculat_kg, pes_editable FROM comanda_linia
@@ -240,7 +261,8 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
 
   it('regla de congelación: no toca cabecera ni líneas, registra incidencia', async () => {
     const primeraVez = await conClient((client) => transformarComanda(client, comandaSimple));
-    await poolTest.query(`UPDATE comanda SET congelat_a = now() WHERE id = $1`, [
+    // Una congelada ya salió de esborrany (oficina la revisó).
+    await poolTest.query(`UPDATE comanda SET estat = 'oberta', congelat_a = now() WHERE id = $1`, [
       primeraVez.comandaId,
     ]);
 
@@ -390,7 +412,7 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
       [primeraVez.comandaId],
     );
     expect(comanda.rows[0]?.client_id).toBeNull();
-    expect(comanda.rows[0]?.estat).toBe('amb_incidencia');
+    expect(comanda.rows[0]?.estat).toBe('esborrany'); // Tarea 38: sigue en esborrany, con la incidencia registrada.
 
     const incidencies = await poolTest.query<{ tipus: string }>(
       `SELECT tipus FROM incidencia_comanda WHERE comanda_id = $1 AND tipus = 'sense_dades_client'`,
@@ -467,7 +489,7 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
       expect(comandas.rows).toHaveLength(2);
       for (const fila of comandas.rows) {
         expect(fila.client_id).toBeNull();
-        expect(fila.estat).toBe('amb_incidencia');
+        expect(fila.estat).toBe('esborrany'); // Tarea 38.
       }
 
       const incidenciaEmail = await poolTest.query<{ tipus: string; detall: string }>(

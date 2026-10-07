@@ -11,6 +11,7 @@ import {
   MODULS_OPERATIUS_APOYO,
   parsearIdPublic,
   parsearPaginacio,
+  patroComencaPer,
   resolverCategoriaUuid,
 } from './comu.js';
 
@@ -120,14 +121,15 @@ export function registrarRutesProductes(fastify: FastifyInstance): void {
         valors.push(query.agrupacioProduccio.trim());
       }
       if (typeof query.cerca === 'string' && query.cerca.trim() !== '') {
-        // Coincidencia EXACTA, no substring (regla 3.1 transversal —
-        // docs/especificacion-funcional-dpages.md): "lomo" no debe traer
-        // "cabeza de lomo". Case-insensitive, por eso LOWER() en vez de ILIKE
-        // — mismo criterio ya aplicado arriba a agrupacioProduccio.
+        // Tasca 18 (01/10/2026): coincidència pel PRINCIPI del text, no
+        // substring — "llom" troba "Llom fresc" però no "Cap de llom"
+        // (manté l'esperit de la regla 3.1). Abans era coincidència exacta,
+        // i el llistat no filtrava mentre s'escrivia. Case-insensitive.
+        const n = valors.length + 1;
         condicions.push(
-          `(LOWER(p.descripcio) = LOWER($${valors.length + 1}) OR LOWER(p.descripcio_venda) = LOWER($${valors.length + 1}) OR LOWER(p.codi) = LOWER($${valors.length + 1}))`,
+          `(LOWER(p.descripcio) LIKE LOWER($${n}) ESCAPE '\\' OR LOWER(p.descripcio_venda) LIKE LOWER($${n}) ESCAPE '\\' OR LOWER(p.codi) LIKE LOWER($${n}) ESCAPE '\\')`,
         );
-        valors.push(query.cerca.trim());
+        valors.push(patroComencaPer(query.cerca.trim()));
       }
 
       const where = condicions.length > 0 ? `WHERE ${condicions.join(' AND ')}` : '';

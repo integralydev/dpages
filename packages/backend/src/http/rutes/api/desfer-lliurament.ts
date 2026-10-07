@@ -2,6 +2,7 @@ import type { LliuramentDesferRespostaApi } from '@dpages/shared';
 import type { FastifyInstance } from 'fastify';
 import { pool } from '../../../db/pool.js';
 import { crearGuardaModul, enviarConflicte, enviarNoTrobat, parsearIdPublic } from './comu.js';
+import { reobrirSiTancada } from './estat-automatic.js';
 
 /**
  * Issue #19 — hasta ahora confirmat_a/confirmat_per sólo se podían SETEAR
@@ -48,6 +49,9 @@ export function registrarRutaDesferLliurament(fastify: FastifyInstance): void {
         [liniaIdPublic, comanda.rows[0].id],
       );
       if (!resultat.rows[0]) return enviarNoTrobat(reply, 'Línia no trobada');
+
+      // Tarea 16: ya no está todo entregado.
+      await reobrirSiTancada(pool, comanda.rows[0].id);
 
       const resposta: LliuramentDesferRespostaApi = {
         liniaId: Number(resultat.rows[0].id_seq),
