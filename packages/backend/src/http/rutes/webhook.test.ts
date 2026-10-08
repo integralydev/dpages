@@ -219,4 +219,110 @@ describe('procesarEventoWebhook (fetch interceptado)', () => {
     expect(procesado.rows[0]?.processat).toBe(true);
     expect(procesado.rows[0]?.error).toContain('500');
   });
+
+  // Piso de activación (08/10/2026) — entornActivacio/pisoActivacioStr
+  // inyectables, mismo criterio que autenticarTasca: no hace falta mutar
+  // NODE_ENV/INGESTA_COMANDES_DES_DE del proceso para probar los dos caminos.
+  it('pedido anterior al piso: no crea comanda, el evento queda processat sin error (no es un fallo)', async () => {
+    const wooOrderId = 95101;
+    fetchMock.mockResolvedValueOnce(
+      respuestaJson({ ...comandaSimple, id: wooOrderId, date_created_gmt: '2026-10-07T23:59:59Z' }),
+    );
+
+    const evento = await poolTest.query<{ id: number }>(
+      `INSERT INTO esdeveniment_webhook (woo_order_id, topic, signatura_valida) VALUES ($1, 'order.updated', true) RETURNING id`,
+      [wooOrderId],
+    );
+
+    await procesarEventoWebhook(
+      wooOrderId,
+      evento.rows[0]!.id,
+      'development',
+      '2026-10-08T00:00:00Z',
+    );
+
+    const comanda = await poolTest.query(`SELECT 1 FROM comanda WHERE woo_order_id = $1`, [
+      wooOrderId,
+    ]);
+    expect(comanda.rowCount).toBe(0);
+
+    const procesado = await poolTest.query<{ processat: boolean; error: string | null }>(
+      `SELECT processat, error FROM esdeveniment_webhook WHERE id = $1`,
+      [evento.rows[0]!.id],
+    );
+    expect(procesado.rows[0]).toEqual({ processat: true, error: null });
+  });
+
+  it('INGESTA_COMANDES_DES_DE ausente en producción: el error queda visible en esdeveniment_webhook.error', async () => {
+    const wooOrderId = 95102;
+    fetchMock.mockResolvedValueOnce(respuestaJson({ ...comandaSimple, id: wooOrderId }));
+
+    const evento = await poolTest.query<{ id: number }>(
+      `INSERT INTO esdeveniment_webhook (woo_order_id, topic, signatura_valida) VALUES ($1, 'order.updated', true) RETURNING id`,
+      [wooOrderId],
+    );
+
+    await procesarEventoWebhook(wooOrderId, evento.rows[0]!.id, 'production', undefined);
+
+    const comanda = await poolTest.query(`SELECT 1 FROM comanda WHERE woo_order_id = $1`, [
+      wooOrderId,
+    ]);
+    expect(comanda.rowCount).toBe(0);
+
+    const procesado = await poolTest.query<{ processat: boolean; error: string | null }>(
+      `SELECT processat, error FROM esdeveniment_webhook WHERE id = $1`,
+      [evento.rows[0]!.id],
+    );
+    expect(procesado.rows[0]?.processat).toBe(true);
+    expect(procesado.rows[0]?.error).toContain(
+      'INGESTA_COMANDES_DES_DE no está configurada en producción',
+    );
+  });
+
+  it('ADR-026: la protección de líneas aplica igual por webhook que por polling', async () => {
+    const wooOrderId = 97101;
+    fetchMock.mockResolvedValueOnce(respuestaJson({ ...comandaSimple, id: wooOrderId }));
+    const evento1 = await poolTest.query<{ id: number }>(
+      `INSERT INTO esdeveniment_webhook (woo_order_id, topic, signatura_valida) VALUES ($1, 'order.updated', true) RETURNING id`,
+      [wooOrderId],
+    );
+    await procesarEventoWebhook(wooOrderId, evento1.rows[0]!.id);
+
+    const comanda = await poolTest.query<{ id: string }>(
+      `SELECT id FROM comanda WHERE woo_order_id = $1`,
+      [wooOrderId],
+    );
+    const comandaId = comanda.rows[0]!.id;
+    // Mismo estado que dejarían las rutas de Oficina: marca fijada + línea editada.
+    await poolTest.query(`UPDATE comanda SET linies_editades_a = now() WHERE id = $1`, [comandaId]);
+    const linia = await poolTest.query<{ id: string }>(
+      `SELECT id FROM comanda_linia WHERE comanda_id = $1`,
+      [comandaId],
+    );
+    await poolTest.query(`UPDATE comanda_linia SET unitats_demanades = 42 WHERE id = $1`, [
+      linia.rows[0]!.id,
+    ]);
+
+    // Llega una NUEVA notificación del mismo pedido (versión más nueva).
+    fetchMock.mockResolvedValueOnce(
+      respuestaJson({ ...comandaSimple, id: wooOrderId, date_modified_gmt: '2026-08-20T10:00:00' }),
+    );
+    const evento2 = await poolTest.query<{ id: number }>(
+      `INSERT INTO esdeveniment_webhook (woo_order_id, topic, signatura_valida) VALUES ($1, 'order.updated', true) RETURNING id`,
+      [wooOrderId],
+    );
+    await procesarEventoWebhook(wooOrderId, evento2.rows[0]!.id);
+
+    const liniaDespues = await poolTest.query<{ unitats_demanades: string }>(
+      `SELECT unitats_demanades FROM comanda_linia WHERE id = $1`,
+      [linia.rows[0]!.id],
+    );
+    expect(liniaDespues.rows[0]?.unitats_demanades).toBe('42.00');
+
+    const procesado = await poolTest.query<{ processat: boolean; error: string | null }>(
+      `SELECT processat, error FROM esdeveniment_webhook WHERE id = $1`,
+      [evento2.rows[0]!.id],
+    );
+    expect(procesado.rows[0]).toEqual({ processat: true, error: null });
+  });
 });

@@ -301,6 +301,43 @@ async function estaCongelada(dbPool: Pool, comandaUuid: string): Promise<boolean
 }
 
 /**
+ * ADR-026 (08/10/2026): la PRIMERA vez que Oficina modifica una línea de un
+ * pedido de WooCommerce (`woo_order_id` no nulo), el pedido queda marcado
+ * (`comanda.linies_editades_a`) y, desde entonces, `transformarComanda`
+ * (transform/comandes.ts) deja de tocar sus líneas — evita que una
+ * sincronización posterior pise la corrección. Un pedido manual
+ * (`woo_order_id` nulo) nunca se marca: nada lo sincroniza.
+ *
+ * Debe llamarse DENTRO de la misma transacción que la modificación de línea
+ * que sigue (POST/PATCH/DELETE .../linies) — si esa modificación falla y
+ * hace ROLLBACK, la marca tampoco queda. Toma el MISMO advisory lock por
+ * `woo_order_id` que usa `transformarComanda` antes de tocar líneas (ver
+ * `transform/comandes.ts`, justo antes de `obtenirComandaExistent`): serializa
+ * esta edición manual contra una sincronización concurrente del mismo
+ * pedido, en vez de que las dos escrituras compitan sin orden definido.
+ * `UPDATE ... WHERE linies_editades_a IS NULL` hace que una segunda edición
+ * nunca cambie el valor ya fijado (no es un "ON CONFLICT" porque no hay
+ * ninguna restricción que lo pida: es un simple guard en el WHERE).
+ */
+async function protegirLiniesSiEsDeWoocommerce(
+  client: PoolClient,
+  comandaUuid: string,
+): Promise<void> {
+  const fila = await client.query<{ woo_order_id: string | null }>(
+    'SELECT woo_order_id FROM comanda WHERE id = $1',
+    [comandaUuid],
+  );
+  const wooOrderId = fila.rows[0]?.woo_order_id;
+  if (wooOrderId === null || wooOrderId === undefined) return;
+
+  await client.query('SELECT pg_advisory_xact_lock($1)', [Number(wooOrderId)]);
+  await client.query(
+    `UPDATE comanda SET linies_editades_a = now() WHERE id = $1 AND linies_editades_a IS NULL`,
+    [comandaUuid],
+  );
+}
+
+/**
  * Cascada de resolución de precio de línia (contrato,
  * `ComandaLiniaApi.preuUnitari`): 1) la tarifa indicada, si tiene precio
  * para este producto; 2) si no, el precio base del producto; 3) si tampoco
@@ -606,6 +643,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         unitatsDemanades: number;
         kgDemanats?: string;
         dataProduccio?: string | null;
+        obsProduccio?: string | null;
         obsEmpaquetat?: string | null;
       }[];
     }>;
@@ -727,6 +765,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       pesCalculatKg: string;
       pesEditable: boolean;
       dataProduccio: string | null;
+      obsProduccio: string | null;
       obsEmpaquetat: string | null;
     }[] = [];
 
@@ -796,6 +835,12 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         // null (mateix criteri que cos.obsLliurament ?? null, més avall) en
         // comptes de deixar passar `undefined` cru al paràmetre de l'INSERT.
         dataProduccio: linia.dataProduccio ?? null,
+        // Fix (ver JSDoc de LiniaCreacioApi.obsProduccio en @dpages/shared):
+        // mismo criterio de normalización que obsEmpaquetat (buida = sense
+        // observació). PATCH .../linies/:liniaId no hace este trim para
+        // obsProduccio (sólo `?? null`) — asimetría preexistente que no se
+        // toca acá (fuera del alcance de este fix, que es sólo la creación).
+        obsProduccio: linia.obsProduccio?.trim() || null,
         // Tasca 7: buida = sense observació.
         obsEmpaquetat: linia.obsEmpaquetat?.trim() || null,
       });
@@ -839,8 +884,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         await client.query(
           `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                        preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-                                       data_produccio, obs_empaquetat)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                                       data_produccio, obs_empaquetat, obs_produccio)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
           [
             comandaUuid,
             i,
@@ -852,6 +897,10 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             l.pesEditable,
             l.dataProduccio,
             l.obsEmpaquetat,
+            // Fix (ver JSDoc de LiniaCreacioApi.obsProduccio): columna agregada
+            // al FINAL de la lista a propósito — ningún parámetro posicional
+            // existente ($1-$10) se desplaza.
+            l.obsProduccio,
           ],
         );
         if (l.sensePreu) {
@@ -1351,6 +1400,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         unitatsDemanades: number;
         kgDemanats: string;
         dataProduccio: string | null;
+        obsProduccio: string | null;
         obsEmpaquetat: string | null;
       }>;
 
@@ -1440,6 +1490,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
+        await protegirLiniesSiEsDeWoocommerce(client, comandaUuid);
 
         const ordinalFila = await client.query<{ seguent: number }>(
           `SELECT COALESCE(max(ordinal), -1) + 1 AS seguent FROM comanda_linia WHERE comanda_id = $1`,
@@ -1450,8 +1501,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         await client.query(
           `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                      preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-                                     data_produccio, obs_empaquetat)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                                     data_produccio, obs_empaquetat, obs_produccio)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
           [
             comandaUuid,
             ordinal,
@@ -1467,6 +1518,10 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             cos.dataProduccio ?? null,
             // Tasca 7: buida = sense observació.
             cos.obsEmpaquetat?.trim() || null,
+            // Fix (ver JSDoc de LiniaCreacioApi.obsProduccio en @dpages/shared):
+            // columna agregada al FINAL de la lista a propósito — ningún
+            // parámetro posicional existente ($1-$10) se desplaza.
+            cos.obsProduccio?.trim() || null,
           ],
         );
 
@@ -1611,6 +1666,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
+        await protegirLiniesSiEsDeWoocommerce(client, comandaUuid);
 
         const resultat = await client.query<{ id: string }>(
           `UPDATE comanda_linia SET
@@ -1731,12 +1787,31 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       const liniaIdPublic = parsearIdPublic(params.liniaId);
       if (liniaIdPublic === null) return enviarNoTrobat(reply, 'Línia no trobada');
 
-      const resultat = await pool.query(
-        `UPDATE comanda_linia SET esborrat = true
-       WHERE id_seq = $1 AND comanda_id = $2 RETURNING id`,
-        [liniaIdPublic, comandaUuid],
-      );
-      if (resultat.rowCount === 0) return enviarNoTrobat(reply, 'Línia no trobada');
+      // ADR-026: la marca tiene que quedar en la MISMA transacción que el
+      // borrado — si el UPDATE no encuentra la línea, el ROLLBACK también
+      // deshace la marca (ver protegirLiniesSiEsDeWoocommerce).
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await protegirLiniesSiEsDeWoocommerce(client, comandaUuid);
+
+        const resultat = await client.query(
+          `UPDATE comanda_linia SET esborrat = true
+         WHERE id_seq = $1 AND comanda_id = $2 RETURNING id`,
+          [liniaIdPublic, comandaUuid],
+        );
+        if (resultat.rowCount === 0) {
+          await client.query('ROLLBACK');
+          return enviarNoTrobat(reply, 'Línia no trobada');
+        }
+
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
 
       reply.code(204);
     },

@@ -43,6 +43,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",
-    "firebase": "^12.17.1"
+    "firebase": "^12.17.1",
+    "jspdf": "^4.2.1"
   }
 }

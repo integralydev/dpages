@@ -246,6 +246,31 @@ connectTimeout: 45_000 }))` contra `192.0.2.1` cambió el error de
   `/products` — confirmado con pruebas reales. Las cabeceras `X-WP-Total` y
   `X-WP-TotalPages` están presentes.
 
+**Nota (08/10/2026) — campos de dirección y nota capturados (ADR-025, decidido internamente, pendiente de validación del cliente)**:
+`WooShippingAddress` pasa a capturar también `address_1`, `address_2` y
+`postcode` (opcionales — no todo pedido real los trae con valor), y
+`WooOrder` captura `customer_note` (opcional). Van a `comanda.adreca_lliurament`
+y `comanda.obs_lliurament` respectivamente, sólo al crear (ver
+`transform/comandes.ts:construirAdrecaLliurament`/`construirObsLliurament`).
+Sobre una muestra real de 200 pedidos se observaron tres `method_id`
+distintos en `shipping_lines`: `flexible_shipping`, `flexible_shipping_single`
+y `local_pickup` — ninguno identifica una empresa transportista (son modos
+de entrega del plugin, ver línea 243 más arriba); `local_pickup` sí se usa
+como señal de negocio: un pedido con ese método nunca tiene una dirección de
+entrega real que mapear, así que `adreca_lliurament` queda en `NULL` aunque
+la dirección venga completa.
+
+**Nota (08/10/2026) — `after` (piso de activación, sólo `/orders`)**:
+filtra por `date_created_gmt` (a diferencia de `modified_after`, que filtra
+por `date_modified_gmt`) — se agrega cuando `INGESTA_COMANDES_DES_DE` está
+configurada (`ingerirComandes`, `sync/ingesta.ts`), para no aterrizar datos
+personales de pedidos anteriores al piso de activación sin necesidad. **No
+es la barrera real**: la fiabilidad de `after`/`dates_are_gmt` del lado de
+WooCommerce no está confirmada con pruebas reales (a diferencia de
+`modified_after`, arriba) — `transformarComanda` (`transform/comandes.ts`)
+vuelve a comparar `date_created_gmt` contra el mismo piso antes de crear
+cualquier pedido, sin confiar en que la tienda filtró bien.
+
 ## Las seis reglas de consulta obligatorias
 
 Se pierden registros si no se respetan todas:

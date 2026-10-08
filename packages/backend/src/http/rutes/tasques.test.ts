@@ -8,6 +8,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { env } from '../../config/env.js';
 import { migrarArriba } from '../../db/migrate.js';
 import type { construirServidor as construirServidorType } from '../servidor.js';
+import { comprobarPisoActivacioOResponder } from './tasques.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -80,6 +81,58 @@ afterAll(async () => {
   await cleanup.connect();
   await cleanup.query(`DROP SCHEMA IF EXISTS "${esquema}" CASCADE`);
   await cleanup.end();
+});
+
+/**
+ * Unitario, sin servidor ni base de datos — mismo criterio que
+ * autenticarTasca (autenticacio-tasques.test.ts): parámetros inyectables en
+ * vez de depender de env.NODE_ENV/env.INGESTA_COMANDES_DES_DE reales. La
+ * prueba de integración completa (bloquea ANTES de llamar a la tienda, no
+ * aterriza nada) vive en tasques-sin-piso-produccion.test.ts — necesita
+ * NODE_ENV=production de verdad ahí, que ESTE archivo no puede dar sin
+ * romper el camino de secreto compartido que usan el resto de sus tests.
+ */
+describe('comprobarPisoActivacioOResponder', () => {
+  function fakeReply() {
+    const code = vi.fn();
+    const send = vi.fn();
+    const reply = { code, send };
+    code.mockReturnValue(reply);
+    return {
+      reply: reply as unknown as Parameters<typeof comprobarPisoActivacioOResponder>[0],
+      code,
+      send,
+    };
+  }
+
+  it('producción sin piso: responde 500 ERROR_INTERN y devuelve false', () => {
+    const { reply, code, send } = fakeReply();
+    const ok = comprobarPisoActivacioOResponder(reply, 'production', undefined);
+
+    expect(ok).toBe(false);
+    expect(code).toHaveBeenCalledWith(500);
+    expect(send).toHaveBeenCalledTimes(1);
+    const cuerpo = send.mock.calls[0]?.[0] as { error: { codi: string; missatge: string } };
+    expect(cuerpo.error.codi).toBe('ERROR_INTERN');
+    expect(cuerpo.error.missatge).toContain('INGESTA_COMANDES_DES_DE no está configurada');
+  });
+
+  it('producción con piso configurado: no responde nada, devuelve true', () => {
+    const { reply, code, send } = fakeReply();
+    const ok = comprobarPisoActivacioOResponder(reply, 'production', '2026-10-08T00:00:00Z');
+
+    expect(ok).toBe(true);
+    expect(code).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('fuera de producción sin piso: no responde nada, devuelve true (comportamiento actual intacto)', () => {
+    const { reply, code } = fakeReply();
+    const ok = comprobarPisoActivacioOResponder(reply, 'development', undefined);
+
+    expect(ok).toBe(true);
+    expect(code).not.toHaveBeenCalled();
+  });
 });
 
 /**

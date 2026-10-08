@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { env } from '../../config/env.js';
 import { pool } from '../../db/pool.js';
 import { finestraReconciliacio, ingerirCataleg, ingerirComandes } from '../../sync/ingesta.js';
 import { transformarCataleg } from '../../transform/cataleg.js';
@@ -21,6 +22,48 @@ async function autenticarOResponder(req: FastifyRequest, reply: FastifyReply): P
 }
 
 /**
+ * Piso de activación (ajuste del 08/10/2026) — ANTES, con la variable
+ * ausente en producción, sync-comandes/reconciliar igual llamaban a la
+ * tienda y aterrizaban los pedidos en aterratge_woocommerce; sólo fallaba
+ * la transformación, fila por fila (transformarComanda) — y si el lote
+ * venía vacío, ese fallo ni se veía. Este chequeo corre ANTES de tocar la
+ * tienda para nada: en producción, sin `INGESTA_COMANDES_DES_DE`, ninguna
+ * de las dos rutas que ingieren pedidos llega siquiera a `ingerirComandes`.
+ *
+ * Mismo código/forma de error que usa el `setErrorHandler` global
+ * (`http/servidor.ts:74-87`) para cualquier 500 no gestionado por una ruta
+ * — `ERROR_INTERN` es justamente el código reservado para errores del
+ * servidor (de configuración, en este caso), no del cliente que llama. A
+ * diferencia de un `throw` simple (que ese handler global convertiría en un
+ * mensaje genérico, "Error intern del servidor", ocultando la causa real),
+ * acá se responde el mensaje explícito a propósito — es justo lo que
+ * Cloud Scheduler/quien mire la respuesta necesita ver.
+ *
+ * `entorn`/`pisoStr` inyectables (default de `env`), mismo criterio que
+ * `autenticarTasca` — permite testear el camino de producción sin mutar
+ * variables de entorno globales del proceso.
+ */
+export function comprobarPisoActivacioOResponder(
+  reply: FastifyReply,
+  entorn: string = env.NODE_ENV,
+  pisoStr: string | undefined = env.INGESTA_COMANDES_DES_DE,
+): boolean {
+  if (entorn === 'production' && pisoStr === undefined) {
+    reply
+      .code(500)
+      .send(
+        cosError(
+          'ERROR_INTERN',
+          'INGESTA_COMANDES_DES_DE no está configurada en producción — no se puede sincronizar ' +
+            'pedidos de WooCommerce sin el piso de fecha de activación.',
+        ),
+      );
+    return false;
+  }
+  return true;
+}
+
+/**
  * Las tres rutas son idempotentes por construcción, no por lógica nueva
  * acá: ingerirComandes/ingerirCataleg upsertean el aterrizaje y sólo avanzan
  * el cursor si el lote se procesó entero (capa de ingesta); transformarComandes/
@@ -31,6 +74,7 @@ async function autenticarOResponder(req: FastifyRequest, reply: FastifyReply): P
 export function registrarRutesTasques(fastify: FastifyInstance): void {
   fastify.post('/tasques/sync-comandes', async (req, reply) => {
     if (!(await autenticarOResponder(req, reply))) return;
+    if (!comprobarPisoActivacioOResponder(reply)) return;
     const ingesta = await ingerirComandes(pool);
     const transformacio = await transformarComandes(pool);
     return reply.code(200).send({ ingesta, transformacio });
@@ -45,6 +89,7 @@ export function registrarRutesTasques(fastify: FastifyInstance): void {
 
   fastify.post('/tasques/reconciliar', async (req, reply) => {
     if (!(await autenticarOResponder(req, reply))) return;
+    if (!comprobarPisoActivacioOResponder(reply)) return;
     const modifiedAfterForcat = finestraReconciliacio(7);
 
     const ingestaComandes = await ingerirComandes(pool, { modifiedAfterForcat });

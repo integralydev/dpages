@@ -128,6 +128,27 @@ describe('servicio de ingesta (Postgres real, esquema aislado; fetch interceptad
     expect(filas.rows[0]?.payload.name).toBe(producteEs.name);
   });
 
+  it('ingerirComandes manda "after" (piso de activación) si se le pasa, nunca a ingerirCataleg', async () => {
+    fetchMock.mockResolvedValueOnce(respuestaPagina([comandaSimple], 1));
+
+    await ingerirComandes(poolTest, undefined, '2026-10-08T07:00:00Z');
+
+    const url = fetchMock.mock.calls[0]?.[0] as URL;
+    expect(url.searchParams.get('after')).toBe('2026-10-08T07:00:00Z');
+    // dates_are_gmt=true ya viaja SIEMPRE en toda petición (PARAMS_OBLIGATORIOS,
+    // cliente.ts) — no es algo que haya que agregar para esto en particular.
+    expect(url.searchParams.get('dates_are_gmt')).toBe('true');
+  });
+
+  it('sin piso (undefined), ingerirComandes no manda "after" — comportamiento actual intacto', async () => {
+    fetchMock.mockResolvedValueOnce(respuestaPagina([comandaSimple], 1));
+
+    await ingerirComandes(poolTest, undefined, undefined);
+
+    const url = fetchMock.mock.calls[0]?.[0] as URL;
+    expect(url.searchParams.has('after')).toBe(false);
+  });
+
   it('si falla el lote (reintentos agotados), el cursor NO avanza y queda el fallo registrado', async () => {
     // 1) Ingesta exitosa primero, para dejar establecido un cursor previo.
     fetchMock.mockResolvedValueOnce(respuestaPagina([comandaSimple], 1));

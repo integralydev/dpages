@@ -48,6 +48,11 @@ async function marcarEsdevenimentProcessat(id: number, error: string | null): Pr
 export async function procesarEventoWebhook(
   wooOrderId: number,
   idEsdeveniment: number,
+  // Inyectables (default de env), mismo criterio que transformarComanda —
+  // permiten testear el piso de activación acá sin depender de variables
+  // de entorno globales del proceso.
+  entornActivacio: string = env.NODE_ENV,
+  pisoActivacioStr: string | undefined = env.INGESTA_COMANDES_DES_DE,
 ): Promise<void> {
   try {
     const pedido = await obtenerPedido(wooOrderId);
@@ -55,7 +60,7 @@ export async function procesarEventoWebhook(
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await transformarComanda(client, pedido);
+      await transformarComanda(client, pedido, entornActivacio, pisoActivacioStr);
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');

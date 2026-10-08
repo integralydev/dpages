@@ -2107,6 +2107,15 @@ components:
             cabecera que existe en ese body; en
             POST /comandes/{comandaId}/linies contra las 3 fechas de
             cabecera ya guardadas del pedido.
+        obsProduccio:
+          type: string
+          nullable: true
+          description: >-
+            Fix (pérdida de datos real, previa a los cambios de Integraly):
+            este campo nunca viajó acá, pese a existir desde antes en el
+            PATCH de línea — se perdía en silencio al crear un pedido o al
+            agregar una línea a uno existente. Vacía o sólo espacios = null,
+            mismo criterio que el resto de observaciones de línea.
 
     ComandaEntradaParcial:
       type: object

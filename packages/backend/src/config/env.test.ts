@@ -150,6 +150,31 @@ describe('parsearEnv', () => {
     });
   });
 
+  describe('piso de activación para pedidos de WooCommerce — INGESTA_COMANDES_DES_DE', () => {
+    it('es opcional: sin ella, undefined (incluso con NODE_ENV=production — ver transform/comandes.ts para el fallo cerrado en runtime)', () => {
+      expect(parsearEnv(entornoValido).INGESTA_COMANDES_DES_DE).toBeUndefined();
+      expect(
+        parsearEnv({ ...entornoValido, NODE_ENV: 'production' }).INGESTA_COMANDES_DES_DE,
+      ).toBeUndefined();
+    });
+
+    it('acepta una fecha ISO 8601 con zona', () => {
+      expect(
+        parsearEnv({ ...entornoValido, INGESTA_COMANDES_DES_DE: '2026-10-08T07:00:00Z' })
+          .INGESTA_COMANDES_DES_DE,
+      ).toBe('2026-10-08T07:00:00Z');
+    });
+
+    it('rechaza una fecha sin zona o con formato inválido', () => {
+      expect(() =>
+        parsearEnv({ ...entornoValido, INGESTA_COMANDES_DES_DE: '2026-10-08T07:00:00' }),
+      ).toThrow(ErrorConfiguracion);
+      expect(() =>
+        parsearEnv({ ...entornoValido, INGESTA_COMANDES_DES_DE: 'no-es-una-fecha' }),
+      ).toThrow(ErrorConfiguracion);
+    });
+  });
+
   describe('ADR-021 — guarda de AUTH_DISABLED', () => {
     it('AUTH_DISABLED es false por defecto, y sólo "true" literal lo activa', () => {
       expect(parsearEnv(entornoValido).AUTH_DISABLED).toBe(false);

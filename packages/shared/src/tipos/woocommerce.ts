@@ -36,13 +36,18 @@ export interface WooCouponLine {
 }
 
 /**
- * Deliberadamente mínima: sólo la ciudad, para poder poblar
- * `comanda.poblacio_desti` (propiedad del sync, ver ADR-005). El resto de
- * la dirección (calle, nombre, teléfono) no se modela acá — no hace falta
+ * `city` para `comanda.poblacio_desti` (propiedad del sync, ver ADR-005).
+ * `address_1`/`address_2`/`postcode` para `comanda.adreca_lliurament` (ver
+ * ADR-025 y `transform/comandes.ts:construirAdrecaLliurament`) — opcionales
+ * porque no todo pedido real los trae con valor. El resto de la dirección
+ * (nombre, teléfono, país, provincia) sigue sin modelarse: no hace falta
  * para esta capa y es dato personal que no queremos acarrear sin necesidad.
  */
 export interface WooShippingAddress {
   city: string;
+  address_1?: string;
+  address_2?: string;
+  postcode?: string;
 }
 
 /**
@@ -76,6 +81,11 @@ export interface WooOrder {
   shipping_lines: WooShippingLine[];
   coupon_lines: WooCouponLine[];
   meta_data: WooMetaData[];
+  /**
+   * Nota del cliente al pagar — para `comanda.obs_lliurament` (ver ADR-025).
+   * Opcional: no todo pedido real la trae.
+   */
+  customer_note?: string;
 }
 
 export interface WooProductAttribute {

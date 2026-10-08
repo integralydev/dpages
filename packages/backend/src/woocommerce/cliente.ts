@@ -333,10 +333,24 @@ async function listarTodo<T>(recurso: string, params: Record<string, string>): P
 export interface ParametrosListado {
   /** date_modified_gmt >= este valor (ISO 8601). Funciona en /orders y /products (verificado). */
   modifiedAfter?: string;
+  /**
+   * Piso de activación (sólo `/orders`, ver `ingerirComandes`): `after`
+   * filtra por `date_created_gmt` — a diferencia de `modified_after`, que
+   * filtra por `date_modified_gmt`. Sólo reduce lo que se trae de la tienda
+   * (menos datos personales de pedidos viejos aterrizados sin necesidad);
+   * NO es la barrera real — `transformarComanda` vuelve a comparar
+   * `date_created_gmt` contra el mismo piso antes de crear nada, porque la
+   * fiabilidad de `after`/`dates_are_gmt` del lado de WooCommerce no está
+   * confirmada (`docs/hallazgos-woocommerce.md`).
+   */
+  createdAfter?: string;
 }
 
 function paramsOpcionales(params: ParametrosListado): Record<string, string> {
-  return params.modifiedAfter ? { modified_after: params.modifiedAfter } : {};
+  return {
+    ...(params.modifiedAfter ? { modified_after: params.modifiedAfter } : {}),
+    ...(params.createdAfter ? { after: params.createdAfter } : {}),
+  };
 }
 
 export async function listarPedidos(params: ParametrosListado = {}): Promise<WooOrder[]> {

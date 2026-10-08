@@ -81,7 +81,11 @@ tocar nada:
   (LEGACY, en migración a Application Default Credentials — sigue haciendo
   falta en producción para `POST /usuaris` mientras el rol IAM de Identity
   Toolkit no esté otorgado a la cuenta de servicio de Cloud Run, ver más
-  abajo; en local no hace falta, ya funciona con ADC).
+  abajo; en local no hace falta, ya funciona con ADC),
+  `INGESTA_COMANDES_DES_DE` (piso de activación de pedidos de WooCommerce —
+  **no bloquea el arranque ni siquiera en producción**, pero sin ella
+  `transformarComanda` falla cerrado en tiempo de ejecución y no crea
+  ningún pedido; ver `.env.example` y `docs/contrato-api.md`).
 
 **Sobre `GOOGLE_APPLICATION_CREDENTIALS` (no está en `.env.example`, es una
 variable estándar del SDK de Google, no propia del proyecto)**: con

@@ -166,6 +166,11 @@ function toLiniaCreacio(line: LineDraft): LiniaCreacioApi {
     // Issue #21 — LiniaCreacioApi.dataProduccio torna a admetre null: ja no
     // hi ha cap bloqueig de submit que en garanteixi la presència.
     dataProduccio: line.dataProduccio,
+    // Fix (pèrdua de dades real): abans aquest camp no viatjava acá —
+    // LiniaCreacioApi no el declarava — i es perdia en silenci en crear un
+    // pedido nou o afegir una línia a un ja existent (toLiniaEdicio, més
+    // avall, ja l'incloïa des d'abans). Mateix criteri que obsEmpaquetat.
+    obsProduccio: line.obsProduccio || null,
     // Tasca 7: observació d'empaquetat de la línia.
     obsEmpaquetat: line.obsEmpaquetat || null,
   };

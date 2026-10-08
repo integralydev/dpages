@@ -913,6 +913,16 @@ correo y WhatsApp, que son la mayoría del volumen real.
 }
 ```
 
+> **Fix (pérdida de datos real, previa a los cambios de Integraly) —
+> `linies[].obsProduccio` ahora SÍ viaja en la creación.** El campo existía
+> desde antes en `PATCH .../linies/:liniaId` pero nunca se aceptaba acá (ni
+> en `POST .../linies` abajo): una observación de producción cargada al
+> crear una línea se perdía en silencio, aunque sí se guardaba si se
+> agregaba después editando la línea. Mismo criterio de normalización que
+> `obsEmpaquetat`: vacía o sólo espacios = `null`. No hizo falta ninguna
+> migración — la columna (`comanda_linia.obs_produccio`) ya existía desde
+> la migración `0008`.
+>
 > **Issue #16 (Francesc, Bloqueante) — BREAKING: `dataComanda`, `dataLliurament`
 > y `linies[].dataProduccio` pasan a ser OBLIGATORIOS**, sin valor por
 > defecto en el backend. El frontend precarga `dataComanda` con HOY
@@ -1113,7 +1123,8 @@ pedido original.
 
 Mismo shape que una línea de `POST /comandes` (`producteId`,
 `unitatsDemanades`, `kgDemanats` opcional — sólo tiene sentido si el
-artículo es "a medida"). Respuesta `201`, **la comanda completa actualizada**
+artículo es "a medida", `obsProduccio` opcional — ver nota de fix en
+`POST /comandes` más arriba, aplica igual acá). Respuesta `201`, **la comanda completa actualizada**
 (mismo shape que `GET /comandes/:id`), no sólo la línea nueva — para
 refrescar toda la pantalla de una. `409 CONFLICTE` si la comanda está
 congelada, igual que el resto de las escrituras sobre un pedido.
@@ -1159,6 +1170,20 @@ se recalcula solo a partir de `unitatsDemanades`, igual que al crear).
 > de coherencia de fechas (ver el bloque dedicado más arriba) — contra las
 > fechas de cabecera ya guardadas del pedido. Si no viene en el body, no se
 > re-valida nada (no cambió).
+
+> **Efecto sobre un pedido de WooCommerce (ADR-026, 08/10/2026):** la
+> PRIMERA vez que alguno de los tres endpoints de línea (`POST .../linies`,
+> este `PATCH`, o `DELETE /comandes/:comandaId/linies/:liniaId` — borrado
+> lógico, ver la nota de `linies[]` más arriba; no tiene sección propia en
+> este documento) modifica una línea de un pedido con origen WooCommerce,
+> el pedido queda marcado internamente
+> (`comanda.linies_editades_a`, no expuesta en ningún `GET`) y, desde
+> entonces, la sincronización deja de tocar sus líneas — sigue actualizando
+> la cabecera (estado web, total, etc.) con normalidad. Antes de esto, una
+> actualización posterior de WooCommerce podía pisar silenciosamente
+> cualquier corrección que Oficina hiciera en las líneas. Un pedido de
+> origen manual nunca se marca (nada lo sincroniza). No cambia la forma de
+> ningún request/response de estos tres endpoints.
 
 ---
 

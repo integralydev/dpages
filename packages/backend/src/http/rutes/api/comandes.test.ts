@@ -1166,6 +1166,171 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
     });
   });
 
+  // Fix (pèrdua de dades real, prèvia als canvis d'Integraly): obsProduccio
+  // de línia no viatjava en el camí de creació (ni POST /comandes ni POST
+  // .../linies) — es perdia en silenci encara que sí es guardava en editar
+  // la línia després (PATCH, ver test "editar només obsProduccio" més amunt).
+  describe('fix — obsProduccio de línia es desa en crear (POST /comandes i POST .../linies)', () => {
+    it('POST /comandes amb una línia amb obsProduccio: un GET posterior el recupera', async () => {
+      const fastify = construirServidor();
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [
+            {
+              producteId: producteFitxaId,
+              unitatsDemanades: 1,
+              obsProduccio: 'Tallar més fi',
+            },
+          ],
+        },
+      });
+      expect(creada.statusCode).toBe(201);
+      // La pèrdua passava ABANS que arribés cap resposta — ja es veia null
+      // a la resposta del propi POST, no només en un GET posterior.
+      const comandaCreada = cuerpoJson<ComandaDetallApi>(creada);
+      expect(comandaCreada.linies[0]!.obsProduccio).toBe('Tallar més fi');
+
+      const detall = await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/comandes/${comandaCreada.id}`,
+      });
+      expect(detall.statusCode).toBe(200);
+      const cuerpo = cuerpoJson<ComandaDetallApi>(detall);
+      expect(cuerpo.linies[0]!.obsProduccio).toBe('Tallar més fi');
+
+      await fastify.close();
+    });
+
+    it('POST .../linies amb obsProduccio: un GET posterior el recupera (mateix defecte, confirmat ara per execució)', async () => {
+      const fastify = construirServidor();
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [{ producteId: producteFitxaId, unitatsDemanades: 1 }],
+        },
+      });
+      const comanda = cuerpoJson<ComandaDetallApi>(creada);
+
+      const afegida = await fastify.inject({
+        method: 'POST',
+        url: `/api/v1/comandes/${comanda.id}/linies`,
+        payload: {
+          producteId: producteFitxaId,
+          unitatsDemanades: 1,
+          obsProduccio: 'Línia afegida — observació',
+        },
+      });
+      expect(afegida.statusCode).toBe(201);
+      const ambDues = cuerpoJson<ComandaDetallApi>(afegida);
+      const liniaNova = ambDues.linies.find((l) => l.obsProduccio !== null);
+      expect(liniaNova?.obsProduccio).toBe('Línia afegida — observació');
+
+      const detall = await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/comandes/${comanda.id}`,
+      });
+      const cuerpo = cuerpoJson<ComandaDetallApi>(detall);
+      expect(cuerpo.linies.find((l) => l.obsProduccio !== null)?.obsProduccio).toBe(
+        'Línia afegida — observació',
+      );
+
+      await fastify.close();
+    });
+
+    it('obsProduccio i obsEmpaquetat amb valors diferents: cada un queda al seu camp (guarda contra paràmetres creuats)', async () => {
+      const fastify = construirServidor();
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [
+            {
+              producteId: producteFitxaId,
+              unitatsDemanades: 1,
+              obsProduccio: 'Observació de producció',
+              obsEmpaquetat: 'Observació d’empaquetat',
+            },
+          ],
+        },
+      });
+      expect(creada.statusCode).toBe(201);
+      const comanda = cuerpoJson<ComandaDetallApi>(creada);
+      const linia = comanda.linies[0]!;
+      expect(linia.obsProduccio).toBe('Observació de producció');
+      expect(linia.obsEmpaquetat).toBe('Observació d’empaquetat');
+
+      await fastify.close();
+    });
+
+    it('obsProduccio absent, buida o només espais: queda null (mateix criteri que obsEmpaquetat)', async () => {
+      const fastify = construirServidor();
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [
+            { producteId: producteFitxaId, unitatsDemanades: 1 },
+            { producteId: producteFitxaId, unitatsDemanades: 1, obsProduccio: '' },
+            { producteId: producteFitxaId, unitatsDemanades: 1, obsProduccio: '   ' },
+          ],
+        },
+      });
+      expect(creada.statusCode).toBe(201);
+      const comanda = cuerpoJson<ComandaDetallApi>(creada);
+      expect(comanda.linies.map((l) => l.obsProduccio)).toEqual([null, null, null]);
+
+      await fastify.close();
+    });
+
+    it('regressió: unitatsDemanades, kgDemanats, dataProduccio i obsEmpaquetat segueixen desant-se igual amb obsProduccio present', async () => {
+      const fastify = construirServidor();
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [
+            {
+              producteId: producteAMidaId,
+              unitatsDemanades: 3,
+              kgDemanats: '1.500',
+              dataProduccio: '2026-08-01T00:00:00Z',
+              obsProduccio: 'Observació de producció',
+              obsEmpaquetat: 'Observació d’empaquetat',
+            },
+          ],
+        },
+      });
+      expect(creada.statusCode).toBe(201);
+      const comanda = cuerpoJson<ComandaDetallApi>(creada);
+      const linia = comanda.linies[0]!;
+      expect(linia.unitatsDemanades).toBe('3.00');
+      expect(linia.kgDemanats).toBe('1.500');
+      expect(linia.dataProduccio).toBe('2026-08-01T00:00:00Z');
+      expect(linia.obsProduccio).toBe('Observació de producció');
+      expect(linia.obsEmpaquetat).toBe('Observació d’empaquetat');
+
+      await fastify.close();
+    });
+  });
+
   describe('capa 31 — canvi manual d’estat (PATCH /comandes/:id)', () => {
     it('PATCH /comandes/:id: canvi lliure entre oberta/en_proces/tancada, sense restricció de transició', async () => {
       const fastify = construirServidor();
@@ -3018,6 +3183,185 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
       expect(wooRes.json()).toMatchObject({
         error: { missatge: expect.stringMatching(/WooCommerce/) as unknown },
       });
+
+      await fastify.close();
+    });
+  });
+
+  describe('ADR-026 — protección de líneas sincronizadas tras edición de Oficina', () => {
+    async function marca(idSeq: number): Promise<string | null> {
+      const fila = await entorn.poolTest.query<{ linies_editades_a: Date | null }>(
+        `SELECT linies_editades_a FROM comanda WHERE id_seq = $1`,
+        [idSeq],
+      );
+      return fila.rows[0]?.linies_editades_a?.toISOString() ?? null;
+    }
+
+    async function crearComandaWoo(
+      wooOrderId: number,
+      opcions: { ambLiniaResolta?: boolean } = {},
+    ): Promise<{ idSeq: number; liniaIdSeq: number | null }> {
+      const res = await entorn.poolTest.query<{ id: string; id_seq: string }>(
+        `INSERT INTO comanda (woo_order_id, origen_id, estat, data_comanda)
+         VALUES ($1, (SELECT id FROM origen_comanda WHERE codi = 'woocommerce'), 'esborrany', '2026-08-01')
+         RETURNING id, id_seq`,
+        [wooOrderId],
+      );
+      const comandaId = res.rows[0]!.id;
+      const idSeq = Number(res.rows[0]!.id_seq);
+      let liniaIdSeq: number | null = null;
+      if (opcions.ambLiniaResolta) {
+        const linia = await entorn.poolTest.query<{ id_seq: string }>(
+          `INSERT INTO comanda_linia (
+             comanda_id, ordinal, woo_line_item_id, producte_id,
+             unitats_demanades, preu_unitari, pes_fitxa_kg, pes_calculat_kg
+           ) VALUES ($1, 0, 501, (SELECT id FROM producte WHERE id_seq = $2), 1, '9.86', '1.250', '1.250')
+           RETURNING id_seq`,
+          [comandaId, producteFitxaId],
+        );
+        liniaIdSeq = Number(linia.rows[0]!.id_seq);
+      }
+      return { idSeq, liniaIdSeq };
+    }
+
+    async function crearComandaManual(
+      fastify: ReturnType<typeof construirServidor>,
+    ): Promise<{ idSeq: number; liniaIdSeq: number }> {
+      const res = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [
+            {
+              dataProduccio: '2026-08-01T00:00:00Z',
+              producteId: producteFitxaId,
+              unitatsDemanades: 1,
+            },
+          ],
+        },
+      });
+      const cuerpo = cuerpoJson<ComandaDetallApi>(res);
+      return { idSeq: cuerpo.id, liniaIdSeq: cuerpo.linies[0]!.id };
+    }
+
+    it('POST .../linies fija la marca en un pedido de WooCommerce, y nunca en uno manual', async () => {
+      const fastify = construirServidor();
+      const woo = await crearComandaWoo(600001);
+      const manual = await crearComandaManual(fastify);
+
+      expect(await marca(woo.idSeq)).toBeNull();
+
+      const res = await fastify.inject({
+        method: 'POST',
+        url: `/api/v1/comandes/${woo.idSeq}/linies`,
+        payload: { producteId: producteFitxaId, unitatsDemanades: 1 },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(await marca(woo.idSeq)).not.toBeNull();
+
+      const resManual = await fastify.inject({
+        method: 'POST',
+        url: `/api/v1/comandes/${manual.idSeq}/linies`,
+        payload: { producteId: producteFitxaId, unitatsDemanades: 1 },
+      });
+      expect(resManual.statusCode).toBe(201);
+      expect(await marca(manual.idSeq)).toBeNull();
+
+      await fastify.close();
+    });
+
+    it('PATCH .../linies/:id fija la marca en un pedido de WooCommerce, y nunca en uno manual', async () => {
+      const fastify = construirServidor();
+      const woo = await crearComandaWoo(600002, { ambLiniaResolta: true });
+      const manual = await crearComandaManual(fastify);
+
+      const res = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${woo.idSeq}/linies/${woo.liniaIdSeq}`,
+        payload: { unitatsDemanades: 2 },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(await marca(woo.idSeq)).not.toBeNull();
+
+      const resManual = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${manual.idSeq}/linies/${manual.liniaIdSeq}`,
+        payload: { unitatsDemanades: 2 },
+      });
+      expect(resManual.statusCode).toBe(200);
+      expect(await marca(manual.idSeq)).toBeNull();
+
+      await fastify.close();
+    });
+
+    it('DELETE .../linies/:id fija la marca en un pedido de WooCommerce, y nunca en uno manual', async () => {
+      const fastify = construirServidor();
+      const woo = await crearComandaWoo(600003, { ambLiniaResolta: true });
+      const manual = await crearComandaManual(fastify);
+
+      const res = await fastify.inject({
+        method: 'DELETE',
+        url: `/api/v1/comandes/${woo.idSeq}/linies/${woo.liniaIdSeq}`,
+      });
+      expect(res.statusCode).toBe(204);
+      expect(await marca(woo.idSeq)).not.toBeNull();
+
+      const resManual = await fastify.inject({
+        method: 'DELETE',
+        url: `/api/v1/comandes/${manual.idSeq}/linies/${manual.liniaIdSeq}`,
+      });
+      expect(resManual.statusCode).toBe(204);
+      expect(await marca(manual.idSeq)).toBeNull();
+
+      await fastify.close();
+    });
+
+    it('una segunda edición no cambia el valor ya fijado', async () => {
+      const fastify = construirServidor();
+      const woo = await crearComandaWoo(600004);
+
+      await fastify.inject({
+        method: 'POST',
+        url: `/api/v1/comandes/${woo.idSeq}/linies`,
+        payload: { producteId: producteFitxaId, unitatsDemanades: 1 },
+      });
+      const primeraMarca = await marca(woo.idSeq);
+      expect(primeraMarca).not.toBeNull();
+
+      await fastify.inject({
+        method: 'POST',
+        url: `/api/v1/comandes/${woo.idSeq}/linies`,
+        payload: { producteId: producteFitxaId, unitatsDemanades: 1 },
+      });
+      expect(await marca(woo.idSeq)).toBe(primeraMarca);
+
+      await fastify.close();
+    });
+
+    it('un fallo de la modificación no deja marca (ni antes de abrir transacción, ni con ROLLBACK)', async () => {
+      const fastify = construirServidor();
+      const woo = await crearComandaWoo(600005);
+
+      // Falta producteId: 400 VALIDACIO — nunca llega a abrir la transacción.
+      const falloPost = await fastify.inject({
+        method: 'POST',
+        url: `/api/v1/comandes/${woo.idSeq}/linies`,
+        payload: {},
+      });
+      expect(falloPost.statusCode).toBe(400);
+      expect(await marca(woo.idSeq)).toBeNull();
+
+      // Línea inexistente: 404 — la transacción SÍ se abre (la marca llega a
+      // fijarse) pero el ROLLBACK la deshace junto con todo lo demás.
+      const falloDelete = await fastify.inject({
+        method: 'DELETE',
+        url: `/api/v1/comandes/${woo.idSeq}/linies/999999`,
+      });
+      expect(falloDelete.statusCode).toBe(404);
+      expect(await marca(woo.idSeq)).toBeNull();
 
       await fastify.close();
     });

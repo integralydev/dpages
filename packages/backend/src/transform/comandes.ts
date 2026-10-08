@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import type { WooOrder } from '@dpages/shared';
+import { env } from '../config/env.js';
 import { pool as poolPerDefecte } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
 import { parsearFechaGmt } from '../sync/fechas.js';
@@ -10,12 +11,23 @@ import { ConflicteIdentitatClient, resolverOCrearClient } from './resolucio-clie
 import type { IndexConflicteClient } from './resolucio-client.js';
 
 export interface ResultatComanda {
-  comandaId: string;
+  /** null = se omitió por el piso de activación — nunca se tocó la base, no hay fila que referenciar. */
+  comandaId: string | null;
   /** true = había congelat_a; no se tocó ni cabecera ni líneas, se registró incidencia. */
   congelada: boolean;
   /** false = se descartó por guardián de versión (no es un error, es lo esperado con entregas fuera de orden). */
   actualitzada: boolean;
   liniesNoResoltes: number;
+  /**
+   * Piso de activación (ver `resolverPisoActivacio`): true = el pedido es
+   * anterior al piso de fecha de creación, o su `date_created_gmt` no se
+   * pudo determinar con certeza — en los dos casos se omite por completo
+   * (sin comanda, sin cliente nuevo, sin incidencia), nunca se llega a
+   * tomar el lock ni a tocar la base.
+   */
+  omesaPerPisoActivacio: boolean;
+  /** ADR-026: true = Oficina ya editó una línea de este pedido — processarLinies no corrió, sólo se actualizó la cabecera. */
+  liniesProtegides: boolean;
 }
 
 export interface ResultatTransformacioComandes {
@@ -23,6 +35,10 @@ export interface ResultatTransformacioComandes {
   comandesActualitzades: number;
   comandesCongelades: number;
   comandesDescartadesPerVersio: number;
+  /** Piso de activación: pedidos anteriores a la fecha de creación mínima, o con date_created_gmt indeterminable. */
+  comandesOmesesPerData: number;
+  /** ADR-026: pedidos con `linies_editades_a` fijada — se actualizó la cabecera, nunca las líneas. */
+  comandesLiniesProtegides: number;
   liniesNoResoltes: number;
   errors: number;
 }
@@ -30,6 +46,10 @@ export interface ResultatTransformacioComandes {
 interface FilaComandaExistent {
   id: string;
   congelat_a: Date | null;
+  /** Para que una línea agregada tarde (`processarLinies`) herede la misma fecha que ya tiene la cabecera — ver ADR-025/tarea del 08/10/2026. */
+  data_produccio: Date | null;
+  /** ADR-026: no nula = Oficina ya editó una línea de este pedido — el sync deja de tocar líneas. */
+  linies_editades_a: Date | null;
 }
 
 async function obtenirComandaExistent(
@@ -37,7 +57,7 @@ async function obtenirComandaExistent(
   wooOrderId: number,
 ): Promise<FilaComandaExistent | null> {
   const res = await client.query<FilaComandaExistent>(
-    'SELECT id, congelat_a FROM comanda WHERE woo_order_id = $1',
+    'SELECT id, congelat_a, data_produccio, linies_editades_a FROM comanda WHERE woo_order_id = $1',
     [wooOrderId],
   );
   return res.rows[0] ?? null;
@@ -143,6 +163,39 @@ async function resolverOrigenWoocommerceUuid(client: PoolClient): Promise<string
   return res.rows[0].id;
 }
 
+/**
+ * ADR-025 (decidido internamente, pendiente de validación del cliente):
+ * `address_1 + ", " + address_2 (si no está vacío) + ", " + postcode (si no
+ * está vacío)` — sin city (ya va en `poblacio_desti`), sin comas colgando.
+ * `null` si `address_1` falta/está vacío, o si el pedido tiene recogida en
+ * tienda (`shipping_lines` con `method_id === 'local_pickup'`, ver
+ * docs/hallazgos-woocommerce.md): no tiene sentido una dirección de entrega
+ * para un pedido que el cliente retira en el local.
+ */
+export function construirAdrecaLliurament(wooOrder: WooOrder): string | null {
+  // Defensivo a propósito: `shipping` es obligatorio en el tipo `WooOrder`,
+  // pero el tipo es sólo de compilación — un payload real que lo omitiera
+  // del todo no debe tirar, sólo dejar la dirección sin armar.
+  const esRecollidaLocal = (wooOrder.shipping_lines ?? []).some(
+    (l) => l.method_id === 'local_pickup',
+  );
+  if (esRecollidaLocal) return null;
+
+  const address1 = wooOrder.shipping?.address_1?.trim();
+  if (!address1) return null;
+
+  const address2 = wooOrder.shipping?.address_2?.trim();
+  const postcode = wooOrder.shipping?.postcode?.trim();
+
+  return [address1, address2, postcode].filter((part) => !!part).join(', ');
+}
+
+/** ADR-025: nota del cliente, tal cual, sólo con trim. `null` si falta o está vacía. */
+export function construirObsLliurament(wooOrder: WooOrder): string | null {
+  const nota = wooOrder.customer_note?.trim();
+  return nota ? nota : null;
+}
+
 async function crearComanda(
   client: PoolClient,
   wooOrder: WooOrder,
@@ -154,8 +207,8 @@ async function crearComanda(
   // Obrador y Empaquetat.
   const origenId = await resolverOrigenWoocommerceUuid(client);
   const res = await client.query<{ id: string }>(
-    `INSERT INTO comanda (woo_order_id, origen_id, estat, estat_web, poblacio_desti, total, data_modificacio_woo, client_id, data_comanda, data_produccio)
-     VALUES ($1, $2, 'esborrany', $3, $4, $5, $6, $7, $8, $9)
+    `INSERT INTO comanda (woo_order_id, origen_id, estat, estat_web, poblacio_desti, total, data_modificacio_woo, client_id, data_comanda, data_produccio, adreca_lliurament, obs_lliurament)
+     VALUES ($1, $2, 'esborrany', $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING id`,
     [
       wooOrder.id,
@@ -173,6 +226,8 @@ async function crearComanda(
       // puede ir minutos u horas detrás del pedido real).
       parsearFechaGmt(wooOrder.date_created_gmt),
       dataProduccio,
+      construirAdrecaLliurament(wooOrder),
+      construirObsLliurament(wooOrder),
     ],
   );
   return res.rows[0]!.id;
@@ -206,6 +261,12 @@ async function vincularClientSiFalta(
  * aplica si la comanda no está congelada y la versión entrante es más
  * nueva que la almacenada. Nunca se lee primero y se decide después: la
  * condición va en el propio WHERE para que sea atómica.
+ *
+ * ADR-025: `adreca_lliurament`/`obs_lliurament` A PROPÓSITO no están en este
+ * UPDATE — sólo se escriben una vez, al crear (`crearComanda`). Después son
+ * de Oficina (mismo criterio de propiedad de columnas que ya aplica acá):
+ * una actualización posterior de WooCommerce nunca pisa lo que Oficina haya
+ * corregido a mano, aunque la versión entrante sea más nueva.
  */
 async function actualitzarCapcaleraSiCorrespon(
   client: PoolClient,
@@ -341,10 +402,105 @@ async function processarLinies(
   return { liniesNoResoltes: noResoltes };
 }
 
+/**
+ * Piso de activación: `null` = sin piso (sólo posible fuera de producción,
+ * sin `INGESTA_COMANDES_DES_DE` configurada — comportamiento actual, nadie
+ * se queda sin poder sincronizar en desarrollo/test por esto). En
+ * producción, la variable es OBLIGATORIA en la práctica aunque `env.ts` no
+ * bloquee el arranque si falta (a propósito, ver comentario en env.ts): acá
+ * es donde se exige de verdad, en tiempo de ejecución, para que nunca pueda
+ * crearse un pedido sin este control activo. Tirar un error (no devolver un
+ * resultado "vacío") es deliberado: es un error de configuración, no un
+ * resultado válido de negocio — se propaga igual al polling (capturado por
+ * fila en `transformarComandes`, cuenta como error) y al webhook (capturado
+ * en `procesarEventoWebhook`, queda en `esdeveniment_webhook.error`).
+ *
+ * Parámetros inyectables con default de `env` (mismo criterio que
+ * `autenticarTasca` en `autenticacio-tasques.ts`): permite testear los tres
+ * caminos — sin piso, con piso, piso obligatorio y ausente — sin depender
+ * de variables de entorno globales del proceso.
+ */
+function resolverPisoActivacio(
+  entorn: string = env.NODE_ENV,
+  pisoStr: string | undefined = env.INGESTA_COMANDES_DES_DE,
+): Date | null {
+  if (pisoStr === undefined) {
+    if (entorn === 'production') {
+      throw new Error(
+        'INGESTA_COMANDES_DES_DE no está configurada en producción — no se puede crear ' +
+          'ningún pedido de WooCommerce sin el piso de fecha de activación.',
+      );
+    }
+    return null;
+  }
+  return new Date(pisoStr);
+}
+
+/**
+ * true = el pedido es anterior al piso, o su fecha de creación no se pudo
+ * determinar con certeza (ninguno de los dos casos es un error: se omite y
+ * se loguea, nada más). `piso === null` (sin piso configurado) nunca omite.
+ */
+function omitidoPorPisoActivacio(wooOrder: WooOrder, piso: Date | null): boolean {
+  if (piso === null) return false;
+
+  if (!wooOrder.date_created_gmt) {
+    logger.warn(
+      { wooOrderId: wooOrder.id },
+      'Pedido sin date_created_gmt — no se puede confirmar que sea posterior al piso de activación, se omite',
+    );
+    return true;
+  }
+
+  let dataCreacio: Date;
+  try {
+    // parsearFechaGmt interpreta la ausencia de "Z" como UTC (ya es lo
+    // correcto: date_created_gmt YA está en GMT, ver sync/fechas.ts) — nunca
+    // new Date() directo, que lo tomaría como hora local del proceso.
+    dataCreacio = parsearFechaGmt(wooOrder.date_created_gmt);
+  } catch {
+    logger.warn(
+      { wooOrderId: wooOrder.id, dateCreatedGmt: wooOrder.date_created_gmt },
+      'Pedido con date_created_gmt inválido — no se puede confirmar que sea posterior al piso de activación, se omite',
+    );
+    return true;
+  }
+
+  // Estricto en "anterior" (<), nunca en "igual" — una fecha EXACTAMENTE
+  // igual al piso cuenta como incluida (regla de negocio: "a partir de").
+  if (dataCreacio.getTime() < piso.getTime()) {
+    logger.info(
+      { wooOrderId: wooOrder.id, dataCreacio: dataCreacio.toISOString(), piso: piso.toISOString() },
+      'Pedido anterior al piso de activación — se omite, nunca entra al sistema',
+    );
+    return true;
+  }
+
+  return false;
+}
+
 export async function transformarComanda(
   client: PoolClient,
   wooOrder: WooOrder,
+  entornActivacio: string = env.NODE_ENV,
+  pisoActivacioStr: string | undefined = env.INGESTA_COMANDES_DES_DE,
 ): Promise<ResultatComanda> {
+  // Piso de activación — lo PRIMERO que se chequea, antes de tomar el lock,
+  // de resolver/crear cliente o de tocar la base para nada (tarea del
+  // 08/10/2026): un pedido anterior a la fecha de activación no debe dejar
+  // ningún rastro, ni siquiera un cliente nuevo a medio resolver.
+  const piso = resolverPisoActivacio(entornActivacio, pisoActivacioStr);
+  if (omitidoPorPisoActivacio(wooOrder, piso)) {
+    return {
+      comandaId: null,
+      congelada: false,
+      actualitzada: false,
+      liniesNoResoltes: 0,
+      omesaPerPisoActivacio: true,
+      liniesProtegides: false,
+    };
+  }
+
   // Lock de concurrencia (decisión ya tomada, ver docs/decisiones-arquitectura.md):
   // el webhook (capa de servidor) y el polling por lote pueden llegar a
   // transformar el MISMO pedido casi al mismo tiempo. pg_advisory_xact_lock
@@ -369,7 +525,14 @@ export async function transformarComanda(
       },
       'Actualización de WooCommerce ignorada: el pedido está congelado — se registró como incidencia',
     );
-    return { comandaId: existent.id, congelada: true, actualitzada: false, liniesNoResoltes: 0 };
+    return {
+      comandaId: existent.id,
+      congelada: true,
+      actualitzada: false,
+      liniesNoResoltes: 0,
+      omesaPerPisoActivacio: false,
+      liniesProtegides: false,
+    };
   }
 
   // Se resuelve/crea ANTES de la rama de guardián de versión: vincular el
@@ -391,12 +554,16 @@ export async function transformarComanda(
     conflicteIdentitat = err.index;
   }
 
-  // Tarea 39: la data de producció sólo se calcula al crear la comanda, y
-  // va en la cabecera y en las líneas. En las actualizaciones posteriores
-  // es del sistema (ADR-005): no se toca, y las líneas que se añadan
-  // entran sin fecha.
+  // Tarea 39: la data de producció de la CABECERA sólo se calcula al crear
+  // la comanda; en actualizaciones posteriores es del sistema (ADR-005) y
+  // no se toca (ver crearComanda vs actualitzarCapcaleraSiCorrespon, que no
+  // la incluye). Para las LÍNEAS es distinto (ajuste del 08/10/2026,
+  // ADR-025): una línea que WooCommerce agrega en una actualización a una
+  // comanda ya existente hereda la fecha que la cabecera YA tiene (si la
+  // tiene) — antes quedaba siempre en NULL, invisible para Obrador/Producció
+  // (que filtran por `comanda_linia.data_produccio`, ver `panells.ts`).
   const dataProduccioNoves = existent
-    ? null
+    ? existent.data_produccio
     : calcularDataProduccioWoo(parsearFechaGmt(wooOrder.date_created_gmt));
 
   let comandaId: string;
@@ -429,8 +596,36 @@ export async function transformarComanda(
         { wooOrderId: wooOrder.id, comandaId },
         'Versión no más nueva que la almacenada — se omite (guardián de versión)',
       );
-      return { comandaId, congelada: false, actualitzada: false, liniesNoResoltes: 0 };
+      return {
+        comandaId,
+        congelada: false,
+        actualitzada: false,
+        liniesNoResoltes: 0,
+        omesaPerPisoActivacio: false,
+        liniesProtegides: false,
+      };
     }
+  }
+
+  // ADR-026 (08/10/2026): Oficina ya editó una línea de este pedido en algún
+  // momento — desde entonces, ninguna sincronización vuelve a tocar sus
+  // líneas (ni a actualizarlas/insertarlas, ni a marcar esborrat las que ya
+  // no vengan, ni a registrar la incidencia "article_no_resolt"). La
+  // cabecera YA se actualizó arriba (`actualitzarCapcaleraSiCorrespon`) con
+  // el comportamiento de siempre — sólo las líneas quedan protegidas.
+  if (existent?.linies_editades_a != null) {
+    logger.info(
+      { wooOrderId: wooOrder.id, comandaId },
+      'Líneas protegidas: Oficina ya las editó — la sincronización sólo actualizó la cabecera',
+    );
+    return {
+      comandaId,
+      congelada: false,
+      actualitzada: true,
+      liniesNoResoltes: 0,
+      omesaPerPisoActivacio: false,
+      liniesProtegides: true,
+    };
   }
 
   const { liniesNoResoltes } = await processarLinies(
@@ -453,11 +648,20 @@ export async function transformarComanda(
     );
   }
 
-  return { comandaId, congelada: false, actualitzada: true, liniesNoResoltes };
+  return {
+    comandaId,
+    congelada: false,
+    actualitzada: true,
+    liniesNoResoltes,
+    omesaPerPisoActivacio: false,
+    liniesProtegides: false,
+  };
 }
 
 export async function transformarComandes(
   pool: Pool = poolPerDefecte,
+  entornActivacio: string = env.NODE_ENV,
+  pisoActivacioStr: string | undefined = env.INGESTA_COMANDES_DES_DE,
 ): Promise<ResultatTransformacioComandes> {
   const crudos = await pool.query<{ woo_id: number; payload: WooOrder }>(
     `SELECT woo_id, payload FROM aterratge_woocommerce WHERE recurs = 'orders' ORDER BY woo_id`,
@@ -468,6 +672,8 @@ export async function transformarComandes(
     comandesActualitzades: 0,
     comandesCongelades: 0,
     comandesDescartadesPerVersio: 0,
+    comandesOmesesPerData: 0,
+    comandesLiniesProtegides: 0,
     liniesNoResoltes: 0,
     errors: 0,
   };
@@ -476,14 +682,22 @@ export async function transformarComandes(
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const r = await transformarComanda(client, fila.payload);
+      const r = await transformarComanda(client, fila.payload, entornActivacio, pisoActivacioStr);
       await client.query('COMMIT');
 
       resultat.comandesProcessades++;
-      resultat.liniesNoResoltes += r.liniesNoResoltes;
-      if (r.congelada) resultat.comandesCongelades++;
-      else if (!r.actualitzada) resultat.comandesDescartadesPerVersio++;
-      else resultat.comandesActualitzades++;
+      if (r.omesaPerPisoActivacio) {
+        resultat.comandesOmesesPerData++;
+      } else {
+        resultat.liniesNoResoltes += r.liniesNoResoltes;
+        if (r.congelada) resultat.comandesCongelades++;
+        else if (!r.actualitzada) resultat.comandesDescartadesPerVersio++;
+        else resultat.comandesActualitzades++;
+        // ADR-026: no es mutuamente excluyente con comandesActualitzades —
+        // la cabecera sí se actualizó, sólo que además las líneas quedaron
+        // protegidas (no es un contador de "qué pasó con la cabecera").
+        if (r.liniesProtegides) resultat.comandesLiniesProtegides++;
+      }
     } catch (err) {
       await client.query('ROLLBACK');
       resultat.errors++;

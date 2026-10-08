@@ -215,6 +215,30 @@ de Cloud Scheduler es parte de `infra/gcp/`. La implementación de estas
 rutas llega en la capa "servidor HTTP"; documentadas también en
 `docs/contrato-api.md`.
 
+**Nota (08/10/2026) — piso de activación para pedidos de WooCommerce**:
+`POST /tasques/sync-comandes`, `POST /tasques/reconciliar` y el webhook
+(`POST /webhooks/woocommerce`) comparten ahora la misma regla: ningún
+pedido de WooCommerce CREADO antes de `INGESTA_COMANDES_DES_DE` entra al
+sistema, aunque se modifique después (`transform/comandes.ts`). La
+variable es opcional incluso en producción a nivel de arranque (no bloquea
+el proceso si falta).
+
+En tiempo de ejecución hay DOS guardas, no una sola: `tasques.ts`
+(`comprobarPisoActivacioOResponder`) corta `sync-comandes`/`reconciliar`
+en producción **antes de llamar a la tienda**, si la variable falta —
+responde `500 ERROR_INTERN` sin aterrizar nada en `aterratge_woocommerce`
+(ajuste del 08/10/2026 — antes sólo fallaba la transformación, fila por
+fila, después de haber llamado igual a la tienda y aterrizado los
+pedidos; si el lote venía vacío, ese fallo ni se veía). `transformarComanda`
+conserva su propia guarda por si alguna vez se la llamara sin pasar por
+esa ruta (el webhook, por ejemplo, no ingiere nada — ver más arriba — así
+que ahí sigue siendo la única barrera). El error queda visible en la
+respuesta de la tarea (`500`, cuerpo `{ error: { codi: 'ERROR_INTERN' } }`)
+o en `esdeveniment_webhook.error` para el webhook. Ver `.env.example`
+(incluye el formato exacto aceptado, verificado arrancando el backend
+real) y `docs/hallazgos-woocommerce.md` (parámetro `after` agregado a
+`GET /orders`).
+
 ---
 
 ## ADR-010 — `@dpages/shared` se consume como paquete compilado
@@ -1173,3 +1197,111 @@ stack de sincronización — todo el comportamiento (reintentos, ventanas de
 consulta, manejo de fallos) es código propio, testeado y versionado junto
 al resto del backend, sin un sistema aparte que mantener o al que dar de
 alta accesos.
+
+## ADR-025 — Dirección y nota de entrega mapeadas desde WooCommerce (decidido internamente, pendiente de validación del cliente)
+
+**Estado**: Decidido internamente, pendiente de validación del cliente —
+ver auditoría del 08/10/2026 sobre los 3 pedidos reales guardados
+(`aterratge_woocommerce`, woo_order_id 6711/6712/6713) y una muestra de 200
+pedidos de la tienda real.
+
+**Contexto**: Hasta esta tarea, `comanda.adreca_lliurament` y
+`comanda.obs_lliurament` quedaban siempre `NULL` en los pedidos
+sincronizados — la auditoría confirmó que WooCommerce sí trae los datos de
+origen (`shipping.address_1/address_2/postcode`, `customer_note`) pero
+`WooShippingAddress`/`WooOrder` (`@dpages/shared`) no los capturaban. No
+existe ningún campo de fecha de expedición/entrega ni de transportista en el
+payload real (se revisaron cabecera y `meta_data`) — esos siguen sin mapeo
+posible, a completar por Oficina.
+
+**Decisión**: cuatro reglas, todas aplicadas únicamente al CREAR la comanda
+(`transform/comandes.ts:crearComanda`), nunca en la actualización posterior:
+
+1. `WooShippingAddress` captura `address_1`/`address_2`/`postcode`
+   (opcionales); `WooOrder` captura `customer_note` (opcional).
+2. `adreca_lliurament = address_1 + ", " + address_2 (si no vacío) + ", " +
+postcode (si no vacío)`, con `trim` en cada parte, sin `city` (ya va en
+   `poblacio_desti`) y sin comas colgando. `NULL` si `address_1` falta/está
+   vacío, o si algún `shipping_lines` tiene `method_id === 'local_pickup'`
+   (recogida en tienda: no hay dirección de entrega que mapear).
+3. `obs_lliurament = customer_note` con `trim`, `NULL` si falta o está vacía.
+4. `actualitzarCapcaleraSiCorrespon` NO toca ninguna de las dos columnas:
+   después de creadas son propiedad de Oficina (mismo criterio de ADR-005) —
+   una actualización posterior de WooCommerce, aunque traiga una versión más
+   nueva, nunca pisa lo que Oficina haya corregido a mano.
+
+Ajuste relacionado (mismo cambio, sin ADR propio): una línea que WooCommerce
+agrega en una actualización a una comanda YA EXISTENTE ahora hereda
+`comanda_linia.data_produccio` de la cabecera (si la cabecera la tiene) —
+antes quedaba siempre en `NULL`, invisible para Obrador/Producció (filtran
+por `comanda_linia.data_produccio`, ver `http/rutes/api/panells.ts`). Ver
+`transform/comandes.ts` (cálculo de `dataProduccioNoves`, antes de
+`processarLinies`).
+
+**Fecha**: 2026-10-08.
+
+**Consecuencias**: cubre dos de los vacíos reales observados en los 3
+pedidos auditados (dirección y nota), con una regla de negocio explícita
+(`local_pickup`) en vez de dejarlo siempre a mano. `data_expedicio`,
+`data_lliurament`, `transportista_id`, `bultos` y `tarifa_id` siguen sin
+ningún origen posible en la tienda — siguen siendo 100% de Oficina, sin
+cambios en esta tarea. Pendiente: validar con Francesc si el formato elegido
+para `adreca_lliurament` y el destino de `customer_note` en
+`obs_lliurament` son los esperados.
+
+## ADR-026 — Líneas de un pedido sincronizado se protegen tras la primera edición de Oficina
+
+**Estado**: Aceptado.
+
+**Contexto**: Una verificación de solo lectura (08/10/2026, ver sección
+"Reemplazo manual" del informe de esa fecha) probó, en un esquema
+descartable, que `processarLinies` (`transform/comandes.ts`) rompía el
+flujo "Oficina revisa y corrige un esborrany" en tres formas, todas
+reproducidas con evidencia real: (a) pisaba `unitats_demanades`/
+`preu_unitari`/pesos de una línea que Oficina ya había corregido a mano,
+en la siguiente sincronización del mismo pedido; (b) marcaba `esborrat`
+una línea agregada manualmente (sin `woo_line_item_id`) al no encontrarla
+entre las líneas que "vinieron" en el payload; (c) recreaba como fila
+nueva una línea que Oficina había borrado, duplicando el mismo
+`woo_line_item_id` (una `esborrat=true`, otra `esborrat=false`). Esto es
+coherente con ADR-005 tal cual estaba escrito (unidades/precio son "de
+WooCommerce, el sync puede sobrescribir") — el problema no es una
+contradicción de ADR-005, es que esa regla general no contempla el caso de
+una corrección manual explícita sobre un pedido que de todos modos sigue
+sincronizándose. No hay pedidos reales de WooCommerce en producción
+todavía, así que no hay datos que migrar ni que reparar.
+
+**Decisión**: columna nueva `comanda.linies_editades_a TIMESTAMPTZ`
+(migración 0024, nullable, aditiva). La PRIMERA vez que una de las tres
+rutas de línea de Oficina (`POST /comandes/:comandaId/linies`,
+`PATCH`/`DELETE .../linies/:liniaId`) modifica una línea de un pedido con
+`woo_order_id` no nulo, ese UPDATE fija `linies_editades_a = now()` en la
+MISMA transacción que la modificación (`http/rutes/api/comandes.ts`,
+función `protegirLiniesSiEsDeWoocommerce`) — si la modificación falla y
+hace ROLLBACK, la marca tampoco queda. Las tres rutas toman el mismo
+`pg_advisory_xact_lock(woo_order_id)` que ya usa `transformarComanda`, para
+serializar la edición manual contra una sincronización concurrente del
+mismo pedido. Un pedido de origen manual (`woo_order_id` nulo) nunca se
+marca — nada lo sincroniza, así que no aplica.
+
+En `transformarComanda` (`transform/comandes.ts`), para un pedido existente
+y no congelado: si `linies_editades_a` no es nula, no se llama a
+`processarLinies` ni se registra la incidencia `article_no_resolt` — la
+cabecera sigue actualizándose exactamente como antes (estado web, total,
+poblacón destino, `data_modificacio_woo`). `ResultatComanda.liniesProtegides`
+y el contador `ResultatTransformacioComandes.comandesLiniesProtegides`
+hacen visible cuántos pedidos están en este estado. Sin la marca, el
+comportamiento es exactamente el de antes de este ADR.
+
+**Fecha**: 2026-10-08.
+
+**Consecuencias**: Una vez que Oficina corrige cualquier línea de un
+pedido de WooCommerce, ese pedido queda "desconectado" de la sincronización
+de líneas para siempre (no hay forma de revertir la marca desde la API hoy)
+— la cabecera sigue viva. Esto es deliberadamente conservador: prioriza no
+perder trabajo de Oficina por sobre mantener el pedido 100% espejado. Si en
+el futuro hiciera falta una reconciliación más fina (línea por línea, no
+pedido por pedido), es un cambio aparte, no cubierto acá. No se tocó el
+contrato de la API: ningún shape de request/response cambia, sólo el
+comportamiento interno de sincronización (ver `docs/contrato-api.md`,
+sección 4.5, nota agregada en el mismo cambio).

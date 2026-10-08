@@ -84,6 +84,24 @@ const esquemaEnv = z
       .optional()
       .transform((valor) => valor === 'true'),
 
+    // Piso de fecha de creación para pedidos de WooCommerce: ningún pedido
+    // CREADO antes de esta fecha se trae ni se transforma, aunque se
+    // modifique después en la tienda (ver transform/comandes.ts). Opcional
+    // SIEMPRE acá (incluso en producción) a propósito: si faltara, NO
+    // queremos que el proceso ni arranque por esto — eso bloquearía TODO el
+    // backend por una variable que sólo afecta a la sincronización de
+    // pedidos. En su lugar, transformarComanda valida su presencia en
+    // tiempo de ejecución (falla cerrado, nunca crea un pedido sin este
+    // control si NODE_ENV=production y la variable falta). Fuera de
+    // producción, su ausencia es simplemente "sin piso" (comportamiento
+    // actual, sin romper tests/desarrollo). ISO 8601 con zona siempre
+    // (ej. "2026-10-08T07:00:00Z") — mismo criterio que TASQUES_OIDC_AUDIENCE
+    // de arriba, que tampoco es obligatoria acá.
+    INGESTA_COMANDES_DES_DE: z
+      .string()
+      .datetime({ message: 'debe ser ISO 8601 con zona, ej. 2026-10-08T07:00:00Z' })
+      .optional(),
+
     // ADR-021: capa de negocio requiere Firebase Auth (contrato, sección 2).
     // Fuera de producción se puede saltear con este interruptor explícito —
     // "true" literal, cualquier otro valor (incluido no definirla) exige

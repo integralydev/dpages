@@ -187,14 +187,24 @@ async function ingerirRecurs<T>(
   };
 }
 
+/**
+ * `pisoActivacioStr` inyectable (default `env.INGESTA_COMANDES_DES_DE`,
+ * mismo criterio que `autenticarTasca` en `autenticacio-tasques.ts`): sólo
+ * reduce lo que se le pide a WooCommerce (`after`, ver `cliente.ts`) — la
+ * barrera real contra pedidos anteriores al piso vive en
+ * `transformarComanda`, que vuelve a comparar `date_created_gmt` antes de
+ * crear nada, sin confiar en que WooCommerce filtró bien.
+ */
 export async function ingerirComandes(
   pool: Pool = poolPerDefecte,
   opcions?: OpcionsIngesta,
+  pisoActivacioStr: string | undefined = env.INGESTA_COMANDES_DES_DE,
 ): Promise<ResultatIngesta> {
   return ingerirRecurs<WooOrder>(
     {
       recurs: 'orders',
-      obtenirLot: (modifiedAfter) => listarPedidos({ modifiedAfter }),
+      obtenirLot: (modifiedAfter) =>
+        listarPedidos({ modifiedAfter, createdAfter: pisoActivacioStr }),
       idDe: (pedido) => pedido.id,
       dataModificacioGmtDe: (pedido) => pedido.date_modified_gmt,
     },

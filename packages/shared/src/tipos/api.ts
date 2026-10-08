@@ -375,6 +375,15 @@ export interface LiniaCreacioApi {
    * opcional del contrato).
    */
   dataProduccio?: string | null;
+  /**
+   * Fix (pérdida de datos real, previa a los cambios de Integraly): este
+   * campo nunca viajó en el camino de creación pese a existir desde antes
+   * en `LiniaEdicioApi` — las observaciones de producción de una línia
+   * nueva se perdían en silencio al crear un pedido (quedaban en `null`),
+   * aunque sí se guardaban al editar la línea después. Mismo shape que
+   * `LiniaEdicioApi.obsProduccio`.
+   */
+  obsProduccio?: string | null;
   /** Tasca 7 (01/10/2026): observació d'empaquetat de la línia. */
   obsEmpaquetat?: string | null;
 }
