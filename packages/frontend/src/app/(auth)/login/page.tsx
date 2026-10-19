@@ -18,6 +18,17 @@ const TOO_MANY_REQUESTS_MESSAGE =
   'Massa intents seguits. Espera uns minuts abans de tornar-ho a provar.';
 const UNKNOWN_ERROR_MESSAGE = "No s'ha pogut enviar l'enllaç. Torna-ho a provar.";
 
+const MISSATGES_ERROR_LOGIN = {
+  invalid: 'Email o contrasenya incorrectes.',
+  inactive: "Aquest usuari està desactivat. Contacta amb l'administrador.",
+  // L'email i la contrasenya són correctes, però el navegador no arriba al
+  // servidor de l'app (xarxa, tallafocs, antivirus o una extensió).
+  connexio:
+    "No s'ha pogut connectar amb el servidor. Comprova la connexió a internet i, si continua, prova en una finestra d'incògnit o des d'un altre navegador.",
+  'massa-intents':
+    'Massa intents seguits. Espera uns minuts abans de tornar-ho a provar, o restableix la contrasenya.',
+} as const;
+
 export default function LoginPage() {
   return (
     // useSearchParams exigeix un límit de Suspense (Next.js 16, App Router) —
@@ -89,11 +100,7 @@ function LoginForm() {
     const result = await login(email, password);
 
     if (!result.ok) {
-      setError(
-        result.reason === 'inactive'
-          ? "Aquest usuari està desactivat. Contacta amb l'administrador."
-          : 'Email o contrasenya incorrectes.',
-      );
+      setError(MISSATGES_ERROR_LOGIN[result.reason]);
       setIsSubmitting(false);
       return;
     }

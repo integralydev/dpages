@@ -21,7 +21,7 @@ import {
 } from 'react';
 import { InactivityWarningBanner } from '@/components/auth/InactivityWarningBanner';
 import { useInactivityTimeout } from '@/hooks/useInactivityTimeout';
-import { api, setAuthTokenProvider, type UsuariApi } from '@/lib/api';
+import { api, ApiError, setAuthTokenProvider, type UsuariApi } from '@/lib/api';
 import { auth } from '@/lib/firebase';
 
 // 30 min sense activitat real → logout automàtic, amb avís 2 min abans
@@ -43,7 +43,8 @@ export const INACTIVITY_LOGOUT_FLAG_KEY = 'dpages:sessioTancadaPerInactivitat';
 setAuthTokenProvider(async () => (auth.currentUser ? auth.currentUser.getIdToken() : null));
 
 export type LoginResult =
-  { ok: true; user: UsuariApi } | { ok: false; reason: 'invalid' | 'inactive' };
+  | { ok: true; user: UsuariApi }
+  | { ok: false; reason: 'invalid' | 'inactive' | 'connexio' | 'massa-intents' };
 
 // Firebase gestiona la pantalla de contrasenya (alta i restabliment són el
 // mateix mecanisme: sendPasswordResetEmail / generatePasswordResetLink),
@@ -75,11 +76,20 @@ function passwordResetActionCodeSettings() {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 /** `GET /jo` — usuario autenticado con rol y mòduls permesos, contrato §4.12. Devuelve `null` si el backend lo rechaza (token vencido, usuari.actiu=false). */
-async function fetchUsuariActual(): Promise<UsuariApi | null> {
+/**
+ * GET /jo. Distingeix el cas real d'usuari desactivat (403 SENSE_PERMIS) de
+ * qualsevol altre error (xarxa, bloqueig del navegador, error del servidor):
+ * abans tots dos es mostraven com "usuari desactivat", i quan la petició ni
+ * arribava al backend el missatge enganyava (cas real, 19/10/2026).
+ */
+async function fetchUsuariActual(): Promise<
+  { usuari: UsuariApi } | { usuari: null; motiu: 'inactive' | 'connexio' }
+> {
   try {
-    return await api.get<UsuariApi>('/jo');
-  } catch {
-    return null;
+    return { usuari: await api.get<UsuariApi>('/jo') };
+  } catch (caught) {
+    const desactivat = caught instanceof ApiError && caught.codi === 'SENSE_PERMIS';
+    return { usuari: null, motiu: desactivat ? 'inactive' : 'connexio' };
   }
 }
 
@@ -96,7 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsLoading(false);
         return;
       }
-      setUser(await fetchUsuariActual());
+      setUser((await fetchUsuariActual()).usuari);
       setIsLoading(false);
     });
 
@@ -113,21 +123,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // retroactiu sobre una sessió ja creada.
       await setPersistence(auth, browserSessionPersistence);
       await signInWithEmailAndPassword(auth, email, password);
-    } catch {
+    } catch (caught) {
+      // Sense connexió amb Firebase o massa intents seguits: no és que la
+      // contrasenya sigui incorrecta, i el missatge no ho ha de dir.
+      const codi = (caught as { code?: string } | null)?.code;
+      if (codi === 'auth/network-request-failed') return { ok: false, reason: 'connexio' };
+      if (codi === 'auth/too-many-requests') return { ok: false, reason: 'massa-intents' };
       return { ok: false, reason: 'invalid' };
     }
 
-    const usuari = await fetchUsuariActual();
-    if (!usuari) {
-      // GET /jo rechazó el token recién emitido: el caso documentado es
-      // usuari.actiu=false (403 SENSE_PERMIS, contrato §4.12) — no dejamos
-      // una sesión de Firebase viva si el backend no reconoce al usuario.
+    const resultat = await fetchUsuariActual();
+    if (!resultat.usuari) {
+      // GET /jo ha fallat amb el token recién emitido: o l'usuari està
+      // desactivat (403 SENSE_PERMIS, contrato §4.12) o no s'ha pogut parlar
+      // amb el backend. En tots dos casos no deixem una sessió de Firebase
+      // viva si el backend no reconeix l'usuari.
       await signOut(auth);
-      return { ok: false, reason: 'inactive' };
+      return { ok: false, reason: resultat.motiu };
     }
 
-    setUser(usuari);
-    return { ok: true, user: usuari };
+    setUser(resultat.usuari);
+    return { ok: true, user: resultat.usuari };
   }, []);
 
   const logout = useCallback(() => {
