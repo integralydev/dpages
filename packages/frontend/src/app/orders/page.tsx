@@ -15,6 +15,7 @@ import { PageHeader } from '@/components/ui/PageHeader';
 import { Pagination } from '@/components/ui/Pagination';
 import { SearchInput } from '@/components/ui/SearchInput';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
+import { useFiltrePersistent } from '@/hooks/useFiltrePersistent';
 import { useOrders } from '@/hooks/useOrders';
 import { useOrigensComanda } from '@/hooks/useOrigensComanda';
 import { ESTAT_LABELS, estatBadgeVariant } from '@/lib/comandaEstat';
@@ -145,13 +146,16 @@ function OrderCard({
 export default function OrdersPage() {
   const router = useRouter();
 
-  const [search, setSearch] = useState('');
-  const [selectedClients, setSelectedClients] = useState<ComboboxOption[]>([]);
-  const [statusFilter, setStatusFilter] = useState(ALL);
+  const [search, setSearch] = useFiltrePersistent('comandes.cerca', '');
+  const [selectedClients, setSelectedClients] = useFiltrePersistent<ComboboxOption[]>(
+    'comandes.clients',
+    [],
+  );
+  const [statusFilter, setStatusFilter] = useFiltrePersistent('comandes.estat', ALL);
   // Filtre d'origen: tots els orígens (també WooCommerce i l'històric
   // "manual"), encara que a mà només es puguin triar els 3 canals manuals.
   const { data: origins } = useOrigensComanda();
-  const [originFilter, setOriginFilter] = useState(ALL);
+  const [originFilter, setOriginFilter] = useFiltrePersistent('comandes.origen', ALL);
   const originCode = useMemo(
     () =>
       originFilter !== ALL
@@ -159,9 +163,15 @@ export default function OrdersPage() {
         : undefined,
     [originFilter, origins],
   );
-  const [productionDateFilter, setProductionDateFilter] = useState('');
-  const [orderDateFilter, setOrderDateFilter] = useState('');
-  const [deliveryDateFilter, setDeliveryDateFilter] = useState('');
+  const [productionDateFilter, setProductionDateFilter] = useFiltrePersistent(
+    'comandes.dataProduccio',
+    '',
+  );
+  const [orderDateFilter, setOrderDateFilter] = useFiltrePersistent('comandes.dataComanda', '');
+  const [deliveryDateFilter, setDeliveryDateFilter] = useFiltrePersistent(
+    'comandes.dataLliurament',
+    '',
+  );
   const [incidenceTarget, setIncidenceTarget] = useState<ComandaResumApi | null>(null);
   const [incidenceDetall, setIncidenceDetall] = useState('');
   const [incidenceError, setIncidenceError] = useState<string | null>(null);

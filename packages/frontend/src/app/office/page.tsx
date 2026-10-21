@@ -13,6 +13,7 @@ import { Pagination } from '@/components/ui/Pagination';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { StatCard } from '@/components/ui/StatCard';
 import { useCarriers } from '@/hooks/useCarriers';
+import { useFiltrePersistent } from '@/hooks/useFiltrePersistent';
 import { usePanellOficina } from '@/hooks/usePanellOficina';
 import { useRates } from '@/hooks/useRates';
 import { ESTAT_LABELS, estatBadgeVariant } from '@/lib/comandaEstat';
@@ -112,17 +113,29 @@ export default function OfficePage() {
   // (useClientTariffs()) — AsyncCombobox el resol via GET /clients?cerca=,
   // per això acá es guarda l'opció sencera (id+label), no només l'id: no
   // hi ha cap array complet per resoldre l'etiqueta a mostrar després.
-  const [selectedClient, setSelectedClient] = useState<ComboboxOption | null>(null);
-  const [statusFilter, setStatusFilter] = useState(ALL);
-  const [carrierFilter, setCarrierFilter] = useState(ALL);
-  const [tariffFilter, setTariffFilter] = useState(ALL_FEM);
-  const [destinationFilter, setDestinationFilter] = useState(ALL_FEM);
-  const [orderDateFrom, setOrderDateFrom] = useState('');
-  const [orderDateTo, setOrderDateTo] = useState('');
-  const [shippingDateFrom, setShippingDateFrom] = useState('');
-  const [shippingDateTo, setShippingDateTo] = useState('');
-  const [deliveryDateFrom, setDeliveryDateFrom] = useState('');
-  const [deliveryDateTo, setDeliveryDateTo] = useState('');
+  const [selectedClient, setSelectedClient] = useFiltrePersistent<ComboboxOption | null>(
+    'oficina.client',
+    null,
+  );
+  const [statusFilter, setStatusFilter] = useFiltrePersistent('oficina.estat', ALL);
+  const [carrierFilter, setCarrierFilter] = useFiltrePersistent('oficina.transportista', ALL);
+  const [tariffFilter, setTariffFilter] = useFiltrePersistent('oficina.tarifa', ALL_FEM);
+  const [destinationFilter, setDestinationFilter] = useFiltrePersistent(
+    'oficina.poblacioDesti',
+    ALL_FEM,
+  );
+  const [orderDateFrom, setOrderDateFrom] = useFiltrePersistent('oficina.dataComandaDes', '');
+  const [orderDateTo, setOrderDateTo] = useFiltrePersistent('oficina.dataComandaFins', '');
+  const [shippingDateFrom, setShippingDateFrom] = useFiltrePersistent(
+    'oficina.dataExpedicioDes',
+    '',
+  );
+  const [shippingDateTo, setShippingDateTo] = useFiltrePersistent('oficina.dataExpedicioFins', '');
+  const [deliveryDateFrom, setDeliveryDateFrom] = useFiltrePersistent(
+    'oficina.dataLliuramentDes',
+    '',
+  );
+  const [deliveryDateTo, setDeliveryDateTo] = useFiltrePersistent('oficina.dataLliuramentFins', '');
 
   const statusCode = useMemo(
     () => Object.entries(ESTAT_LABELS).find(([, label]) => label === statusFilter)?.[0],

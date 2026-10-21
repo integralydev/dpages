@@ -20,6 +20,7 @@ import {
   type ReactNode,
 } from 'react';
 import { InactivityWarningBanner } from '@/components/auth/InactivityWarningBanner';
+import { esborrarFiltresPersistents } from '@/hooks/useFiltrePersistent';
 import { useInactivityTimeout } from '@/hooks/useInactivityTimeout';
 import { api, ApiError, setAuthTokenProvider, type UsuariApi } from '@/lib/api';
 import { auth } from '@/lib/firebase';
@@ -102,6 +103,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // mano en localStorage) — esto reemplaza la hidratación manual de antes.
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (!firebaseUser) {
+        // Tasca 36: també si la sessió es tanca per una altra via (token
+        // revocat, signOut des d'una altra pestanya…), no només amb logout().
+        esborrarFiltresPersistents();
         setUser(null);
         setIsLoading(false);
         return;
@@ -147,6 +151,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    // Tasca 36: els filtres desats són de la sessió de qui la tanca.
+    esborrarFiltresPersistents();
     void signOut(auth);
     setUser(null);
   }, []);
