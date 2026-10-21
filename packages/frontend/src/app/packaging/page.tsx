@@ -11,6 +11,7 @@ import { DateRangeInput } from '@/components/ui/DateRangeInput';
 import { DecimalInput } from '@/components/ui/DecimalInput';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Pagination } from '@/components/ui/Pagination';
+import { SearchInput } from '@/components/ui/SearchInput';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { StatCard } from '@/components/ui/StatCard';
 import { useCarriers } from '@/hooks/useCarriers';
@@ -363,6 +364,9 @@ export default function PackagingPage() {
   // criteri que Producte a OrderForm.tsx) — veure lib/productSearch.ts.
   const [deliveryDateFilter, setDeliveryDateFilter] = useState('');
   const [selectedProducts, setSelectedProducts] = useState<ComboboxOption[]>([]);
+  // Tasca 45 (Ari, 20/10/2026): cerca per codi o descripció mentre
+  // s'escriu, com al Catàleg ("botifarra" les troba totes).
+  const [productSearch, setProductSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState(ALL_FEM);
   // Tasca 48 (Ari, 20/10/2026): origen de la comanda (tots els orígens,
   // també WooCommerce), mateix filtre que a Comandes.
@@ -425,6 +429,7 @@ export default function PackagingPage() {
       ...(selectedProducts.length > 0
         ? { producte: selectedProducts.map((product) => product.label) }
         : {}),
+      ...(productSearch.trim() ? { cercaProducte: productSearch.trim() } : {}),
       ...(categoriaId !== undefined ? { categoriaId } : {}),
       ...(originCode ? { origen: originCode } : {}),
       ...(confirmacio !== undefined ? { confirmacio } : {}),
@@ -437,6 +442,7 @@ export default function PackagingPage() {
       selectedClient,
       deliveryDateFilter,
       selectedProducts,
+      productSearch,
       categoriaId,
       originCode,
       confirmacio,
@@ -499,6 +505,7 @@ export default function PackagingPage() {
     setSelectedClient(null);
     setDeliveryDateFilter('');
     setSelectedProducts([]);
+    setProductSearch('');
     setCategoryFilter(ALL_FEM);
     setOriginFilter(ALL);
     setConfirmacioFilter(ALL_FEM);
@@ -583,6 +590,12 @@ export default function PackagingPage() {
           addMorePlaceholder="Afegir un altre transportista..."
           debounceMs={0}
           loadOptions={loadCarrierOptions}
+        />
+        <SearchInput
+          label="Cerca producte"
+          placeholder="Codi o descripció..."
+          value={productSearch}
+          onChange={setProductSearch}
         />
         <MultiCombobox
           label="Productes"

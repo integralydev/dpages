@@ -15,6 +15,7 @@ import {
   formatearDataApi,
   parsearIdPublic,
   parsearPaginacio,
+  patroComencaPer,
   resolverCategoriaUuid,
   resolverClientUuid,
   resolverFiltreEntitat,
@@ -22,6 +23,22 @@ import {
   resolverTarifaUuid,
   resolverTransportistaUuid,
 } from './comu.js';
+
+/**
+ * Tasca 45 (Ari, 20/10/2026): `?cercaProducte=` filtra mentre s'escriu,
+ * igual que el cercador del Catàleg (GET /productes?cerca=): línies amb un
+ * producte el codi o la descripció del qual COMENCEN pel text
+ * ("botifarra" les troba totes, "bott" les de codi BOTT…).
+ * Case-insensitive.
+ */
+function afegirCercaProducte(valor: unknown, condicions: string[], valors: unknown[]): void {
+  if (typeof valor !== 'string' || valor.trim() === '') return;
+  const n = valors.length + 1;
+  condicions.push(
+    `(LOWER(p.descripcio) LIKE LOWER($${n}) ESCAPE '\\' OR LOWER(p.descripcio_venda) LIKE LOWER($${n}) ESCAPE '\\' OR LOWER(p.codi) LIKE LOWER($${n}) ESCAPE '\\')`,
+  );
+  valors.push(patroComencaPer(valor.trim()));
+}
 
 /**
  * `?producte=` repetible (petició del client, 29/09/2026): `?producte=A&
@@ -115,6 +132,7 @@ export async function construirFiltresObrador(
     valors.push(query.tipus);
   }
   afegirFiltreProductes(query.producte, condicions, valors);
+  afegirCercaProducte(query.cercaProducte, condicions, valors);
   // Tasca 29: les línies d'un sol producte (desplegar una fila de la vista
   // acumulada), per id públic.
   if (query.producteId !== undefined && query.producteId !== '') {
@@ -629,6 +647,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         valors.push(query.origen);
       }
       afegirFiltreProductes(query.producte, condicions, valors);
+      afegirCercaProducte(query.cercaProducte, condicions, valors);
       // Peticions d'Ari (29/09/2026): categoria de l'article (mateix criteri
       // que a /panells/obrador) i línies pendents / ja enviades.
       const categoriaUuid = await resolverFiltreEntitat(

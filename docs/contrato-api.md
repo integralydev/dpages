@@ -1296,7 +1296,13 @@ líneas individuales visibles.
 
 **`GET /panells/obrador`**
 
-Filtros: `?dataProduccioDes=&dataProduccioFins=&categoriaId=&tipus=&producte=&format=&envasat=&clientId=&agrupacioProduccio=&observacions=&treball=`
+Filtros: `?dataProduccioDes=&dataProduccioFins=&categoriaId=&tipus=&producte=&cercaProducte=&format=&envasat=&clientId=&agrupacioProduccio=&observacions=&treball=`
+
+> **`cercaProducte` (tarea 45, Ari 20/10/2026):** filtra mientras se
+> escribe, mismo criterio que `cerca` en `GET /productes`: líneas cuyo
+> producto tiene `codi`, `descripcio` o `descripcio_venda` que **empieza**
+> por el texto (case-insensitive). No sustituye a `producte` (exacto,
+> repetible); se pueden combinar.
 
 > **`categoriaId` repetible (tarea 50, Ari 20/10/2026):**
 > `?categoriaId=3&categoriaId=7` = líneas de cualquiera de esas categorías.
@@ -1494,7 +1500,13 @@ Respuesta `200`:
 
 **`GET /panells/empaquetat`**
 
-Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&producte=&categoriaId=&confirmacio=&origen=`
+Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&producte=&cercaProducte=&categoriaId=&confirmacio=&origen=`
+
+> **`cercaProducte` (tarea 45, Ari 20/10/2026):** filtra mientras se
+> escribe, mismo criterio que `cerca` en `GET /productes`: líneas cuyo
+> producto tiene `codi`, `descripcio` o `descripcio_venda` que **empieza**
+> por el texto (case-insensitive). No sustituye a `producte` (exacto,
+> repetible); se pueden combinar.
 
 > **`origen` (tarea 48, Ari 20/10/2026):** origen del pedido
 > (`OrigenComandaApi.codi`: `woocommerce`, `telefon`, `whatsapp`, `correu`,

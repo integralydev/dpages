@@ -28,6 +28,8 @@ export type PackagingPanelFilters = {
   dataLliuramentFins?: string;
   /** Un o més productes (descripció exacta); el backend en fa un OR. */
   producte?: string[];
+  /** Tasca 45: codi o descripció que comença pel text. */
+  cercaProducte?: string;
   categoriaId?: number;
   /** Tasca 48: `OrigenComandaApi.codi` (coincidència exacta). */
   origen?: string;

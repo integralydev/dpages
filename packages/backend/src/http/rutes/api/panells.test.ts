@@ -1459,4 +1459,61 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
 
     await fastify.close();
   });
+  it('tasca 45 — ?cercaProducte= filtra per principi de codi o descripció (Obrador i Empaquetat)', async () => {
+    const fastify = construirServidor();
+    const ids: number[] = [];
+    for (const [codi, descripcio] of [
+      ['T45BOTT1', 'Botifarra Tasca45 tallada'],
+      ['T45BOTN', 'Botifarra Tasca45 negra'],
+      ['T45LLOM', 'Cap de llom Tasca45'],
+    ]) {
+      const producte = await entorn.poolTest.query<{ id_seq: string }>(
+        `INSERT INTO producte (codi, descripcio, pes_kg, preu_venda, tipus)
+         VALUES ($1, $2, '1.000', '5.00', 'simple') RETURNING id_seq`,
+        [codi, descripcio],
+      );
+      ids.push(Number(producte.rows[0]!.id_seq));
+    }
+    await fastify.inject({
+      method: 'POST',
+      url: '/api/v1/comandes',
+      payload: {
+        dataComanda: '2026-08-01',
+        dataLliurament: '2026-08-30T00:00:00Z',
+        origen: 'manual',
+        linies: ids.map((producteId) => ({
+          dataProduccio: '2026-08-01T00:00:00Z',
+          producteId,
+          unitatsDemanades: 1,
+        })),
+      },
+    });
+
+    for (const panell of ['obrador', 'empaquetat'] as const) {
+      const cerca = async (text: string) => {
+        const res = await fastify.inject({
+          method: 'GET',
+          url: `/api/v1/panells/${panell}?cercaProducte=${encodeURIComponent(text)}&mida=200`,
+        });
+        expect(res.statusCode).toBe(200);
+        const cos = cuerpoJson<{ dades: { producte: { descripcio: string } | string }[] }>(res);
+        return cos.dades
+          .map((fila) =>
+            typeof fila.producte === 'string' ? fila.producte : fila.producte.descripcio,
+          )
+          .sort();
+      };
+      // Per descripció, case-insensitive.
+      expect(await cerca('BOTIFARRA TASCA45')).toEqual([
+        'Botifarra Tasca45 negra',
+        'Botifarra Tasca45 tallada',
+      ]);
+      // Per codi.
+      expect(await cerca('t45bott')).toEqual(['Botifarra Tasca45 tallada']);
+      // Pel principi, no substring: "llom" no troba "Cap de llom".
+      expect(await cerca('llom Tasca45')).toEqual([]);
+    }
+
+    await fastify.close();
+  });
 });
