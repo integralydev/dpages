@@ -36,7 +36,7 @@ function ambAvisSiCal(missatge: string, hiHaLiniaEliminada: boolean): string {
 export default function OrderDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
-  const { editOrder, deleteLine, markIncidence, addLine, editLine } = useOrders();
+  const { editOrder, deleteLine, markIncidence, addLine, reorderLines, editLine } = useOrders();
   const { data: clients } = useClientTariffs();
   const { tariffColumns } = useRates();
   const { data: carriers } = useCarriers();
@@ -155,9 +155,18 @@ export default function OrderDetailPage() {
     // PATCH /comandes/:id) — extractComandaErrorMessage ja inclou quina
     // línia és, encara que aquí no hi hagi cap `lineChanges` que la referenci.
     const lineErrors: string[] = [];
-    for (const novaLinia of lineChanges.novaLinies) {
+    // Tasca 37: id real de cada línia nova (la que no hi era abans del
+    // POST), per poder enviar després l'ordre de pantalla.
+    const idsConeguts = new Set(order.linies.map((linia) => linia.id));
+    const idReal = new Map<number, number>();
+    for (const [index, novaLinia] of lineChanges.novaLinies.entries()) {
       try {
-        await addLine(order.id, novaLinia);
+        const actualitzada = await addLine(order.id, novaLinia);
+        const creada = actualitzada.linies.find((linia) => !idsConeguts.has(linia.id));
+        if (creada) {
+          idsConeguts.add(creada.id);
+          idReal.set(lineChanges.novaLiniesIds[index]!, creada.id);
+        }
       } catch (caught) {
         lineErrors.push(extractComandaErrorMessage(caught, "No s'ha pogut afegir una línia."));
       }
@@ -167,6 +176,20 @@ export default function OrderDetailPage() {
         await editLine(order.id, liniaId, patch);
       } catch (caught) {
         lineErrors.push(extractComandaErrorMessage(caught, "No s'ha pogut editar una línia."));
+      }
+    }
+    // Una línia nova que no s'ha pogut crear no existeix al backend: fora
+    // de la llista (si no, la rebutjaria sencera).
+    if (lineChanges.ordreLinies) {
+      const ids = lineChanges.ordreLinies
+        .map((id) => (id < 0 ? idReal.get(id) : id))
+        .filter((id): id is number => id !== undefined);
+      try {
+        await reorderLines(order.id, ids);
+      } catch (caught) {
+        lineErrors.push(
+          extractComandaErrorMessage(caught, "No s'ha pogut desar l'ordre de les línies."),
+        );
       }
     }
     if (capcaleraDespres) await desarCapcalera();

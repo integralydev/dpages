@@ -1,7 +1,14 @@
 'use client';
 
-import { Plus } from 'lucide-react';
-import { forwardRef, Fragment, useEffect, useImperativeHandle, useState } from 'react';
+import { ChevronDown, ChevronUp, Plus } from 'lucide-react';
+import {
+  forwardRef,
+  Fragment,
+  useEffect,
+  useImperativeHandle,
+  useState,
+  type ReactNode,
+} from 'react';
 import { AsyncCombobox, type ComboboxOption } from '@/components/ui/AsyncCombobox';
 import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -350,6 +357,48 @@ function resolvePriceRisk(
   return { risk: status === 'not-covered', isChecking: false };
 }
 
+/**
+ * Tasca 37 (Ari, 20/10/2026): moure una línia amunt o avall (p. ex. posar
+ * un afegit de pollastre amb la resta de pollastre). Botons petits, un
+ * sobre l'altre, per no eixamplar la columna d'accions.
+ */
+function MoveLineButtons({
+  disabled,
+  isFirst,
+  isLast,
+  onMove,
+}: {
+  disabled: boolean;
+  isFirst: boolean;
+  isLast: boolean;
+  onMove: (direction: -1 | 1) => void;
+}) {
+  const className =
+    'flex h-5 w-7 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:cursor-not-allowed disabled:text-gray-300 disabled:hover:bg-transparent';
+  return (
+    <div className="flex shrink-0 flex-col">
+      <button
+        type="button"
+        aria-label="Moure la línia amunt"
+        disabled={disabled || isFirst}
+        onClick={() => onMove(-1)}
+        className={className}
+      >
+        <ChevronUp className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        aria-label="Moure la línia avall"
+        disabled={disabled || isLast}
+        onClick={() => onMove(1)}
+        className={className}
+      >
+        <ChevronDown className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
 function LineFormCard({
   line,
   products,
@@ -359,6 +408,7 @@ function LineFormCard({
   headerDates,
   onUpdate,
   onRemove,
+  moveButtons,
 }: {
   line: LineDraft;
   products: ProducteApi[];
@@ -373,6 +423,7 @@ function LineFormCard({
   };
   onUpdate: (patch: Partial<LineDraft>) => void;
   onRemove: () => void;
+  moveButtons: ReactNode;
 }) {
   const product = products.find((p) => p.id === line.producte?.id);
   const dateError = validateLineDate(
@@ -412,6 +463,7 @@ function LineFormCard({
             </p>
           )}
         </div>
+        {moveButtons}
         <IconButton
           variant="delete"
           label="Eliminar línia"
@@ -652,6 +704,9 @@ export const OrderForm = forwardRef<
   // falso positivo por comparación de tipo/formato: si el id no está acá,
   // el usuario no tocó esa línea, punto.
   const [dirtyLineIds, setDirtyLineIds] = useState<Set<number>>(new Set());
+  // Tasca 37: l'usuari ha mogut alguna línia en aquesta sessió (mateix
+  // criteri que dirtyLineIds: es marca a l'acció, no comparant després).
+  const [lineOrderTouched, setLineOrderTouched] = useState(false);
   // Mateix criteri que dirtyLineIds: es marca EXPLÍCITAMENT a l'acció de
   // l'usuari (cada onChange de capçalera), mai comparant valors contra
   // initialData més tard — evita falsos positius de tipus/format.
@@ -703,13 +758,37 @@ export const OrderForm = forwardRef<
     }
   }
 
+  // Tasca 37: la línia nova s'afegeix a dalt de tot, no a baix.
   function addLine() {
     const newLine = createEmptyLine(
       lines.length + 1,
       dataProduccio ? `${dataProduccio}T00:00:00Z` : null,
     );
-    setLines((current) => [...current, newLine]);
+    setLines((current) => [newLine, ...current]);
     setDirtyLineIds((current) => new Set(current).add(newLine.id));
+  }
+
+  function moveLine(id: number, direction: -1 | 1) {
+    setLines((current) => {
+      const index = current.findIndex((line) => line.id === id);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target]!, next[index]!];
+      return next;
+    });
+    setLineOrderTouched(true);
+  }
+
+  function renderMoveButtons(line: LineDraft, index: number) {
+    return (
+      <MoveLineButtons
+        disabled={isFrozen}
+        isFirst={index === 0}
+        isLast={index === lines.length - 1}
+        onMove={(direction) => moveLine(line.id, direction)}
+      />
+    );
   }
 
   function removeLine(line: LineDraft) {
@@ -913,11 +992,23 @@ export const OrderForm = forwardRef<
         mode === 'edit'
           ? {
               novaLinies: newLines.map(toLiniaCreacio),
+              novaLiniesIds: newLines.map((line) => line.id),
               liniesEditades: touchedLines
                 .filter((line) => dirtyLineIds.has(line.id) && line.id > 0)
                 .map((line) => ({ liniaId: line.id, patch: toLiniaEdicio(line) })),
+              // Tasca 37: les línies noves el backend les afegeix al final,
+              // així que si n'hi ha cap (o s'ha mogut alguna) es reenvia
+              // l'ordre de pantalla sencer. Fora les files buides sense
+              // desar; les ja desades hi van sempre (també una de Woo sense
+              // producte resolt), si no el backend rebutjaria la llista.
+              ordreLinies:
+                lineOrderTouched || newLines.length > 0
+                  ? lines
+                      .filter((line) => line.id > 0 || newLines.includes(line))
+                      .map((line) => line.id)
+                  : null,
             }
-          : { novaLinies: [], liniesEditades: [] };
+          : { novaLinies: [], novaLiniesIds: [], liniesEditades: [], ordreLinies: null };
 
       void onSave(
         {
@@ -1203,7 +1294,7 @@ export const OrderForm = forwardRef<
         </div>
 
         <div className="flex flex-col gap-3 xl:hidden">
-          {lines.map((line) => (
+          {lines.map((line, index) => (
             <LineFormCard
               key={line.id}
               line={line}
@@ -1214,6 +1305,7 @@ export const OrderForm = forwardRef<
               headerDates={{ dataComanda, dataLliurament, dataExpedicio, dataProduccio }}
               onUpdate={(patch) => updateLine(line.id, patch)}
               onRemove={() => removeLine(line)}
+              moveButtons={renderMoveButtons(line, index)}
             />
           ))}
           <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-right text-sm font-semibold text-gray-900">
@@ -1225,7 +1317,7 @@ export const OrderForm = forwardRef<
           <table className="w-full table-fixed text-sm">
             <thead className="border-b border-gray-200">
               <tr>
-                <th className="w-[18%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
+                <th className="w-[16%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
                   Producte
                 </th>
                 <th className="w-[10%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
@@ -1252,11 +1344,11 @@ export const OrderForm = forwardRef<
                 <th className="w-[7%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
                   Pes lliurat (kg)
                 </th>
-                <th className="w-[8%] px-1.5 py-2" />
+                <th className="w-[10%] px-1.5 py-2" />
               </tr>
             </thead>
             <tbody>
-              {lines.map((line) => {
+              {lines.map((line, index) => {
                 const product = products.find((p) => p.id === line.producte?.id);
                 const lineDateError = validateLineDate(
                   line.dataProduccio,
@@ -1371,12 +1463,15 @@ export const OrderForm = forwardRef<
                       </td>
                       <td className="px-1.5 py-2 text-right text-gray-500">{line.kgLliurats}</td>
                       <td className="px-1.5 py-2">
-                        <IconButton
-                          variant="delete"
-                          label="Eliminar línia"
-                          onClick={() => removeLine(line)}
-                          disabled={isFrozen}
-                        />
+                        <div className="flex items-center justify-end gap-1">
+                          {renderMoveButtons(line, index)}
+                          <IconButton
+                            variant="delete"
+                            label="Eliminar línia"
+                            onClick={() => removeLine(line)}
+                            disabled={isFrozen}
+                          />
+                        </div>
                       </td>
                     </tr>
                     {/* Observacions a la fila de sota, a tota l'amplada (abans

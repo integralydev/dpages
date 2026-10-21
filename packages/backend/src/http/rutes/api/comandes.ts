@@ -1776,6 +1776,79 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
     );
   });
 
+  // Tasca 37 (Ari, 20/10/2026): Oficina reordena lliurement les línies
+  // (p. ex. posar un afegit de pollastre amb la resta de pollastre). El cos
+  // porta TOTS els ids de línia vius en el nou ordre; `ordinal` passa a ser
+  // la seva posició. Reordenar és una edició de línies a tots els efectes:
+  // mateixa guarda de congelació i mateixa marca ADR-026 (sense ella, el
+  // proper sync d'un pedido de WooCommerce tornaria a escriure `ordinal`
+  // amb la posició de Woo i desfaria l'ordre).
+  fastify.put('/comandes/:id/linies/ordre', { preHandler: GUARD_COMANDES }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const comandaUuid = await resolverComandaOResponder(reply, id);
+    if (comandaUuid === null) return;
+
+    const cos = req.body as Partial<{ ids: unknown }>;
+    const ids = Array.isArray(cos?.ids) ? cos.ids : null;
+    if (
+      ids === null ||
+      !ids.every((item) => typeof item === 'number' && Number.isSafeInteger(item) && item > 0) ||
+      new Set(ids).size !== ids.length
+    ) {
+      return enviarValidacio(
+        reply,
+        "ids ha de ser una llista d'identificadors de línia sense repetir",
+        [{ camp: 'ids', missatge: "llista d'identificadors de línia sense repetir" }],
+      );
+    }
+
+    if (await estaCongelada(pool, comandaUuid)) {
+      return enviarConflicte(reply, 'La comanda està congelada i ja no admet canvis');
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const vives = await client.query<{ id_seq: string }>(
+        `SELECT id_seq FROM comanda_linia WHERE comanda_id = $1 AND NOT esborrat
+         ORDER BY ordinal, id_seq FOR UPDATE`,
+        [comandaUuid],
+      );
+      const idsVius = new Set(vives.rows.map((fila) => Number(fila.id_seq)));
+      if (idsVius.size !== ids.length || !(ids as number[]).every((item) => idsVius.has(item))) {
+        await client.query('ROLLBACK');
+        return enviarValidacio(reply, 'ids ha de contenir exactament les línies de la comanda', [
+          { camp: 'ids', missatge: 'ha de contenir exactament les línies de la comanda' },
+        ]);
+      }
+
+      // Mateix ordre que ja hi havia (doble clic, una línia que torna al seu
+      // lloc): res a fer, i sobretot sense la marca ADR-026, que és irreversible.
+      const ordreActual = vives.rows.map((fila) => Number(fila.id_seq));
+      if (ordreActual.every((item, index) => item === ids[index])) {
+        await client.query('ROLLBACK');
+        return carregarDetallPerUuid(comandaUuid);
+      }
+
+      await protegirLiniesSiEsDeWoocommerce(client, comandaUuid);
+      await client.query(
+        `UPDATE comanda_linia cl SET ordinal = nou.posicio - 1
+         FROM unnest($2::bigint[]) WITH ORDINALITY AS nou(id_seq, posicio)
+         WHERE cl.id_seq = nou.id_seq AND cl.comanda_id = $1`,
+        [comandaUuid, ids],
+      );
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    return carregarDetallPerUuid(comandaUuid);
+  });
+
   fastify.delete(
     '/comandes/:comandaId/linies/:liniaId',
     { preHandler: GUARD_COMANDES },

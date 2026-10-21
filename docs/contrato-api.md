@@ -1149,6 +1149,18 @@ congelada, igual que el resto de las escrituras sobre un pedido.
 > bloque dedicado más arriba) — contra las fechas de cabecera ya guardadas
 > del pedido, no las de este mismo body (este endpoint no toca cabecera).
 
+**`PUT /comandes/:id/linies/ordre`** (tarea 37, Ari 20/10/2026) — reordenar
+las líneas de un pedido. Cuerpo: `{ "ids": [38012, 38010, 38011] }` con
+**todos** los ids de línea vivos del pedido, sin repetir, en el orden nuevo;
+`ordinal` pasa a ser la posición (0, 1, 2…). Respuesta `200` con el
+`ComandaDetallApi` ya reordenado.
+
+> - Lista que no coincide exactamente con las líneas del pedido (falta o
+>   sobra alguna, repetidas, no numéricas) → `400 VALIDACIO`.
+> - Pedido congelado → `409 CONFLICTE`, igual que el resto de rutas de línea.
+> - Pedido de WooCommerce: cuenta como edición de Oficina y fija
+>   `linies_editades_a` (ADR-026); el sync deja de tocar sus líneas.
+
 **`PATCH /comandes/:comandaId/linies/:liniaId`** (capa 30) — editar una
 línea existente.
 

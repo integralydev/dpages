@@ -3431,4 +3431,123 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
       await fastify.close();
     });
   });
+  describe('tasca 37 — PUT /comandes/:id/linies/ordre (reordenar línies)', () => {
+    async function crearAmbTresLinies(fastify: ReturnType<typeof construirServidor>) {
+      const res = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [1, 2, 3].map((unitats) => ({
+            dataProduccio: '2026-08-01T00:00:00Z',
+            producteId: producteFitxaId,
+            unitatsDemanades: unitats,
+          })),
+        },
+      });
+      return cuerpoJson<ComandaDetallApi>(res);
+    }
+    const reordenar = (fastify: ReturnType<typeof construirServidor>, id: number, ids: unknown) =>
+      fastify.inject({
+        method: 'PUT',
+        url: `/api/v1/comandes/${id}/linies/ordre`,
+        payload: { ids },
+      });
+
+    it('desa el nou ordre i el GET el retorna així', async () => {
+      const fastify = construirServidor();
+      const comanda = await crearAmbTresLinies(fastify);
+      const [a, b, c] = comanda.linies.map((linia) => linia.id);
+
+      const res = await reordenar(fastify, comanda.id, [c, a, b]);
+      expect(res.statusCode).toBe(200);
+      expect(cuerpoJson<ComandaDetallApi>(res).linies.map((linia) => linia.id)).toEqual([c, a, b]);
+
+      const detall = cuerpoJson<ComandaDetallApi>(
+        await fastify.inject({ method: 'GET', url: `/api/v1/comandes/${comanda.id}` }),
+      );
+      expect(detall.linies.map((linia) => linia.id)).toEqual([c, a, b]);
+      expect(detall.linies.map((linia) => linia.unitatsDemanades)).toEqual([
+        '3.00',
+        '1.00',
+        '2.00',
+      ]);
+
+      await fastify.close();
+    });
+
+    it('rebutja una llista que no són exactament les línies de la comanda (400)', async () => {
+      const fastify = construirServidor();
+      const comanda = await crearAmbTresLinies(fastify);
+      const [a, b, c] = comanda.linies.map((linia) => linia.id);
+
+      expect((await reordenar(fastify, comanda.id, [a, b])).statusCode).toBe(400); // en falta una
+      expect((await reordenar(fastify, comanda.id, [a, b, c, 999999])).statusCode).toBe(400);
+      expect((await reordenar(fastify, comanda.id, [a, a, b])).statusCode).toBe(400);
+      expect((await reordenar(fastify, comanda.id, 'abc')).statusCode).toBe(400);
+
+      await fastify.close();
+    });
+
+    it("comanda congelada: 409, l'ordre no canvia", async () => {
+      const fastify = construirServidor();
+      const comanda = await crearAmbTresLinies(fastify);
+      const [a, b, c] = comanda.linies.map((linia) => linia.id);
+      await entorn.poolTest.query(`UPDATE comanda SET congelat_a = now() WHERE id_seq = $1`, [
+        comanda.id,
+      ]);
+
+      expect((await reordenar(fastify, comanda.id, [c, b, a])).statusCode).toBe(409);
+      const detall = cuerpoJson<ComandaDetallApi>(
+        await fastify.inject({ method: 'GET', url: `/api/v1/comandes/${comanda.id}` }),
+      );
+      expect(detall.linies.map((linia) => linia.id)).toEqual([a, b, c]);
+
+      await fastify.close();
+    });
+
+    it('comanda de WooCommerce: reordenar la marca com a editada (ADR-026)', async () => {
+      const fastify = construirServidor();
+      const res = await entorn.poolTest.query<{ id: string; id_seq: string }>(
+        `INSERT INTO comanda (woo_order_id, origen_id, estat, data_comanda)
+         VALUES (555037, (SELECT id FROM origen_comanda WHERE codi = 'woocommerce'), 'esborrany', '2026-08-01')
+         RETURNING id, id_seq`,
+      );
+      const liniaIds: number[] = [];
+      for (const ordinal of [0, 1]) {
+        const linia = await entorn.poolTest.query<{ id_seq: string }>(
+          `INSERT INTO comanda_linia (
+             comanda_id, ordinal, woo_line_item_id, producte_id,
+             unitats_demanades, preu_unitari, pes_fitxa_kg, pes_calculat_kg
+           ) VALUES ($1, $2, $3, (SELECT id FROM producte WHERE id_seq = $4), 1, '9.86', '1.250', '1.250')
+           RETURNING id_seq`,
+          [res.rows[0]!.id, ordinal, 3700 + ordinal, producteFitxaId],
+        );
+        liniaIds.push(Number(linia.rows[0]!.id_seq));
+      }
+      const idSeq = Number(res.rows[0]!.id_seq);
+      const llegirMarca = async () =>
+        (
+          await entorn.poolTest.query<{ linies_editades_a: Date | null }>(
+            `SELECT linies_editades_a FROM comanda WHERE id_seq = $1`,
+            [idSeq],
+          )
+        ).rows[0]?.linies_editades_a ?? null;
+
+      // El mateix ordre que ja hi havia no és cap edició: sense marca.
+      expect((await reordenar(fastify, idSeq, liniaIds)).statusCode).toBe(200);
+      expect(await llegirMarca()).toBeNull();
+
+      expect((await reordenar(fastify, idSeq, [...liniaIds].reverse())).statusCode).toBe(200);
+      const marca = await entorn.poolTest.query<{ linies_editades_a: Date | null }>(
+        `SELECT linies_editades_a FROM comanda WHERE id_seq = $1`,
+        [idSeq],
+      );
+      expect(marca.rows[0]?.linies_editades_a).not.toBeNull();
+
+      await fastify.close();
+    });
+  });
 });

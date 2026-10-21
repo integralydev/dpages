@@ -1305,3 +1305,12 @@ pedido por pedido), es un cambio aparte, no cubierto acá. No se tocó el
 contrato de la API: ningún shape de request/response cambia, sólo el
 comportamiento interno de sincronización (ver `docs/contrato-api.md`,
 sección 4.5, nota agregada en el mismo cambio).
+
+**Ampliación (21/10/2026, tarea 37)**: la cuarta ruta de línea,
+`PUT /comandes/:id/linies/ordre` (Oficina reordena las líneas), también
+llama a `protegirLiniesSiEsDeWoocommerce`. El orden se guarda en
+`comanda_linia.ordinal`, la misma columna que `processarLinies` reescribe
+con la posición de la línea en WooCommerce y usa como criterio de
+emparejamiento; sin la marca, el siguiente sync del pedido desharía el
+orden. Mismo trade-off que arriba: reordenar un pedido web lo desconecta
+de la sincronización de líneas.
