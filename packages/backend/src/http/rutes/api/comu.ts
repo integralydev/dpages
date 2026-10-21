@@ -212,6 +212,62 @@ export function parsearIdPublic(valor: string): number | null {
   return Number.isSafeInteger(id) ? id : null;
 }
 
+/**
+ * Filtre opcional per id públic d'una entitat (`?clientId=45`): `undefined`
+ * = sense filtre; `null` = resposta 400 ja enviada (id no numèric). Un id
+ * que no existeix es resol al UUID buit — no coincideix amb res, no és un
+ * error.
+ */
+export async function resolverFiltreEntitat(
+  reply: FastifyReply,
+  valor: unknown,
+  camp: string,
+  resolver: (idSeq: number) => Promise<string | null>,
+): Promise<string | undefined | null> {
+  if (typeof valor !== 'string') return undefined;
+  const idPublic = parsearIdPublic(valor);
+  if (idPublic === null) {
+    enviarValidacio(reply, `${camp} ha de ser un enter`);
+    return null;
+  }
+  const uuid = await resolver(idPublic);
+  return uuid ?? '00000000-0000-0000-0000-000000000000';
+}
+
+/** Topall de valors d'un filtre repetible: cada un és una consulta (pool petit, Cloud Run). */
+export const MAX_VALORS_FILTRE = 100;
+
+/**
+ * Igual que `resolverFiltreEntitat`, però el paràmetre es pot repetir
+ * (`?transportistaId=1&transportistaId=4`, tasca 22, 01/10/2026): retorna
+ * els UUID de tots els ids. Un id que no existeix es resol al UUID buit
+ * (mateix criteri: no coincideix amb res, no és un error). `undefined` =
+ * sense filtre; `null` = resposta 400 ja enviada (també si se'n passen més
+ * de `MAX_VALORS_FILTRE`).
+ */
+export async function resolverFiltreEntitats(
+  reply: FastifyReply,
+  valor: unknown,
+  camp: string,
+  resolver: (idSeq: number) => Promise<string | null>,
+): Promise<string[] | undefined | null> {
+  const valors = (Array.isArray(valor) ? valor : [valor]).filter(
+    (item): item is string => typeof item === 'string',
+  );
+  if (valors.length === 0) return undefined;
+  if (valors.length > MAX_VALORS_FILTRE) {
+    enviarValidacio(reply, `${camp}: com a màxim ${MAX_VALORS_FILTRE} valors`);
+    return null;
+  }
+  const uuids: string[] = [];
+  for (const item of valors) {
+    const uuid = await resolverFiltreEntitat(reply, item, camp, resolver);
+    if (uuid === null) return null;
+    if (uuid !== undefined) uuids.push(uuid);
+  }
+  return uuids;
+}
+
 async function resolverUuid(pool: Pool, taula: string, idSeq: number): Promise<string | null> {
   // `taula` nunca viene de una petición: siempre es uno de los literales de
   // abajo, fijados en el código — interpolarlo acá no es una inyección SQL.

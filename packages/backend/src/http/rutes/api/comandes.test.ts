@@ -2935,6 +2935,71 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
     });
   });
 
+  describe('tasca 35 — GET /comandes?clientId= repetible (diversos clients alhora)', () => {
+    it('clientId repetit torna les comandes de tots els clients indicats i cap altra', async () => {
+      const fastify = construirServidor();
+      const crearClientAmbComanda = async (nom: string) => {
+        const client = await entorn.poolTest.query<{ id_seq: string }>(
+          `INSERT INTO client (nom, poblacio) VALUES ($1, 'Manresa') RETURNING id_seq`,
+          [nom],
+        );
+        const id = Number(client.rows[0]!.id_seq);
+        const creada = await fastify.inject({
+          method: 'POST',
+          url: '/api/v1/comandes',
+          payload: {
+            dataComanda: '2026-08-01',
+            dataLliurament: '2026-08-30T00:00:00Z',
+            origen: 'manual',
+            clientId: id,
+            linies: [
+              {
+                dataProduccio: '2026-08-01T00:00:00Z',
+                producteId: producteFitxaId,
+                unitatsDemanades: 1,
+              },
+            ],
+          },
+        });
+        return { clientId: id, comandaId: cuerpoJson<ComandaDetallApi>(creada).id };
+      };
+      const a = await crearClientAmbComanda('Client Tasca 35 A');
+      const b = await crearClientAmbComanda('Client Tasca 35 B');
+      const c = await crearClientAmbComanda('Client Tasca 35 C');
+
+      const dosClients = cuerpoJson<RespostaPaginada<ComandaResumApi>>(
+        await fastify.inject({
+          method: 'GET',
+          url: `/api/v1/comandes?clientId=${a.clientId}&clientId=${b.clientId}`,
+        }),
+      );
+      expect(dosClients.dades.map((comanda) => comanda.id).sort()).toEqual(
+        [a.comandaId, b.comandaId].sort(),
+      );
+
+      // Un sol clientId continua funcionant igual que abans.
+      const unClient = cuerpoJson<RespostaPaginada<ComandaResumApi>>(
+        await fastify.inject({ method: 'GET', url: `/api/v1/comandes?clientId=${c.clientId}` }),
+      );
+      expect(unClient.dades.map((comanda) => comanda.id)).toEqual([c.comandaId]);
+
+      const invalid = await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/comandes?clientId=${a.clientId}&clientId=abc`,
+      });
+      expect(invalid.statusCode).toBe(400);
+
+      // Topall de valors repetits (MAX_VALORS_FILTRE).
+      const massa = await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/comandes?${Array.from({ length: 101 }, () => `clientId=${a.clientId}`).join('&')}`,
+      });
+      expect(massa.statusCode).toBe(400);
+
+      await fastify.close();
+    });
+  });
+
   describe('tasca 17 — POST /comandes/duplicar', () => {
     const avui = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Madrid' }).format(new Date());
 

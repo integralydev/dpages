@@ -680,6 +680,11 @@ Filtros: `?estat=oberta&clientId=45&origen=web&dataDes=2026-08-01&dataFins=2026-
 > `productes`/`tarifes` (exacto, LOWER — sección 2, regla 3.1): acá
 > buscar por parte del nombre de un cliente sí tiene sentido de negocio.
 > No reemplaza `clientId` (filtro exacto por id, sin cambios).
+>
+> **`clientId` repetible (tarea 35, Ari 20/10/2026):**
+> `?clientId=45&clientId=12` = pedidos de cualquiera de esos clientes. Un
+> solo `clientId` funciona igual que antes; un id no numérico → `400
+VALIDACIO`; un id inexistente no coincide con nada (no es error).
 
 ```json
 {

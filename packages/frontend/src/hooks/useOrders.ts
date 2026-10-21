@@ -16,6 +16,8 @@ import { usePageClamp } from './usePageClamp';
 import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
 
 export type OrderListFilters = {
+  /** Tasca 35: un o més clients (GET /comandes?clientId=, repetible). */
+  clientId?: number[];
   estat?: string;
   /** `OrigenComandaApi.codi` (GET /comandes?origen=, coincidència exacta). */
   origen?: string;

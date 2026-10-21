@@ -17,51 +17,11 @@ import {
   parsearPaginacio,
   resolverCategoriaUuid,
   resolverClientUuid,
+  resolverFiltreEntitat,
+  resolverFiltreEntitats,
   resolverTarifaUuid,
   resolverTransportistaUuid,
 } from './comu.js';
-
-async function resolverFiltreEntitat(
-  reply: FastifyReply,
-  valor: unknown,
-  camp: string,
-  resolver: (idSeq: number) => Promise<string | null>,
-): Promise<string | undefined | null> {
-  if (typeof valor !== 'string') return undefined;
-  const idPublic = parsearIdPublic(valor);
-  if (idPublic === null) {
-    enviarValidacio(reply, `${camp} ha de ser un enter`);
-    return null;
-  }
-  const uuid = await resolver(idPublic);
-  return uuid ?? '00000000-0000-0000-0000-000000000000';
-}
-
-/**
- * Igual que `resolverFiltreEntitat`, però el paràmetre es pot repetir
- * (`?transportistaId=1&transportistaId=4`, tasca 22, 01/10/2026): retorna
- * els UUID de tots els ids. Un id que no existeix es resol al UUID buit
- * (mateix criteri: no coincideix amb res, no és un error). `undefined` =
- * sense filtre; `null` = resposta 400 ja enviada.
- */
-async function resolverFiltreEntitats(
-  reply: FastifyReply,
-  valor: unknown,
-  camp: string,
-  resolver: (idSeq: number) => Promise<string | null>,
-): Promise<string[] | undefined | null> {
-  const valors = (Array.isArray(valor) ? valor : [valor]).filter(
-    (item): item is string => typeof item === 'string',
-  );
-  if (valors.length === 0) return undefined;
-  const uuids: string[] = [];
-  for (const item of valors) {
-    const uuid = await resolverFiltreEntitat(reply, item, camp, resolver);
-    if (uuid === null) return null;
-    if (uuid !== undefined) uuids.push(uuid);
-  }
-  return uuids;
-}
 
 /**
  * `?producte=` repetible (petició del client, 29/09/2026): `?producte=A&

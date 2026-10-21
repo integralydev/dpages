@@ -21,6 +21,7 @@ import {
   parsearPaginacio,
   resolverClientUuid,
   resolverComandaUuid,
+  resolverFiltreEntitats,
   resolverTarifaUuid,
   resolverTransportistaUuid,
 } from './comu.js';
@@ -536,12 +537,15 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       condicions.push(`oc.codi = $${valors.length + 1}`);
       valors.push(query.origen);
     }
-    if (typeof query.clientId === 'string') {
-      const clientIdPublic = parsearIdPublic(query.clientId);
-      if (clientIdPublic === null) return enviarValidacio(reply, 'clientId ha de ser un enter');
-      const clientUuid = await resolverClientUuid(pool, clientIdPublic);
-      condicions.push(`c.client_id = $${valors.length + 1}`);
-      valors.push(clientUuid ?? '00000000-0000-0000-0000-000000000000');
+    // Tasca 35 (Ari, 20/10/2026): `?clientId=` repetible
+    // (`?clientId=1&clientId=4`) = comandes de qualsevol d'aquests clients.
+    const clientUuids = await resolverFiltreEntitats(reply, query.clientId, 'clientId', (id) =>
+      resolverClientUuid(pool, id),
+    );
+    if (clientUuids === null) return;
+    if (clientUuids !== undefined) {
+      condicions.push(`c.client_id = ANY($${valors.length + 1}::uuid[])`);
+      valors.push(clientUuids);
     }
     // Issue #16: dataDes/dataFins filtran por dataComanda (docs/contrato-api.md
     // § 4.5) — desde la migración 0019 eso es c.data_comanda, ya NO
