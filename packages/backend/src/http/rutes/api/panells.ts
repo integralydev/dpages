@@ -97,13 +97,18 @@ export async function construirFiltresObrador(
     condicions.push(condicioDataFinsInclusiva('cl.data_produccio', valors.length + 1));
     valors.push(query.dataProduccioFins);
   }
-  const categoriaUuid = await resolverFiltreEntitat(reply, query.categoriaId, 'categoriaId', (id) =>
-    resolverCategoriaUuid(pool, id),
+  // Tasca 50 (Ari, 20/10/2026): `?categoriaId=` repetible = línies de
+  // qualsevol d'aquestes categories.
+  const categoriaUuids = await resolverFiltreEntitats(
+    reply,
+    query.categoriaId,
+    'categoriaId',
+    (id) => resolverCategoriaUuid(pool, id),
   );
-  if (categoriaUuid === null) return null;
-  if (categoriaUuid !== undefined) {
-    condicions.push(`p.categoria_id = $${valors.length + 1}`);
-    valors.push(categoriaUuid);
+  if (categoriaUuids === null) return null;
+  if (categoriaUuids !== undefined) {
+    condicions.push(`p.categoria_id = ANY($${valors.length + 1}::uuid[])`);
+    valors.push(categoriaUuids);
   }
   if (query.tipus === 'simple' || query.tipus === 'variable') {
     condicions.push(`p.tipus = $${valors.length + 1}`);

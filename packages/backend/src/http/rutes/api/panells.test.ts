@@ -1351,4 +1351,66 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
       await fastify.close();
     });
   });
+  it('tasca 50 — GET /panells/obrador?categoriaId= repetible (diverses categories alhora)', async () => {
+    const fastify = construirServidor();
+    const crearCategoriaAmbProducte = async (nom: string, codi: string) => {
+      const categoria = await entorn.poolTest.query<{ id: string; id_seq: string }>(
+        `INSERT INTO categoria_producte (nom) VALUES ($1) RETURNING id, id_seq`,
+        [nom],
+      );
+      const producte = await entorn.poolTest.query<{ id_seq: string }>(
+        `INSERT INTO producte (codi, descripcio, pes_kg, preu_venda, tipus, categoria_id)
+         VALUES ($1, $2, '1.000', '5.00', 'simple', $3) RETURNING id_seq`,
+        [codi, `Producte ${nom}`, categoria.rows[0]!.id],
+      );
+      return {
+        categoriaId: Number(categoria.rows[0]!.id_seq),
+        producteId: Number(producte.rows[0]!.id_seq),
+      };
+    };
+    const a = await crearCategoriaAmbProducte('Tasca50 A', 'T50A');
+    const b = await crearCategoriaAmbProducte('Tasca50 B', 'T50B');
+    const c = await crearCategoriaAmbProducte('Tasca50 C', 'T50C');
+    await fastify.inject({
+      method: 'POST',
+      url: '/api/v1/comandes',
+      payload: {
+        dataComanda: '2026-08-01',
+        dataLliurament: '2026-08-30T00:00:00Z',
+        origen: 'manual',
+        linies: [a, b, c].map(({ producteId: id }) => ({
+          dataProduccio: '2026-08-01T00:00:00Z',
+          producteId: id,
+          unitatsDemanades: 1,
+        })),
+      },
+    });
+
+    const dues = cuerpoJson<PanellObradorApi>(
+      await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/panells/obrador?categoriaId=${a.categoriaId}&categoriaId=${b.categoriaId}`,
+      }),
+    );
+    expect(new Set(dues.dades.map((f) => f.producte.descripcio))).toEqual(
+      new Set(['Producte Tasca50 A', 'Producte Tasca50 B']),
+    );
+
+    // Una sola categoria continua funcionant igual.
+    const una = cuerpoJson<PanellObradorApi>(
+      await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/panells/obrador?categoriaId=${c.categoriaId}`,
+      }),
+    );
+    expect(una.dades.map((f) => f.producte.descripcio)).toEqual(['Producte Tasca50 C']);
+
+    const invalid = await fastify.inject({
+      method: 'GET',
+      url: `/api/v1/panells/obrador?categoriaId=${a.categoriaId}&categoriaId=abc`,
+    });
+    expect(invalid.statusCode).toBe(400);
+
+    await fastify.close();
+  });
 });

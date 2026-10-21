@@ -362,15 +362,18 @@ export default function WorkshopPage() {
   // Un o més productes (petició del client, 29/09/2026) — es guarda
   // l'opció sencera (id+label) per poder pintar l'etiqueta de cadascun.
   const [selectedProducts, setSelectedProducts] = useState<ComboboxOption[]>([]);
-  // Tasca 24 (01/10/2026): mateix filtre que al Panell Empaquetat.
+  // Tasca 24 (01/10/2026): filtre de categoria. Tasca 50 (Ari, 20/10/2026):
+  // una o més categories alhora (el backend en fa un OR).
   const { data: categories } = useCategories();
-  const [categoryFilter, setCategoryFilter] = useState(ALL_FEM);
-  const categoriaId = useMemo(
-    () =>
-      categoryFilter !== ALL_FEM
-        ? categories.find((item) => item.nom === categoryFilter)?.id
-        : undefined,
-    [categoryFilter, categories],
+  const [selectedCategories, setSelectedCategories] = useState<ComboboxOption[]>([]);
+  const loadCategoryOptions = useMemo(
+    () => (query: string) =>
+      Promise.resolve(
+        categories
+          .map((item) => ({ id: item.id, label: item.nom }))
+          .filter((option) => option.label.toLowerCase().startsWith(query.toLowerCase())),
+      ),
+    [categories],
   );
   // Tasca 28: agrupacions de producció del catàleg, sense repetir i
   // ordenades; l'id només serveix per al MultiCombobox.
@@ -430,7 +433,9 @@ export default function WorkshopPage() {
       ...(treballFilter !== ALL_FEM
         ? { treball: TREBALL_OPTIONS[treballFilter as keyof typeof TREBALL_OPTIONS] }
         : {}),
-      ...(categoriaId !== undefined ? { categoriaId } : {}),
+      ...(selectedCategories.length > 0
+        ? { categoriaId: selectedCategories.map((item) => item.id) }
+        : {}),
       ...(selectedProducts.length > 0
         ? { producte: selectedProducts.map((product) => product.label) }
         : {}),
@@ -445,7 +450,7 @@ export default function WorkshopPage() {
       selectedClient,
       observacionsFilter,
       treballFilter,
-      categoriaId,
+      selectedCategories,
       selectedProducts,
       envasatFilter,
       formatFilter,
@@ -528,7 +533,8 @@ export default function WorkshopPage() {
     return [
       selectedAgrupacions.length > 0 &&
         `Agrupació: ${selectedAgrupacions.map((item) => item.label).join(', ')}`,
-      categoryFilter !== ALL_FEM && `Categoria: ${categoryFilter}`,
+      selectedCategories.length > 0 &&
+        `Categories: ${selectedCategories.map((item) => item.label).join(', ')}`,
       selectedProducts.length > 0 &&
         `Productes: ${selectedProducts.map((item) => item.label).join(', ')}`,
       selectedClient && `Client: ${selectedClient.label}`,
@@ -638,7 +644,7 @@ export default function WorkshopPage() {
     setObservacionsFilter(ALL_FEM);
     setTreballFilter(ALL_FEM);
     setSelectedProducts([]);
-    setCategoryFilter(ALL_FEM);
+    setSelectedCategories([]);
     setEnvasatFilter(ALL);
     setFormatFilter(ALL);
     setProductionDateFilter('');
@@ -717,12 +723,14 @@ export default function WorkshopPage() {
           debounceMs={0}
           loadOptions={loadAgrupacioOptions}
         />
-        <SimpleDropdown
-          label="Categoria"
-          options={categories.map((item) => item.nom)}
-          value={categoryFilter}
-          onChange={setCategoryFilter}
-          allLabel={ALL_FEM}
+        <MultiCombobox
+          label="Categories"
+          selected={selectedCategories}
+          onChange={setSelectedCategories}
+          placeholder="Cercar categoria..."
+          addMorePlaceholder="Afegir una altra categoria..."
+          debounceMs={0}
+          loadOptions={loadCategoryOptions}
         />
         <MultiCombobox
           label="Productes"

@@ -1286,6 +1286,11 @@ líneas individuales visibles.
 
 Filtros: `?dataProduccioDes=&dataProduccioFins=&categoriaId=&tipus=&producte=&format=&envasat=&clientId=&agrupacioProduccio=&observacions=&treball=`
 
+> **`categoriaId` repetible (tarea 50, Ari 20/10/2026):**
+> `?categoriaId=3&categoriaId=7` = líneas de cualquiera de esas categorías.
+> Se aplica también a "marcar todo como hecho" (mismos filtros). Una sola
+> `categoriaId` funciona igual que antes; id no numérico → `400 VALIDACIO`.
+
 > **Filtros nuevos (01/10/2026):**
 >
 > - `clientId` (tarea 25): cliente del pedido.

@@ -19,7 +19,8 @@ import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
  * backend però no forma part del disseny d'aquesta pantalla.
  */
 export type WorkshopPanelFilters = {
-  categoriaId?: number;
+  /** Tasca 50: una o més categories (OR). */
+  categoriaId?: number[];
   /** Tasca 25. */
   clientId?: number;
   /** Tasca 28: una o més agrupacions de producció (OR). */
