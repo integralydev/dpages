@@ -541,80 +541,86 @@ export default function PackagingPage() {
         }
       />
 
+      {/* Dues files, com al Panell Obrador: a dalt els filtres curts, a baix
+        els cercadors (Client ja no queda sol en una fila). */}
       <FilterBar>
-        <SimpleDropdown
-          label="Enviament"
-          options={Object.keys(CONFIRMACIO_OPTIONS)}
-          value={confirmacioFilter}
-          onChange={setConfirmacioFilter}
-          allLabel={ALL_FEM}
-        />
-        <SimpleDropdown
-          label="Observacions"
-          options={Object.keys(OBSERVACIONS_OPTIONS)}
-          value={observacionsFilter}
-          onChange={setObservacionsFilter}
-          allLabel={ALL_FEM}
-        />
-        <SimpleDropdown
-          label="Categoria"
-          options={categories.map((item) => item.nom)}
-          value={categoryFilter}
-          onChange={setCategoryFilter}
-          allLabel={ALL_FEM}
-        />
-        <SimpleDropdown
-          label="Origen"
-          options={origins.map((origin) => origin.nom)}
-          value={originFilter}
-          onChange={setOriginFilter}
-          allLabel={ALL}
-        />
-        <DateRangeInput
-          label="Data d'expedició"
-          from={shippingDateFrom}
-          to={shippingDateTo}
-          onFromChange={setShippingDateFrom}
-          onToChange={setShippingDateTo}
-        />
-        <DateInput
-          label="Data de lliurament"
-          value={deliveryDateFilter}
-          onChange={setDeliveryDateFilter}
-        />
-        <MultiCombobox
-          label="Transportistes"
-          selected={selectedCarriers}
-          onChange={setSelectedCarriers}
-          placeholder="Cercar transportista..."
-          addMorePlaceholder="Afegir un altre transportista..."
-          debounceMs={0}
-          loadOptions={loadCarrierOptions}
-        />
-        <SearchInput
-          label="Cerca producte"
-          placeholder="Codi o descripció..."
-          value={productSearch}
-          onChange={setProductSearch}
-        />
-        <MultiCombobox
-          label="Productes"
-          selected={selectedProducts}
-          onChange={setSelectedProducts}
-          placeholder="Cercar producte..."
-          addMorePlaceholder="Afegir un altre producte..."
-          debounceMs={0}
-          loadOptions={loadProductOptions}
-        />
-        <AsyncCombobox
-          label="Client"
-          value={selectedClient?.id ?? null}
-          displayValue={selectedClient?.label ?? ''}
-          placeholder="Cercar client..."
-          onChange={setSelectedClient}
-          loadOptions={loadClientOptions}
-        />
-        <ClearFiltersButton onClick={clearFilters} />
+        <div className="flex w-full flex-wrap gap-4">
+          <SimpleDropdown
+            label="Enviament"
+            options={Object.keys(CONFIRMACIO_OPTIONS)}
+            value={confirmacioFilter}
+            onChange={setConfirmacioFilter}
+            allLabel={ALL_FEM}
+          />
+          <SimpleDropdown
+            label="Observacions"
+            options={Object.keys(OBSERVACIONS_OPTIONS)}
+            value={observacionsFilter}
+            onChange={setObservacionsFilter}
+            allLabel={ALL_FEM}
+          />
+          <SimpleDropdown
+            label="Categoria"
+            options={categories.map((item) => item.nom)}
+            value={categoryFilter}
+            onChange={setCategoryFilter}
+            allLabel={ALL_FEM}
+          />
+          <SimpleDropdown
+            label="Origen"
+            options={origins.map((origin) => origin.nom)}
+            value={originFilter}
+            onChange={setOriginFilter}
+            allLabel={ALL}
+          />
+          <DateRangeInput
+            label="Data d'expedició"
+            from={shippingDateFrom}
+            to={shippingDateTo}
+            onFromChange={setShippingDateFrom}
+            onToChange={setShippingDateTo}
+          />
+          <DateInput
+            label="Data de lliurament"
+            value={deliveryDateFilter}
+            onChange={setDeliveryDateFilter}
+          />
+        </div>
+        <div className="flex w-full flex-wrap gap-4">
+          <MultiCombobox
+            label="Transportistes"
+            selected={selectedCarriers}
+            onChange={setSelectedCarriers}
+            placeholder="Cercar transportista..."
+            addMorePlaceholder="Afegir un altre transportista..."
+            debounceMs={0}
+            loadOptions={loadCarrierOptions}
+          />
+          <SearchInput
+            label="Cerca producte"
+            placeholder="Codi o descripció..."
+            value={productSearch}
+            onChange={setProductSearch}
+          />
+          <MultiCombobox
+            label="Productes"
+            selected={selectedProducts}
+            onChange={setSelectedProducts}
+            placeholder="Cercar producte..."
+            addMorePlaceholder="Afegir un altre producte..."
+            debounceMs={0}
+            loadOptions={loadProductOptions}
+          />
+          <AsyncCombobox
+            label="Client"
+            value={selectedClient?.id ?? null}
+            displayValue={selectedClient?.label ?? ''}
+            placeholder="Cercar client..."
+            onChange={setSelectedClient}
+            loadOptions={loadClientOptions}
+          />
+          <ClearFiltersButton onClick={clearFilters} />
+        </div>
       </FilterBar>
 
       {isLoading && <p className="text-sm text-gray-500">Carregant...</p>}

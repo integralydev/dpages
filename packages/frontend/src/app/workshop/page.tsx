@@ -720,83 +720,89 @@ export default function WorkshopPage() {
         </p>
       )}
 
+      {/* Dues files: a dalt els filtres curts (Estat línia ja no queda sol
+        ocupant tota una fila), a baix els cercadors, que així són més amples. */}
       <FilterBar>
-        {/* Tasca 28: primer filtre de tots, selecció múltiple. */}
-        <MultiCombobox
-          label="Agrupació producció"
-          selected={selectedAgrupacions}
-          onChange={setSelectedAgrupacions}
-          placeholder="Cercar agrupació..."
-          addMorePlaceholder="Afegir una altra agrupació..."
-          debounceMs={0}
-          loadOptions={loadAgrupacioOptions}
-        />
-        <MultiCombobox
-          label="Categories"
-          selected={selectedCategories}
-          onChange={setSelectedCategories}
-          placeholder="Cercar categoria..."
-          addMorePlaceholder="Afegir una altra categoria..."
-          debounceMs={0}
-          loadOptions={loadCategoryOptions}
-        />
-        <SearchInput
-          label="Cerca producte"
-          placeholder="Codi o descripció..."
-          value={productSearch}
-          onChange={setProductSearch}
-        />
-        <MultiCombobox
-          label="Productes"
-          selected={selectedProducts}
-          onChange={setSelectedProducts}
-          placeholder="Cercar producte..."
-          addMorePlaceholder="Afegir un altre producte..."
-          debounceMs={0}
-          loadOptions={loadProductOptions}
-        />
-        <AsyncCombobox
-          label="Client"
-          value={selectedClient?.id ?? null}
-          displayValue={selectedClient?.label ?? ''}
-          placeholder="Cercar client..."
-          onChange={setSelectedClient}
-          loadOptions={loadClientOptions}
-        />
-        <SimpleDropdown
-          label="Envasat"
-          options={ENVASAT_OPTIONS}
-          value={envasatFilter}
-          onChange={setEnvasatFilter}
-          allLabel={ALL}
-        />
-        <SimpleDropdown
-          label="Format"
-          options={FORMAT_OPTIONS}
-          value={formatFilter}
-          onChange={setFormatFilter}
-          allLabel={ALL}
-        />
-        <DateInput
-          label="Data de producció"
-          value={productionDateFilter}
-          onChange={setProductionDateFilter}
-        />
-        <SimpleDropdown
-          label="Observacions"
-          options={Object.keys(OBSERVACIONS_OPTIONS)}
-          value={observacionsFilter}
-          onChange={setObservacionsFilter}
-          allLabel={ALL_FEM}
-        />
-        <SimpleDropdown
-          label="Estat línia"
-          options={Object.keys(TREBALL_OPTIONS)}
-          value={treballFilter}
-          onChange={setTreballFilter}
-          allLabel={ALL_FEM}
-        />
-        <ClearFiltersButton onClick={clearFilters} />
+        <div className="flex w-full flex-wrap gap-4">
+          {/* Tasca 28: primer filtre de tots, selecció múltiple. */}
+          <MultiCombobox
+            label="Agrupació producció"
+            selected={selectedAgrupacions}
+            onChange={setSelectedAgrupacions}
+            placeholder="Cercar agrupació..."
+            addMorePlaceholder="Afegir una altra agrupació..."
+            debounceMs={0}
+            loadOptions={loadAgrupacioOptions}
+          />
+          <MultiCombobox
+            label="Categories"
+            selected={selectedCategories}
+            onChange={setSelectedCategories}
+            placeholder="Cercar categoria..."
+            addMorePlaceholder="Afegir una altra categoria..."
+            debounceMs={0}
+            loadOptions={loadCategoryOptions}
+          />
+          <SimpleDropdown
+            label="Envasat"
+            options={ENVASAT_OPTIONS}
+            value={envasatFilter}
+            onChange={setEnvasatFilter}
+            allLabel={ALL}
+          />
+          <SimpleDropdown
+            label="Format"
+            options={FORMAT_OPTIONS}
+            value={formatFilter}
+            onChange={setFormatFilter}
+            allLabel={ALL}
+          />
+          <DateInput
+            label="Data de producció"
+            value={productionDateFilter}
+            onChange={setProductionDateFilter}
+          />
+          <SimpleDropdown
+            label="Observacions"
+            options={Object.keys(OBSERVACIONS_OPTIONS)}
+            value={observacionsFilter}
+            onChange={setObservacionsFilter}
+            allLabel={ALL_FEM}
+          />
+          <SimpleDropdown
+            label="Estat línia"
+            options={Object.keys(TREBALL_OPTIONS)}
+            value={treballFilter}
+            onChange={setTreballFilter}
+            allLabel={ALL_FEM}
+          />
+        </div>
+        <div className="flex w-full flex-wrap gap-4">
+          <SearchInput
+            label="Cerca producte"
+            placeholder="Codi o descripció..."
+            value={productSearch}
+            onChange={setProductSearch}
+          />
+          <MultiCombobox
+            label="Productes"
+            selected={selectedProducts}
+            onChange={setSelectedProducts}
+            placeholder="Cercar producte..."
+            addMorePlaceholder="Afegir un altre producte..."
+            debounceMs={0}
+            loadOptions={loadProductOptions}
+          />
+          <AsyncCombobox
+            label="Client"
+            value={selectedClient?.id ?? null}
+            displayValue={selectedClient?.label ?? ''}
+            placeholder="Cercar client..."
+            onChange={setSelectedClient}
+            loadOptions={loadClientOptions}
+          />
+          <ClearFiltersButton onClick={clearFilters} />
+        </div>
       </FilterBar>
 
       {isLoading && <p className="text-sm text-gray-500">Carregant...</p>}
