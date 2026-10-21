@@ -16,6 +16,7 @@ import { StatCard } from '@/components/ui/StatCard';
 import { useCarriers } from '@/hooks/useCarriers';
 import { useCatalog } from '@/hooks/useCatalog';
 import { useCategories } from '@/hooks/useCategories';
+import { useOrigensComanda } from '@/hooks/useOrigensComanda';
 import { useEditableRow } from '@/hooks/useEditableRow';
 import { type LliuramentSaveResult, usePanellEmpaquetat } from '@/hooks/usePanellEmpaquetat';
 import {
@@ -28,6 +29,7 @@ import { formatData } from '@/lib/dates';
 import { formatDecimal, parseDecimalInput } from '@/lib/decimals';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
 
+const ALL = 'Tots';
 const ALL_FEM = 'Totes';
 
 // Petició d'Ari (29/09/2026): una línia és "enviada" quan s'hi han desat
@@ -362,6 +364,17 @@ export default function PackagingPage() {
   const [deliveryDateFilter, setDeliveryDateFilter] = useState('');
   const [selectedProducts, setSelectedProducts] = useState<ComboboxOption[]>([]);
   const [categoryFilter, setCategoryFilter] = useState(ALL_FEM);
+  // Tasca 48 (Ari, 20/10/2026): origen de la comanda (tots els orígens,
+  // també WooCommerce), mateix filtre que a Comandes.
+  const { data: origins } = useOrigensComanda();
+  const [originFilter, setOriginFilter] = useState(ALL);
+  const originCode = useMemo(
+    () =>
+      originFilter !== ALL
+        ? origins.find((origin) => origin.nom === originFilter)?.codi
+        : undefined,
+    [originFilter, origins],
+  );
   const [confirmacioFilter, setConfirmacioFilter] = useState(ALL_FEM);
   const [observacionsFilter, setObservacionsFilter] = useState(ALL_FEM);
   const observacions =
@@ -413,6 +426,7 @@ export default function PackagingPage() {
         ? { producte: selectedProducts.map((product) => product.label) }
         : {}),
       ...(categoriaId !== undefined ? { categoriaId } : {}),
+      ...(originCode ? { origen: originCode } : {}),
       ...(confirmacio !== undefined ? { confirmacio } : {}),
       ...(observacions !== undefined ? { observacions } : {}),
     }),
@@ -424,6 +438,7 @@ export default function PackagingPage() {
       deliveryDateFilter,
       selectedProducts,
       categoriaId,
+      originCode,
       confirmacio,
       observacions,
     ],
@@ -485,6 +500,7 @@ export default function PackagingPage() {
     setDeliveryDateFilter('');
     setSelectedProducts([]);
     setCategoryFilter(ALL_FEM);
+    setOriginFilter(ALL);
     setConfirmacioFilter(ALL_FEM);
     setObservacionsFilter(ALL_FEM);
   }
@@ -539,6 +555,13 @@ export default function PackagingPage() {
           value={categoryFilter}
           onChange={setCategoryFilter}
           allLabel={ALL_FEM}
+        />
+        <SimpleDropdown
+          label="Origen"
+          options={origins.map((origin) => origin.nom)}
+          value={originFilter}
+          onChange={setOriginFilter}
+          allLabel={ALL}
         />
         <DateRangeInput
           label="Data d'expedició"

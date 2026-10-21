@@ -622,6 +622,12 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         condicions.push(`c.client_id = $${valors.length + 1}`);
         valors.push(clientUuid);
       }
+      // Tasca 48 (Ari, 20/10/2026): origen de la comanda (`OrigenComandaApi.codi`,
+      // coincidència exacta), mateix criteri que `?origen=` a GET /comandes.
+      if (typeof query.origen === 'string' && query.origen !== '') {
+        condicions.push(`oc.codi = $${valors.length + 1}`);
+        valors.push(query.origen);
+      }
       afegirFiltreProductes(query.producte, condicions, valors);
       // Peticions d'Ari (29/09/2026): categoria de l'article (mateix criteri
       // que a /panells/obrador) i línies pendents / ja enviades.
@@ -662,6 +668,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       const base = `
       FROM comanda_linia cl
       JOIN comanda c ON c.id = cl.comanda_id
+      JOIN origen_comanda oc ON oc.id = c.origen_id
       LEFT JOIN client cli ON cli.id = c.client_id
       LEFT JOIN transportista tr ON tr.id = c.transportista_id
       LEFT JOIN producte p ON p.id = cl.producte_id

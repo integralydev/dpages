@@ -1413,4 +1413,50 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
 
     await fastify.close();
   });
+  it('tasca 48 — GET /panells/empaquetat?origen= (origen de la comanda, coincidència exacta)', async () => {
+    const fastify = construirServidor();
+    const producte = await entorn.poolTest.query<{ id_seq: string }>(
+      `INSERT INTO producte (codi, descripcio, pes_kg, preu_venda, tipus)
+       VALUES ('T48', 'Producte Tasca48', '1.000', '5.00', 'simple') RETURNING id_seq`,
+    );
+    const producteT48 = Number(producte.rows[0]!.id_seq);
+    // L'esquema de tests només sembra els orígens "manual"/"woocommerce".
+    await entorn.poolTest.query(
+      `INSERT INTO origen_comanda (codi, nom)
+       VALUES ('whatsapp', 'WhatsApp'), ('telefon', 'Telèfon'), ('correu', 'Correu')
+       ON CONFLICT (codi) DO NOTHING`,
+    );
+    for (const origen of ['telefon', 'whatsapp']) {
+      await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen,
+          linies: [
+            { dataProduccio: '2026-08-01T00:00:00Z', producteId: producteT48, unitatsDemanades: 1 },
+          ],
+        },
+      });
+    }
+    const url = (origen: string) =>
+      `/api/v1/panells/empaquetat?producte=${encodeURIComponent('Producte Tasca48')}&origen=${origen}`;
+
+    const perTelefon = cuerpoJson<PanellEmpaquetatApi>(
+      await fastify.inject({ method: 'GET', url: url('telefon') }),
+    );
+    expect(perTelefon.dades).toHaveLength(1);
+    const perWhatsapp = cuerpoJson<PanellEmpaquetatApi>(
+      await fastify.inject({ method: 'GET', url: url('whatsapp') }),
+    );
+    expect(perWhatsapp.dades).toHaveLength(1);
+    expect(perWhatsapp.dades[0]?.comandaId).not.toBe(perTelefon.dades[0]?.comandaId);
+    const perCorreu = cuerpoJson<PanellEmpaquetatApi>(
+      await fastify.inject({ method: 'GET', url: url('correu') }),
+    );
+    expect(perCorreu.dades).toEqual([]);
+
+    await fastify.close();
+  });
 });

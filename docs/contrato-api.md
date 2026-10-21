@@ -1482,7 +1482,12 @@ Respuesta `200`:
 
 **`GET /panells/empaquetat`**
 
-Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&producte=&categoriaId=&confirmacio=`
+Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&producte=&categoriaId=&confirmacio=&origen=`
+
+> **`origen` (tarea 48, Ari 20/10/2026):** origen del pedido
+> (`OrigenComandaApi.codi`: `woocommerce`, `telefon`, `whatsapp`, `correu`,
+> `manual`), coincidencia exacta — mismo criterio que `?origen=` en
+> `GET /comandes`.
 
 > **`transportistaId` repetible** (tarea 22, 01/10/2026):
 > `?transportistaId=1&transportistaId=4` devuelve las líneas de cualquiera

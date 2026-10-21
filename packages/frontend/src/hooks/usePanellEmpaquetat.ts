@@ -29,6 +29,8 @@ export type PackagingPanelFilters = {
   /** Un o més productes (descripció exacta); el backend en fa un OR. */
   producte?: string[];
   categoriaId?: number;
+  /** Tasca 48: `OrigenComandaApi.codi` (coincidència exacta). */
+  origen?: string;
   /** Sense valor = totes les línies. */
   confirmacio?: 'pendents' | 'confirmades';
   /** Tasca 23: amb / sense observacions de la línia. */
