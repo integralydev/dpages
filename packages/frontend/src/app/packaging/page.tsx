@@ -7,6 +7,7 @@ import { ClearFiltersButton, FilterBar } from '@/components/ui/FilterBar';
 import { MultiCombobox } from '@/components/ui/MultiCombobox';
 import { DataCard, DataCardActions, DataCardField, DataCardGrid } from '@/components/ui/DataCard';
 import { DateInput } from '@/components/ui/DateInput';
+import { DateRangeInput } from '@/components/ui/DateRangeInput';
 import { DecimalInput } from '@/components/ui/DecimalInput';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Pagination } from '@/components/ui/Pagination';
@@ -341,7 +342,9 @@ export default function PackagingPage() {
   const { data: catalog } = useCatalog();
   const { data: categories } = useCategories();
 
-  const [shippingDateFilter, setShippingDateFilter] = useState('');
+  // Tasca 52 (Ari, 20/10/2026): data d'expedició com a rang des de / fins a.
+  const [shippingDateFrom, setShippingDateFrom] = useState('');
+  const [shippingDateTo, setShippingDateTo] = useState('');
   // Un o més transportistes (tasca 22, 01/10/2026), mateix patró que Productes.
   const [selectedCarriers, setSelectedCarriers] = useState<ComboboxOption[]>([]);
   // Client ja no ve d'un <select> amb els clients de useClientTariffs()
@@ -353,7 +356,7 @@ export default function PackagingPage() {
   const [selectedClient, setSelectedClient] = useState<ComboboxOption | null>(null);
   // dataLliuramentDes/Fins (rang) i producte (exacte, case-insensitive; un
   // o més, mateix patró que Obrador) ja tenen suport real al backend. Mateix patró que
-  // "Data d'expedició" (un sol camp, enviat com Des=Fins=mateix valor).
+  // l'antic camp únic de "Data d'expedició" (enviat com Des=Fins=mateix valor).
   // Producte segueix en mode LOCAL (filtrant `catalog` ja carregat, mateix
   // criteri que Producte a OrderForm.tsx) — veure lib/productSearch.ts.
   const [deliveryDateFilter, setDeliveryDateFilter] = useState('');
@@ -397,9 +400,8 @@ export default function PackagingPage() {
 
   const filters = useMemo(
     () => ({
-      ...(shippingDateFilter
-        ? { dataExpedicioDes: shippingDateFilter, dataExpedicioFins: shippingDateFilter }
-        : {}),
+      ...(shippingDateFrom ? { dataExpedicioDes: shippingDateFrom } : {}),
+      ...(shippingDateTo ? { dataExpedicioFins: shippingDateTo } : {}),
       ...(selectedCarriers.length > 0
         ? { transportistaId: selectedCarriers.map((item) => item.id) }
         : {}),
@@ -415,7 +417,8 @@ export default function PackagingPage() {
       ...(observacions !== undefined ? { observacions } : {}),
     }),
     [
-      shippingDateFilter,
+      shippingDateFrom,
+      shippingDateTo,
       selectedCarriers,
       selectedClient,
       deliveryDateFilter,
@@ -475,7 +478,8 @@ export default function PackagingPage() {
   }
 
   function clearFilters() {
-    setShippingDateFilter('');
+    setShippingDateFrom('');
+    setShippingDateTo('');
     setSelectedCarriers([]);
     setSelectedClient(null);
     setDeliveryDateFilter('');
@@ -536,10 +540,12 @@ export default function PackagingPage() {
           onChange={setCategoryFilter}
           allLabel={ALL_FEM}
         />
-        <DateInput
+        <DateRangeInput
           label="Data d'expedició"
-          value={shippingDateFilter}
-          onChange={setShippingDateFilter}
+          from={shippingDateFrom}
+          to={shippingDateTo}
+          onFromChange={setShippingDateFrom}
+          onToChange={setShippingDateTo}
         />
         <DateInput
           label="Data de lliurament"
