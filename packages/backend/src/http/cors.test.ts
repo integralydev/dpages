@@ -42,6 +42,15 @@ describe('CORS (@fastify/cors) — fuera de producción', () => {
     expect(del.statusCode).toBe(204);
     expect(del.headers['access-control-allow-methods']).toContain('DELETE');
 
+    // Tasca 37: PUT /comandes/:id/linies/ordre.
+    const put = await fastify.inject({
+      method: 'OPTIONS',
+      url: '/api/v1/comandes/1/linies/ordre',
+      headers: { origin: 'http://localhost:3000', 'access-control-request-method': 'PUT' },
+    });
+    expect(put.statusCode).toBe(204);
+    expect(put.headers['access-control-allow-methods']).toContain('PUT');
+
     await fastify.close();
   });
 

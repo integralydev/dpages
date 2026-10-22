@@ -9,10 +9,13 @@ import { DataCard, DataCardActions, DataCardField, DataCardGrid } from '@/compon
 import { DateInput } from '@/components/ui/DateInput';
 import { FilterBar } from '@/components/ui/FilterBar';
 import { IconButton } from '@/components/ui/IconButton';
+import type { ComboboxOption } from '@/components/ui/AsyncCombobox';
+import { MultiCombobox } from '@/components/ui/MultiCombobox';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Pagination } from '@/components/ui/Pagination';
 import { SearchInput } from '@/components/ui/SearchInput';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
+import { useFiltrePersistent } from '@/hooks/useFiltrePersistent';
 import { useOrders } from '@/hooks/useOrders';
 import { useOrigensComanda } from '@/hooks/useOrigensComanda';
 import { ESTAT_LABELS, estatBadgeVariant } from '@/lib/comandaEstat';
@@ -34,6 +37,19 @@ import { descarregarPdfComandes, descarregarPdfLlistatComandes } from '@/lib/ord
 import { ResultatDuplicatDialog } from './ResultatDuplicatDialog';
 
 const ALL = 'Tots';
+
+// Tasca 35 (Ari, 20/10/2026): mateix cercador de clients que l'Obrador
+// (GET /clients?cerca=, mode servidor), aquí amb selecció múltiple.
+async function loadClientOptions(query: string): Promise<ComboboxOption[]> {
+  const resposta = await api.get<RespostaPaginada<ClientApi>>('/clients', {
+    cerca: query,
+    mida: 8,
+  });
+  return resposta.dades.map((client) => ({
+    id: client.id,
+    label: `${client.codi ?? client.id} · ${client.nom ?? ''}`,
+  }));
+}
 
 function productionDates(order: ComandaResumApi): string {
   return order.datesProduccioLinies.map((data) => formatData(data, false)).join(', ');
@@ -130,12 +146,16 @@ function OrderCard({
 export default function OrdersPage() {
   const router = useRouter();
 
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState(ALL);
+  const [search, setSearch] = useFiltrePersistent('comandes.cerca', '');
+  const [selectedClients, setSelectedClients] = useFiltrePersistent<ComboboxOption[]>(
+    'comandes.clients',
+    [],
+  );
+  const [statusFilter, setStatusFilter] = useFiltrePersistent('comandes.estat', ALL);
   // Filtre d'origen: tots els orígens (també WooCommerce i l'històric
   // "manual"), encara que a mà només es puguin triar els 3 canals manuals.
   const { data: origins } = useOrigensComanda();
-  const [originFilter, setOriginFilter] = useState(ALL);
+  const [originFilter, setOriginFilter] = useFiltrePersistent('comandes.origen', ALL);
   const originCode = useMemo(
     () =>
       originFilter !== ALL
@@ -143,9 +163,15 @@ export default function OrdersPage() {
         : undefined,
     [originFilter, origins],
   );
-  const [productionDateFilter, setProductionDateFilter] = useState('');
-  const [orderDateFilter, setOrderDateFilter] = useState('');
-  const [deliveryDateFilter, setDeliveryDateFilter] = useState('');
+  const [productionDateFilter, setProductionDateFilter] = useFiltrePersistent(
+    'comandes.dataProduccio',
+    '',
+  );
+  const [orderDateFilter, setOrderDateFilter] = useFiltrePersistent('comandes.dataComanda', '');
+  const [deliveryDateFilter, setDeliveryDateFilter] = useFiltrePersistent(
+    'comandes.dataLliurament',
+    '',
+  );
   const [incidenceTarget, setIncidenceTarget] = useState<ComandaResumApi | null>(null);
   const [incidenceDetall, setIncidenceDetall] = useState('');
   const [incidenceError, setIncidenceError] = useState<string | null>(null);
@@ -173,6 +199,9 @@ export default function OrdersPage() {
   // OR del backend per recuperar-ho.
   const filters = useMemo(
     () => ({
+      ...(selectedClients.length > 0
+        ? { clientId: selectedClients.map((client) => client.id) }
+        : {}),
       ...(statusCode ? { estat: statusCode } : {}),
       ...(originCode ? { origen: originCode } : {}),
       ...(orderDateFilter ? { dataDes: orderDateFilter, dataFins: orderDateFilter } : {}),
@@ -184,7 +213,15 @@ export default function OrdersPage() {
         : {}),
       ...(search.trim() ? { cerca: search.trim() } : {}),
     }),
-    [statusCode, originCode, orderDateFilter, productionDateFilter, deliveryDateFilter, search],
+    [
+      selectedClients,
+      statusCode,
+      originCode,
+      orderDateFilter,
+      productionDateFilter,
+      deliveryDateFilter,
+      search,
+    ],
   );
 
   const { data, paginacio, setPagina, isLoading, error, refetch, markIncidence } =
@@ -202,6 +239,8 @@ export default function OrdersPage() {
 
   const activeFilterLabels = [
     search.trim() && `Cerca: ${search.trim()}`,
+    selectedClients.length > 0 &&
+      `Client: ${selectedClients.map((client) => client.label).join(', ')}`,
     statusFilter !== ALL && `Estat: ${statusFilter}`,
     originFilter !== ALL && `Origen: ${originFilter}`,
     productionDateFilter && `Data producció: ${formatData(productionDateFilter, false)}`,
@@ -401,6 +440,14 @@ export default function OrdersPage() {
 
       <FilterBar>
         <SearchInput label="Cerca (núm. comanda o client)" value={search} onChange={setSearch} />
+        <MultiCombobox
+          label="Clients"
+          selected={selectedClients}
+          onChange={setSelectedClients}
+          placeholder="Cercar client..."
+          addMorePlaceholder="Afegir un altre client..."
+          loadOptions={loadClientOptions}
+        />
         <SimpleDropdown
           label="Estat"
           options={Object.values(ESTAT_LABELS)}

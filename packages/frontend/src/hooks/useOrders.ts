@@ -16,6 +16,8 @@ import { usePageClamp } from './usePageClamp';
 import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
 
 export type OrderListFilters = {
+  /** Tasca 35: un o més clients (GET /comandes?clientId=, repetible). */
+  clientId?: number[];
   estat?: string;
   /** `OrigenComandaApi.codi` (GET /comandes?origen=, coincidència exacta). */
   origen?: string;
@@ -90,7 +92,15 @@ export type OrderFormValues = {
 /** Línies noves (POST) i línies editades (PATCH) d'una comanda ja creada. Buit en mode "create" (les línies viatgen dins ComandaCreacioApi). */
 export type OrderLineChanges = {
   novaLinies: LiniaCreacioApi[];
+  /** Id temporal (negatiu) de cada línia de `novaLinies`, en el mateix ordre. */
+  novaLiniesIds: number[];
   liniesEditades: { liniaId: number; patch: LiniaEdicioApi }[];
+  /**
+   * Tasca 37: ids de totes les línies en l'ordre de pantalla (les noves amb
+   * el seu id temporal), o `null` si l'ordre no ha canviat i no n'hi ha cap
+   * de nova (PUT .../linies/ordre).
+   */
+  ordreLinies: number[] | null;
 };
 
 /**
@@ -145,6 +155,8 @@ type UseOrdersResult = {
   markIncidence: (comandaId: number, detall: string) => Promise<ComandaDetallApi>;
   /** POST /comandes/:comandaId/linies. */
   addLine: (comandaId: number, linia: LiniaCreacioApi) => Promise<ComandaDetallApi>;
+  /** PUT /comandes/:comandaId/linies/ordre — `ids`: totes les línies, en el nou ordre. */
+  reorderLines: (comandaId: number, ids: number[]) => Promise<ComandaDetallApi>;
   /** PATCH /comandes/:comandaId/linies/:liniaId. */
   editLine: (
     comandaId: number,
@@ -363,6 +375,18 @@ export function useOrders(filters: OrderListFilters = {}): UseOrdersResult {
     [refetch],
   );
 
+  // Tasca 37: nou ordre de les línies (Oficina les mou amunt i avall).
+  const reorderLines = useCallback(
+    async (comandaId: number, ids: number[]): Promise<ComandaDetallApi> => {
+      const actualitzada = await api.put<ComandaDetallApi>(`/comandes/${comandaId}/linies/ordre`, {
+        ids,
+      });
+      refetch();
+      return actualitzada;
+    },
+    [refetch],
+  );
+
   // Editar unitatsDemanades/kgDemanats/dataProduccio/obsProduccio d'una
   // línia existent. Mai re-resol preuUnitari (ver LiniaEdicioApi).
   const editLine = useCallback(
@@ -394,6 +418,7 @@ export function useOrders(filters: OrderListFilters = {}): UseOrdersResult {
     deleteLine,
     markIncidence,
     addLine,
+    reorderLines,
     editLine,
   };
 }

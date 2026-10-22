@@ -15,52 +15,29 @@ import {
   formatearDataApi,
   parsearIdPublic,
   parsearPaginacio,
+  patroComencaPer,
   resolverCategoriaUuid,
   resolverClientUuid,
+  resolverFiltreEntitat,
+  resolverFiltreEntitats,
   resolverTarifaUuid,
   resolverTransportistaUuid,
 } from './comu.js';
 
-async function resolverFiltreEntitat(
-  reply: FastifyReply,
-  valor: unknown,
-  camp: string,
-  resolver: (idSeq: number) => Promise<string | null>,
-): Promise<string | undefined | null> {
-  if (typeof valor !== 'string') return undefined;
-  const idPublic = parsearIdPublic(valor);
-  if (idPublic === null) {
-    enviarValidacio(reply, `${camp} ha de ser un enter`);
-    return null;
-  }
-  const uuid = await resolver(idPublic);
-  return uuid ?? '00000000-0000-0000-0000-000000000000';
-}
-
 /**
- * Igual que `resolverFiltreEntitat`, però el paràmetre es pot repetir
- * (`?transportistaId=1&transportistaId=4`, tasca 22, 01/10/2026): retorna
- * els UUID de tots els ids. Un id que no existeix es resol al UUID buit
- * (mateix criteri: no coincideix amb res, no és un error). `undefined` =
- * sense filtre; `null` = resposta 400 ja enviada.
+ * Tasca 45 (Ari, 20/10/2026): `?cercaProducte=` filtra mentre s'escriu,
+ * igual que el cercador del Catàleg (GET /productes?cerca=): línies amb un
+ * producte el codi o la descripció del qual COMENCEN pel text
+ * ("botifarra" les troba totes, "bott" les de codi BOTT…).
+ * Case-insensitive.
  */
-async function resolverFiltreEntitats(
-  reply: FastifyReply,
-  valor: unknown,
-  camp: string,
-  resolver: (idSeq: number) => Promise<string | null>,
-): Promise<string[] | undefined | null> {
-  const valors = (Array.isArray(valor) ? valor : [valor]).filter(
-    (item): item is string => typeof item === 'string',
+function afegirCercaProducte(valor: unknown, condicions: string[], valors: unknown[]): void {
+  if (typeof valor !== 'string' || valor.trim() === '') return;
+  const n = valors.length + 1;
+  condicions.push(
+    `(LOWER(p.descripcio) LIKE LOWER($${n}) ESCAPE '\\' OR LOWER(p.descripcio_venda) LIKE LOWER($${n}) ESCAPE '\\' OR LOWER(p.codi) LIKE LOWER($${n}) ESCAPE '\\')`,
   );
-  if (valors.length === 0) return undefined;
-  const uuids: string[] = [];
-  for (const item of valors) {
-    const uuid = await resolverFiltreEntitat(reply, item, camp, resolver);
-    if (uuid === null) return null;
-    if (uuid !== undefined) uuids.push(uuid);
-  }
-  return uuids;
+  valors.push(patroComencaPer(valor.trim()));
 }
 
 /**
@@ -137,19 +114,25 @@ export async function construirFiltresObrador(
     condicions.push(condicioDataFinsInclusiva('cl.data_produccio', valors.length + 1));
     valors.push(query.dataProduccioFins);
   }
-  const categoriaUuid = await resolverFiltreEntitat(reply, query.categoriaId, 'categoriaId', (id) =>
-    resolverCategoriaUuid(pool, id),
+  // Tasca 50 (Ari, 20/10/2026): `?categoriaId=` repetible = línies de
+  // qualsevol d'aquestes categories.
+  const categoriaUuids = await resolverFiltreEntitats(
+    reply,
+    query.categoriaId,
+    'categoriaId',
+    (id) => resolverCategoriaUuid(pool, id),
   );
-  if (categoriaUuid === null) return null;
-  if (categoriaUuid !== undefined) {
-    condicions.push(`p.categoria_id = $${valors.length + 1}`);
-    valors.push(categoriaUuid);
+  if (categoriaUuids === null) return null;
+  if (categoriaUuids !== undefined) {
+    condicions.push(`p.categoria_id = ANY($${valors.length + 1}::uuid[])`);
+    valors.push(categoriaUuids);
   }
   if (query.tipus === 'simple' || query.tipus === 'variable') {
     condicions.push(`p.tipus = $${valors.length + 1}`);
     valors.push(query.tipus);
   }
   afegirFiltreProductes(query.producte, condicions, valors);
+  afegirCercaProducte(query.cercaProducte, condicions, valors);
   // Tasca 29: les línies d'un sol producte (desplegar una fila de la vista
   // acumulada), per id públic.
   if (query.producteId !== undefined && query.producteId !== '') {
@@ -657,7 +640,14 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         condicions.push(`c.client_id = $${valors.length + 1}`);
         valors.push(clientUuid);
       }
+      // Tasca 48 (Ari, 20/10/2026): origen de la comanda (`OrigenComandaApi.codi`,
+      // coincidència exacta), mateix criteri que `?origen=` a GET /comandes.
+      if (typeof query.origen === 'string' && query.origen !== '') {
+        condicions.push(`oc.codi = $${valors.length + 1}`);
+        valors.push(query.origen);
+      }
       afegirFiltreProductes(query.producte, condicions, valors);
+      afegirCercaProducte(query.cercaProducte, condicions, valors);
       // Peticions d'Ari (29/09/2026): categoria de l'article (mateix criteri
       // que a /panells/obrador) i línies pendents / ja enviades.
       const categoriaUuid = await resolverFiltreEntitat(
@@ -697,6 +687,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       const base = `
       FROM comanda_linia cl
       JOIN comanda c ON c.id = cl.comanda_id
+      JOIN origen_comanda oc ON oc.id = c.origen_id
       LEFT JOIN client cli ON cli.id = c.client_id
       LEFT JOIN transportista tr ON tr.id = c.transportista_id
       LEFT JOIN producte p ON p.id = cl.producte_id

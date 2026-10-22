@@ -21,6 +21,7 @@ import {
   parsearPaginacio,
   resolverClientUuid,
   resolverComandaUuid,
+  resolverFiltreEntitats,
   resolverTarifaUuid,
   resolverTransportistaUuid,
 } from './comu.js';
@@ -536,12 +537,15 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       condicions.push(`oc.codi = $${valors.length + 1}`);
       valors.push(query.origen);
     }
-    if (typeof query.clientId === 'string') {
-      const clientIdPublic = parsearIdPublic(query.clientId);
-      if (clientIdPublic === null) return enviarValidacio(reply, 'clientId ha de ser un enter');
-      const clientUuid = await resolverClientUuid(pool, clientIdPublic);
-      condicions.push(`c.client_id = $${valors.length + 1}`);
-      valors.push(clientUuid ?? '00000000-0000-0000-0000-000000000000');
+    // Tasca 35 (Ari, 20/10/2026): `?clientId=` repetible
+    // (`?clientId=1&clientId=4`) = comandes de qualsevol d'aquests clients.
+    const clientUuids = await resolverFiltreEntitats(reply, query.clientId, 'clientId', (id) =>
+      resolverClientUuid(pool, id),
+    );
+    if (clientUuids === null) return;
+    if (clientUuids !== undefined) {
+      condicions.push(`c.client_id = ANY($${valors.length + 1}::uuid[])`);
+      valors.push(clientUuids);
     }
     // Issue #16: dataDes/dataFins filtran por dataComanda (docs/contrato-api.md
     // § 4.5) — desde la migración 0019 eso es c.data_comanda, ya NO
@@ -1770,6 +1774,79 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       reply,
       "La comanda no es pot eliminar: ja té línies fetes a l'Obrador o amb dades d'empaquetat",
     );
+  });
+
+  // Tasca 37 (Ari, 20/10/2026): Oficina reordena lliurement les línies
+  // (p. ex. posar un afegit de pollastre amb la resta de pollastre). El cos
+  // porta TOTS els ids de línia vius en el nou ordre; `ordinal` passa a ser
+  // la seva posició. Reordenar és una edició de línies a tots els efectes:
+  // mateixa guarda de congelació i mateixa marca ADR-026 (sense ella, el
+  // proper sync d'un pedido de WooCommerce tornaria a escriure `ordinal`
+  // amb la posició de Woo i desfaria l'ordre).
+  fastify.put('/comandes/:id/linies/ordre', { preHandler: GUARD_COMANDES }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const comandaUuid = await resolverComandaOResponder(reply, id);
+    if (comandaUuid === null) return;
+
+    const cos = req.body as Partial<{ ids: unknown }>;
+    const ids = Array.isArray(cos?.ids) ? cos.ids : null;
+    if (
+      ids === null ||
+      !ids.every((item) => typeof item === 'number' && Number.isSafeInteger(item) && item > 0) ||
+      new Set(ids).size !== ids.length
+    ) {
+      return enviarValidacio(
+        reply,
+        "ids ha de ser una llista d'identificadors de línia sense repetir",
+        [{ camp: 'ids', missatge: "llista d'identificadors de línia sense repetir" }],
+      );
+    }
+
+    if (await estaCongelada(pool, comandaUuid)) {
+      return enviarConflicte(reply, 'La comanda està congelada i ja no admet canvis');
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const vives = await client.query<{ id_seq: string }>(
+        `SELECT id_seq FROM comanda_linia WHERE comanda_id = $1 AND NOT esborrat
+         ORDER BY ordinal, id_seq FOR UPDATE`,
+        [comandaUuid],
+      );
+      const idsVius = new Set(vives.rows.map((fila) => Number(fila.id_seq)));
+      if (idsVius.size !== ids.length || !(ids as number[]).every((item) => idsVius.has(item))) {
+        await client.query('ROLLBACK');
+        return enviarValidacio(reply, 'ids ha de contenir exactament les línies de la comanda', [
+          { camp: 'ids', missatge: 'ha de contenir exactament les línies de la comanda' },
+        ]);
+      }
+
+      // Mateix ordre que ja hi havia (doble clic, una línia que torna al seu
+      // lloc): res a fer, i sobretot sense la marca ADR-026, que és irreversible.
+      const ordreActual = vives.rows.map((fila) => Number(fila.id_seq));
+      if (ordreActual.every((item, index) => item === ids[index])) {
+        await client.query('ROLLBACK');
+        return carregarDetallPerUuid(comandaUuid);
+      }
+
+      await protegirLiniesSiEsDeWoocommerce(client, comandaUuid);
+      await client.query(
+        `UPDATE comanda_linia cl SET ordinal = nou.posicio - 1
+         FROM unnest($2::bigint[]) WITH ORDINALITY AS nou(id_seq, posicio)
+         WHERE cl.id_seq = nou.id_seq AND cl.comanda_id = $1`,
+        [comandaUuid, ids],
+      );
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    return carregarDetallPerUuid(comandaUuid);
   });
 
   fastify.delete(

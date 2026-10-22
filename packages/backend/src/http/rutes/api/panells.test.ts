@@ -1351,4 +1351,169 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
       await fastify.close();
     });
   });
+  it('tasca 50 — GET /panells/obrador?categoriaId= repetible (diverses categories alhora)', async () => {
+    const fastify = construirServidor();
+    const crearCategoriaAmbProducte = async (nom: string, codi: string) => {
+      const categoria = await entorn.poolTest.query<{ id: string; id_seq: string }>(
+        `INSERT INTO categoria_producte (nom) VALUES ($1) RETURNING id, id_seq`,
+        [nom],
+      );
+      const producte = await entorn.poolTest.query<{ id_seq: string }>(
+        `INSERT INTO producte (codi, descripcio, pes_kg, preu_venda, tipus, categoria_id)
+         VALUES ($1, $2, '1.000', '5.00', 'simple', $3) RETURNING id_seq`,
+        [codi, `Producte ${nom}`, categoria.rows[0]!.id],
+      );
+      return {
+        categoriaId: Number(categoria.rows[0]!.id_seq),
+        producteId: Number(producte.rows[0]!.id_seq),
+      };
+    };
+    const a = await crearCategoriaAmbProducte('Tasca50 A', 'T50A');
+    const b = await crearCategoriaAmbProducte('Tasca50 B', 'T50B');
+    const c = await crearCategoriaAmbProducte('Tasca50 C', 'T50C');
+    await fastify.inject({
+      method: 'POST',
+      url: '/api/v1/comandes',
+      payload: {
+        dataComanda: '2026-08-01',
+        dataLliurament: '2026-08-30T00:00:00Z',
+        origen: 'manual',
+        linies: [a, b, c].map(({ producteId: id }) => ({
+          dataProduccio: '2026-08-01T00:00:00Z',
+          producteId: id,
+          unitatsDemanades: 1,
+        })),
+      },
+    });
+
+    const dues = cuerpoJson<PanellObradorApi>(
+      await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/panells/obrador?categoriaId=${a.categoriaId}&categoriaId=${b.categoriaId}`,
+      }),
+    );
+    expect(new Set(dues.dades.map((f) => f.producte.descripcio))).toEqual(
+      new Set(['Producte Tasca50 A', 'Producte Tasca50 B']),
+    );
+
+    // Una sola categoria continua funcionant igual.
+    const una = cuerpoJson<PanellObradorApi>(
+      await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/panells/obrador?categoriaId=${c.categoriaId}`,
+      }),
+    );
+    expect(una.dades.map((f) => f.producte.descripcio)).toEqual(['Producte Tasca50 C']);
+
+    const invalid = await fastify.inject({
+      method: 'GET',
+      url: `/api/v1/panells/obrador?categoriaId=${a.categoriaId}&categoriaId=abc`,
+    });
+    expect(invalid.statusCode).toBe(400);
+
+    await fastify.close();
+  });
+  it('tasca 48 — GET /panells/empaquetat?origen= (origen de la comanda, coincidència exacta)', async () => {
+    const fastify = construirServidor();
+    const producte = await entorn.poolTest.query<{ id_seq: string }>(
+      `INSERT INTO producte (codi, descripcio, pes_kg, preu_venda, tipus)
+       VALUES ('T48', 'Producte Tasca48', '1.000', '5.00', 'simple') RETURNING id_seq`,
+    );
+    const producteT48 = Number(producte.rows[0]!.id_seq);
+    // L'esquema de tests només sembra els orígens "manual"/"woocommerce".
+    await entorn.poolTest.query(
+      `INSERT INTO origen_comanda (codi, nom)
+       VALUES ('whatsapp', 'WhatsApp'), ('telefon', 'Telèfon'), ('correu', 'Correu')
+       ON CONFLICT (codi) DO NOTHING`,
+    );
+    for (const origen of ['telefon', 'whatsapp']) {
+      await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen,
+          linies: [
+            { dataProduccio: '2026-08-01T00:00:00Z', producteId: producteT48, unitatsDemanades: 1 },
+          ],
+        },
+      });
+    }
+    const url = (origen: string) =>
+      `/api/v1/panells/empaquetat?producte=${encodeURIComponent('Producte Tasca48')}&origen=${origen}`;
+
+    const perTelefon = cuerpoJson<PanellEmpaquetatApi>(
+      await fastify.inject({ method: 'GET', url: url('telefon') }),
+    );
+    expect(perTelefon.dades).toHaveLength(1);
+    const perWhatsapp = cuerpoJson<PanellEmpaquetatApi>(
+      await fastify.inject({ method: 'GET', url: url('whatsapp') }),
+    );
+    expect(perWhatsapp.dades).toHaveLength(1);
+    expect(perWhatsapp.dades[0]?.comandaId).not.toBe(perTelefon.dades[0]?.comandaId);
+    const perCorreu = cuerpoJson<PanellEmpaquetatApi>(
+      await fastify.inject({ method: 'GET', url: url('correu') }),
+    );
+    expect(perCorreu.dades).toEqual([]);
+
+    await fastify.close();
+  });
+  it('tasca 45 — ?cercaProducte= filtra per principi de codi o descripció (Obrador i Empaquetat)', async () => {
+    const fastify = construirServidor();
+    const ids: number[] = [];
+    for (const [codi, descripcio] of [
+      ['T45BOTT1', 'Botifarra Tasca45 tallada'],
+      ['T45BOTN', 'Botifarra Tasca45 negra'],
+      ['T45LLOM', 'Cap de llom Tasca45'],
+    ]) {
+      const producte = await entorn.poolTest.query<{ id_seq: string }>(
+        `INSERT INTO producte (codi, descripcio, pes_kg, preu_venda, tipus)
+         VALUES ($1, $2, '1.000', '5.00', 'simple') RETURNING id_seq`,
+        [codi, descripcio],
+      );
+      ids.push(Number(producte.rows[0]!.id_seq));
+    }
+    await fastify.inject({
+      method: 'POST',
+      url: '/api/v1/comandes',
+      payload: {
+        dataComanda: '2026-08-01',
+        dataLliurament: '2026-08-30T00:00:00Z',
+        origen: 'manual',
+        linies: ids.map((producteId) => ({
+          dataProduccio: '2026-08-01T00:00:00Z',
+          producteId,
+          unitatsDemanades: 1,
+        })),
+      },
+    });
+
+    for (const panell of ['obrador', 'empaquetat'] as const) {
+      const cerca = async (text: string) => {
+        const res = await fastify.inject({
+          method: 'GET',
+          url: `/api/v1/panells/${panell}?cercaProducte=${encodeURIComponent(text)}&mida=200`,
+        });
+        expect(res.statusCode).toBe(200);
+        const cos = cuerpoJson<{ dades: { producte: { descripcio: string } | string }[] }>(res);
+        return cos.dades
+          .map((fila) =>
+            typeof fila.producte === 'string' ? fila.producte : fila.producte.descripcio,
+          )
+          .sort();
+      };
+      // Per descripció, case-insensitive.
+      expect(await cerca('BOTIFARRA TASCA45')).toEqual([
+        'Botifarra Tasca45 negra',
+        'Botifarra Tasca45 tallada',
+      ]);
+      // Per codi.
+      expect(await cerca('t45bott')).toEqual(['Botifarra Tasca45 tallada']);
+      // Pel principi, no substring: "llom" no troba "Cap de llom".
+      expect(await cerca('llom Tasca45')).toEqual([]);
+    }
+
+    await fastify.close();
+  });
 });

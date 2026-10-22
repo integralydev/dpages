@@ -19,7 +19,8 @@ import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
  * backend però no forma part del disseny d'aquesta pantalla.
  */
 export type WorkshopPanelFilters = {
-  categoriaId?: number;
+  /** Tasca 50: una o més categories (OR). */
+  categoriaId?: number[];
   /** Tasca 25. */
   clientId?: number;
   /** Tasca 28: una o més agrupacions de producció (OR). */
@@ -30,6 +31,8 @@ export type WorkshopPanelFilters = {
   treball?: 'pendents' | 'fets';
   /** Un o més productes (descripció exacta); el backend en fa un OR. */
   producte?: string[];
+  /** Tasca 45: codi o descripció que comença pel text. */
+  cercaProducte?: string;
   /** Tasca 29: les línies d'un sol producte (desplegar la vista acumulada). */
   producteId?: number;
   format?: string;

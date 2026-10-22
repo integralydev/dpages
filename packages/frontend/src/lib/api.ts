@@ -133,7 +133,7 @@ async function parseErrorBody(response: Response): Promise<ApiError> {
 }
 
 async function request<T>(
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
   path: string,
   body?: unknown,
 ): Promise<T> {
@@ -188,6 +188,7 @@ export const api = {
   post: <T>(path: string, body?: unknown, params?: Record<string, QueryValue>) =>
     request<T>('POST', withQuery(path, params), body ?? {}),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body ?? {}),
+  put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body ?? {}),
   delete: <T>(path: string) => request<T>('DELETE', path),
 };
 

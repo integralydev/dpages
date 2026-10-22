@@ -19,7 +19,8 @@ export const ORIGEN_DESENVOLUPAMENT = 'http://localhost:3000';
  * falta: ningún endpoint del sistema los usa (verificado, grep sobre todos
  * los `fastify.<verbo>(` registrados).
  */
-const METODES_PERMESOS = ['GET', 'POST', 'PATCH', 'DELETE'];
+// PUT: tasca 37 (PUT /comandes/:id/linies/ordre).
+const METODES_PERMESOS = ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'];
 
 /**
  * Mismo criterio que las demás guardas de entorno (WC_BASE_URL, AUTH_DISABLED):

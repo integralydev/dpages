@@ -680,6 +680,11 @@ Filtros: `?estat=oberta&clientId=45&origen=web&dataDes=2026-08-01&dataFins=2026-
 > `productes`/`tarifes` (exacto, LOWER — sección 2, regla 3.1): acá
 > buscar por parte del nombre de un cliente sí tiene sentido de negocio.
 > No reemplaza `clientId` (filtro exacto por id, sin cambios).
+>
+> **`clientId` repetible (tarea 35, Ari 20/10/2026):**
+> `?clientId=45&clientId=12` = pedidos de cualquiera de esos clientes. Un
+> solo `clientId` funciona igual que antes; un id no numérico → `400
+VALIDACIO`; un id inexistente no coincide con nada (no es error).
 
 ```json
 {
@@ -1144,6 +1149,18 @@ congelada, igual que el resto de las escrituras sobre un pedido.
 > bloque dedicado más arriba) — contra las fechas de cabecera ya guardadas
 > del pedido, no las de este mismo body (este endpoint no toca cabecera).
 
+**`PUT /comandes/:id/linies/ordre`** (tarea 37, Ari 20/10/2026) — reordenar
+las líneas de un pedido. Cuerpo: `{ "ids": [38012, 38010, 38011] }` con
+**todos** los ids de línea vivos del pedido, sin repetir, en el orden nuevo;
+`ordinal` pasa a ser la posición (0, 1, 2…). Respuesta `200` con el
+`ComandaDetallApi` ya reordenado.
+
+> - Lista que no coincide exactamente con las líneas del pedido (falta o
+>   sobra alguna, repetidas, no numéricas) → `400 VALIDACIO`.
+> - Pedido congelado → `409 CONFLICTE`, igual que el resto de rutas de línea.
+> - Pedido de WooCommerce: cuenta como edición de Oficina y fija
+>   `linies_editades_a` (ADR-026); el sync deja de tocar sus líneas.
+
 **`PATCH /comandes/:comandaId/linies/:liniaId`** (capa 30) — editar una
 línea existente.
 
@@ -1279,7 +1296,18 @@ líneas individuales visibles.
 
 **`GET /panells/obrador`**
 
-Filtros: `?dataProduccioDes=&dataProduccioFins=&categoriaId=&tipus=&producte=&format=&envasat=&clientId=&agrupacioProduccio=&observacions=&treball=`
+Filtros: `?dataProduccioDes=&dataProduccioFins=&categoriaId=&tipus=&producte=&cercaProducte=&format=&envasat=&clientId=&agrupacioProduccio=&observacions=&treball=`
+
+> **`cercaProducte` (tarea 45, Ari 20/10/2026):** filtra mientras se
+> escribe, mismo criterio que `cerca` en `GET /productes`: líneas cuyo
+> producto tiene `codi`, `descripcio` o `descripcio_venda` que **empieza**
+> por el texto (case-insensitive). No sustituye a `producte` (exacto,
+> repetible); se pueden combinar.
+
+> **`categoriaId` repetible (tarea 50, Ari 20/10/2026):**
+> `?categoriaId=3&categoriaId=7` = líneas de cualquiera de esas categorías.
+> Se aplica también a "marcar todo como hecho" (mismos filtros). Una sola
+> `categoriaId` funciona igual que antes; id no numérico → `400 VALIDACIO`.
 
 > **Filtros nuevos (01/10/2026):**
 >
@@ -1472,7 +1500,18 @@ Respuesta `200`:
 
 **`GET /panells/empaquetat`**
 
-Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&producte=&categoriaId=&confirmacio=`
+Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&producte=&cercaProducte=&categoriaId=&confirmacio=&origen=`
+
+> **`cercaProducte` (tarea 45, Ari 20/10/2026):** filtra mientras se
+> escribe, mismo criterio que `cerca` en `GET /productes`: líneas cuyo
+> producto tiene `codi`, `descripcio` o `descripcio_venda` que **empieza**
+> por el texto (case-insensitive). No sustituye a `producte` (exacto,
+> repetible); se pueden combinar.
+
+> **`origen` (tarea 48, Ari 20/10/2026):** origen del pedido
+> (`OrigenComandaApi.codi`: `woocommerce`, `telefon`, `whatsapp`, `correu`,
+> `manual`), coincidencia exacta — mismo criterio que `?origen=` en
+> `GET /comandes`.
 
 > **`transportistaId` repetible** (tarea 22, 01/10/2026):
 > `?transportistaId=1&transportistaId=4` devuelve las líneas de cualquiera

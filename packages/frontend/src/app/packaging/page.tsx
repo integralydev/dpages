@@ -7,14 +7,17 @@ import { ClearFiltersButton, FilterBar } from '@/components/ui/FilterBar';
 import { MultiCombobox } from '@/components/ui/MultiCombobox';
 import { DataCard, DataCardActions, DataCardField, DataCardGrid } from '@/components/ui/DataCard';
 import { DateInput } from '@/components/ui/DateInput';
+import { DateRangeInput } from '@/components/ui/DateRangeInput';
 import { DecimalInput } from '@/components/ui/DecimalInput';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Pagination } from '@/components/ui/Pagination';
+import { SearchInput } from '@/components/ui/SearchInput';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { StatCard } from '@/components/ui/StatCard';
 import { useCarriers } from '@/hooks/useCarriers';
 import { useCatalog } from '@/hooks/useCatalog';
 import { useCategories } from '@/hooks/useCategories';
+import { useOrigensComanda } from '@/hooks/useOrigensComanda';
 import { useEditableRow } from '@/hooks/useEditableRow';
 import { type LliuramentSaveResult, usePanellEmpaquetat } from '@/hooks/usePanellEmpaquetat';
 import {
@@ -27,6 +30,7 @@ import { formatData } from '@/lib/dates';
 import { formatDecimal, parseDecimalInput } from '@/lib/decimals';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
 
+const ALL = 'Tots';
 const ALL_FEM = 'Totes';
 
 // Petició d'Ari (29/09/2026): una línia és "enviada" quan s'hi han desat
@@ -341,7 +345,9 @@ export default function PackagingPage() {
   const { data: catalog } = useCatalog();
   const { data: categories } = useCategories();
 
-  const [shippingDateFilter, setShippingDateFilter] = useState('');
+  // Tasca 52 (Ari, 20/10/2026): data d'expedició com a rang des de / fins a.
+  const [shippingDateFrom, setShippingDateFrom] = useState('');
+  const [shippingDateTo, setShippingDateTo] = useState('');
   // Un o més transportistes (tasca 22, 01/10/2026), mateix patró que Productes.
   const [selectedCarriers, setSelectedCarriers] = useState<ComboboxOption[]>([]);
   // Client ja no ve d'un <select> amb els clients de useClientTariffs()
@@ -353,12 +359,26 @@ export default function PackagingPage() {
   const [selectedClient, setSelectedClient] = useState<ComboboxOption | null>(null);
   // dataLliuramentDes/Fins (rang) i producte (exacte, case-insensitive; un
   // o més, mateix patró que Obrador) ja tenen suport real al backend. Mateix patró que
-  // "Data d'expedició" (un sol camp, enviat com Des=Fins=mateix valor).
+  // l'antic camp únic de "Data d'expedició" (enviat com Des=Fins=mateix valor).
   // Producte segueix en mode LOCAL (filtrant `catalog` ja carregat, mateix
   // criteri que Producte a OrderForm.tsx) — veure lib/productSearch.ts.
   const [deliveryDateFilter, setDeliveryDateFilter] = useState('');
   const [selectedProducts, setSelectedProducts] = useState<ComboboxOption[]>([]);
+  // Tasca 45 (Ari, 20/10/2026): cerca per codi o descripció mentre
+  // s'escriu, com al Catàleg ("botifarra" les troba totes).
+  const [productSearch, setProductSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState(ALL_FEM);
+  // Tasca 48 (Ari, 20/10/2026): origen de la comanda (tots els orígens,
+  // també WooCommerce), mateix filtre que a Comandes.
+  const { data: origins } = useOrigensComanda();
+  const [originFilter, setOriginFilter] = useState(ALL);
+  const originCode = useMemo(
+    () =>
+      originFilter !== ALL
+        ? origins.find((origin) => origin.nom === originFilter)?.codi
+        : undefined,
+    [originFilter, origins],
+  );
   const [confirmacioFilter, setConfirmacioFilter] = useState(ALL_FEM);
   const [observacionsFilter, setObservacionsFilter] = useState(ALL_FEM);
   const observacions =
@@ -397,9 +417,8 @@ export default function PackagingPage() {
 
   const filters = useMemo(
     () => ({
-      ...(shippingDateFilter
-        ? { dataExpedicioDes: shippingDateFilter, dataExpedicioFins: shippingDateFilter }
-        : {}),
+      ...(shippingDateFrom ? { dataExpedicioDes: shippingDateFrom } : {}),
+      ...(shippingDateTo ? { dataExpedicioFins: shippingDateTo } : {}),
       ...(selectedCarriers.length > 0
         ? { transportistaId: selectedCarriers.map((item) => item.id) }
         : {}),
@@ -410,17 +429,22 @@ export default function PackagingPage() {
       ...(selectedProducts.length > 0
         ? { producte: selectedProducts.map((product) => product.label) }
         : {}),
+      ...(productSearch.trim() ? { cercaProducte: productSearch.trim() } : {}),
       ...(categoriaId !== undefined ? { categoriaId } : {}),
+      ...(originCode ? { origen: originCode } : {}),
       ...(confirmacio !== undefined ? { confirmacio } : {}),
       ...(observacions !== undefined ? { observacions } : {}),
     }),
     [
-      shippingDateFilter,
+      shippingDateFrom,
+      shippingDateTo,
       selectedCarriers,
       selectedClient,
       deliveryDateFilter,
       selectedProducts,
+      productSearch,
       categoriaId,
+      originCode,
       confirmacio,
       observacions,
     ],
@@ -475,12 +499,15 @@ export default function PackagingPage() {
   }
 
   function clearFilters() {
-    setShippingDateFilter('');
+    setShippingDateFrom('');
+    setShippingDateTo('');
     setSelectedCarriers([]);
     setSelectedClient(null);
     setDeliveryDateFilter('');
     setSelectedProducts([]);
+    setProductSearch('');
     setCategoryFilter(ALL_FEM);
+    setOriginFilter(ALL);
     setConfirmacioFilter(ALL_FEM);
     setObservacionsFilter(ALL_FEM);
   }
@@ -514,65 +541,86 @@ export default function PackagingPage() {
         }
       />
 
+      {/* Dues files, com al Panell Obrador: a dalt els filtres curts, a baix
+        els cercadors (Client ja no queda sol en una fila). */}
       <FilterBar>
-        <SimpleDropdown
-          label="Enviament"
-          options={Object.keys(CONFIRMACIO_OPTIONS)}
-          value={confirmacioFilter}
-          onChange={setConfirmacioFilter}
-          allLabel={ALL_FEM}
-        />
-        <SimpleDropdown
-          label="Observacions"
-          options={Object.keys(OBSERVACIONS_OPTIONS)}
-          value={observacionsFilter}
-          onChange={setObservacionsFilter}
-          allLabel={ALL_FEM}
-        />
-        <SimpleDropdown
-          label="Categoria"
-          options={categories.map((item) => item.nom)}
-          value={categoryFilter}
-          onChange={setCategoryFilter}
-          allLabel={ALL_FEM}
-        />
-        <DateInput
-          label="Data d'expedició"
-          value={shippingDateFilter}
-          onChange={setShippingDateFilter}
-        />
-        <DateInput
-          label="Data de lliurament"
-          value={deliveryDateFilter}
-          onChange={setDeliveryDateFilter}
-        />
-        <MultiCombobox
-          label="Transportistes"
-          selected={selectedCarriers}
-          onChange={setSelectedCarriers}
-          placeholder="Cercar transportista..."
-          addMorePlaceholder="Afegir un altre transportista..."
-          debounceMs={0}
-          loadOptions={loadCarrierOptions}
-        />
-        <MultiCombobox
-          label="Productes"
-          selected={selectedProducts}
-          onChange={setSelectedProducts}
-          placeholder="Cercar producte..."
-          addMorePlaceholder="Afegir un altre producte..."
-          debounceMs={0}
-          loadOptions={loadProductOptions}
-        />
-        <AsyncCombobox
-          label="Client"
-          value={selectedClient?.id ?? null}
-          displayValue={selectedClient?.label ?? ''}
-          placeholder="Cercar client..."
-          onChange={setSelectedClient}
-          loadOptions={loadClientOptions}
-        />
-        <ClearFiltersButton onClick={clearFilters} />
+        <div className="flex w-full flex-wrap gap-4">
+          <SimpleDropdown
+            label="Enviament"
+            options={Object.keys(CONFIRMACIO_OPTIONS)}
+            value={confirmacioFilter}
+            onChange={setConfirmacioFilter}
+            allLabel={ALL_FEM}
+          />
+          <SimpleDropdown
+            label="Observacions"
+            options={Object.keys(OBSERVACIONS_OPTIONS)}
+            value={observacionsFilter}
+            onChange={setObservacionsFilter}
+            allLabel={ALL_FEM}
+          />
+          <SimpleDropdown
+            label="Categoria"
+            options={categories.map((item) => item.nom)}
+            value={categoryFilter}
+            onChange={setCategoryFilter}
+            allLabel={ALL_FEM}
+          />
+          <SimpleDropdown
+            label="Origen"
+            options={origins.map((origin) => origin.nom)}
+            value={originFilter}
+            onChange={setOriginFilter}
+            allLabel={ALL}
+          />
+          <DateRangeInput
+            label="Data d'expedició"
+            from={shippingDateFrom}
+            to={shippingDateTo}
+            onFromChange={setShippingDateFrom}
+            onToChange={setShippingDateTo}
+          />
+          <DateInput
+            label="Data de lliurament"
+            value={deliveryDateFilter}
+            onChange={setDeliveryDateFilter}
+          />
+        </div>
+        <div className="flex w-full flex-wrap gap-4">
+          <MultiCombobox
+            label="Transportistes"
+            selected={selectedCarriers}
+            onChange={setSelectedCarriers}
+            placeholder="Cercar transportista..."
+            addMorePlaceholder="Afegir un altre transportista..."
+            debounceMs={0}
+            loadOptions={loadCarrierOptions}
+          />
+          <SearchInput
+            label="Cerca producte"
+            placeholder="Codi o descripció..."
+            value={productSearch}
+            onChange={setProductSearch}
+          />
+          <MultiCombobox
+            label="Productes"
+            selected={selectedProducts}
+            onChange={setSelectedProducts}
+            placeholder="Cercar producte..."
+            addMorePlaceholder="Afegir un altre producte..."
+            debounceMs={0}
+            loadOptions={loadProductOptions}
+          />
+          <AsyncCombobox
+            label="Client"
+            value={selectedClient?.id ?? null}
+            displayValue={selectedClient?.label ?? ''}
+            placeholder="Cercar client..."
+            onChange={setSelectedClient}
+            loadOptions={loadClientOptions}
+          />
+          <ClearFiltersButton onClick={clearFilters} />
+        </div>
       </FilterBar>
 
       {isLoading && <p className="text-sm text-gray-500">Carregant...</p>}
