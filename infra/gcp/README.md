@@ -36,7 +36,8 @@ bloqueo de IP en el cortafuegos del hosting de WordPress, cdmon).
   seguidas, la tarea corre cada 5 min); un fallo aislado (p. ej. durante un
   cambio de revisión) no avisa. Se cierra sola 30 min después de volver a
   funcionar.
-- **Canal**: correo a francesc@integralyaisolutions.com.
+- **Canales**: correo a francesc@integralyaisolutions.com y a
+  eloi@integralyaisolutions.com (añadido el 06/11/2026).
 
 Ver/editar en Cloud Console → Monitoring → Alerting (proyecto `dpages`).
 Las tareas `sync-cataleg` y `reconciliar` están en pausa a fecha de hoy y no
