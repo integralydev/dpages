@@ -64,7 +64,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: 'Llistat de Tarifes', href: '/rates', modul: 'tarifes', icon: Euro },
       {
-        label: 'Tarifes per client',
+        label: 'Fitxes de clients',
         href: '/client-tariffs',
         modul: 'tarifes-clients',
         icon: ContactRound,

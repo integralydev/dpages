@@ -59,7 +59,7 @@ export const MODUL_LABELS: Record<string, string> = {
   categories: 'Categories',
   catalog: 'Catàleg',
   tarifes: 'Tarifes',
-  'tarifes-clients': 'Tarifes de clients',
+  'tarifes-clients': 'Fitxes de clients',
   comandes: 'Comandes',
   'rendiments-porcs': 'Rendiments de porcs',
   'panell-oficina': "Panell d'Oficina",

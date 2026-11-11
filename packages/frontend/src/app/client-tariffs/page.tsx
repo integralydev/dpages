@@ -98,7 +98,7 @@ export default function ClientTariffsPage() {
   return (
     <div>
       <PageHeader
-        title="Tarifes per client"
+        title="Fitxes de clients"
         subtitle="Assignació de tarifes als clients."
         action={{
           label: 'Nou client',
