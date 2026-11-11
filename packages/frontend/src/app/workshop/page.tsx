@@ -34,7 +34,11 @@ import {
 } from '@/lib/api';
 import { formatData } from '@/lib/dates';
 import { formatDecimal } from '@/lib/decimals';
-import { descarregarPdfObradorNoFetes, descarregarPdfObradorPantalla } from '@/lib/ordersPdf';
+import {
+  descarregarPdfObradorAgrupat,
+  descarregarPdfObradorNoFetes,
+  descarregarPdfObradorPantalla,
+} from '@/lib/ordersPdf';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
 
 const ALL = 'Tots';
@@ -555,12 +559,17 @@ export default function WorkshopPage() {
 
   // Tasca 30: els acumulats per producte amb totes les seves línies a sota
   // (sempre tot desplegat, encara que a pantalla estigui plegat), amb els
-  // mateixos filtres.
-  async function handlePrintScreen() {
+  // mateixos filtres. Tasca 49: la versió agrupada només porta la fila
+  // d'acumulats de cada producte, sense les línies de comanda.
+  async function handlePrintScreen(desglossat: boolean) {
     if (!totals) return;
     setIsPrinting(true);
     setPrintError(null);
     try {
+      if (!desglossat) {
+        await descarregarPdfObradorAgrupat({ grups, totals, filtres: etiquetesFiltres(true) });
+        return;
+      }
       const linies = await obtenirTotesLesPagines((pagina) =>
         api.get<PanellObradorApi>('/panells/obrador', { ...filters, mida: 200, pagina }),
       );
@@ -692,12 +701,21 @@ export default function WorkshopPage() {
               </button>
               <button
                 type="button"
-                onClick={handlePrintScreen}
+                onClick={() => handlePrintScreen(true)}
                 disabled={isLoading || isPrinting || grups.length === 0}
                 className="flex items-center justify-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Printer className="h-4 w-4" />
-                Imprimir llista
+                Imprimir llista desglossada
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePrintScreen(false)}
+                disabled={isLoading || isPrinting || grups.length === 0}
+                className="flex items-center justify-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Printer className="h-4 w-4" />
+                Imprimir llista agrupada
               </button>
               <button
                 type="button"
