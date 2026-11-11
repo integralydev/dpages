@@ -16,7 +16,7 @@ la orientación general en `CLAUDE.md`.
 packages/
   shared/     @dpages/shared — tipos compartidos backend↔frontend, se consume compilado (dist/, ADR-010)
   backend/    @dpages/backend — API Fastify, migraciones SQL, ingesta/transformación WooCommerce
-  frontend/   Next.js (App Router) — paneles oficina/obrador/empaquetado/producció
+  frontend/   Next.js (App Router) — paneles oficina/obrador/empaquetado/compres/producció
 docs/         contexto de negocio, ADRs, contrato de API (openapi.yaml), infraestructura GCP
 infra/gcp/    notas de infraestructura de Google Cloud
 .github/      workflows de CI (ci.yml) y deploy manual (deploy.yml)

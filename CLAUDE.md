@@ -101,18 +101,23 @@ están documentadas ahí mismo y en el agente `woocommerce-integration`.
   y reemplazando una decisión anterior.
 - Seis estados de pedido: `esborrany`, `oberta`, `en_proces`, `tancada`,
   `amb_incidencia`, `cancellada`. `esborrany` (tarea 33, 03/10/2026): no cuenta
-  en los paneles de Obrador ni Empaquetat; sí en Oficina y Producció. Es el
+  en los paneles de Obrador, Empaquetat ni Compres; sí en Oficina y Producció. Es el
   estado con el que entran los pedidos de WooCommerce (tarea 38); una
   incidencia del sync no los saca de `esborrany`. Tarea 39: al crearse, la
   cabecera y sus líneas reciben fecha de producción = lunes siguiente si entraron de martes
   16:00 a domingo 24:00 (Europe/Madrid); si no, sin fecha. Petición de Ari (29/09/2026): un pedido `cancellada` no cuenta
-  en **ninguno** de los cuatro paneles (ni en filas ni en totales), pero sigue
+  en **ninguno** de los cinco paneles (ni en filas ni en totales), pero sigue
   visible en la pantalla de pedidos (filtro de estado incluido). Única
   excepción: en el Panel Oficina aparece si se filtra explícitamente por
   `estat=cancellada` (nunca con "Tots").
-- Cuatro paneles: oficina, obrador, empaquetado, producció/planificació. **Sólo
-  empaquetado edita**; los otros tres son de sólo lectura con filtros y
-  subtotales.
+- Cinco paneles: oficina, obrador, empaquetado, compres, producció/planificació.
+  **Sólo empaquetado y compres editan**; los otros tres son de sólo lectura con
+  filtros y subtotales. El Panell de Compres (tarea 41 del Excel del cliente,
+  11/11/2026) es la misma información que Empaquetat — mismos filtros, mismas
+  líneas, misma edición de unidades y kilos enviados, misma regla de doble
+  confirmación — pero acumulada por cliente, con el detalle de sus líneas al
+  desplegarlo. Módulo de permisos propio (`panell-compres`); la migración
+  `0025` se lo dio a todos los roles que ya tenían `panell-empaquetat`.
 
 ## Decisiones de integración ya tomadas
 
