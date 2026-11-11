@@ -1230,7 +1230,7 @@ paths:
   /api/v1/panells/empaquetat:
     get:
       tags: [Panells]
-      summary: Panel de empaquetado (única pantalla operativa con edición, vía /lliurament)
+      summary: Panel de empaquetado (edición vía /lliurament; también lo lee el Panell de Compres)
       description: >-
         Capa 37: 2 filtros nuevos — dataLliuramentDes/Fins y producte.
         Orden por defecto (capa 46), no opcional: mismo criterio que
@@ -1298,6 +1298,19 @@ paths:
           schema: { type: string, enum: [si, 'no'] }
         - $ref: '#/components/parameters/Pagina'
         - $ref: '#/components/parameters/Mida'
+        - name: senseClient
+          in: query
+          description: >-
+            Tarea 41: `si` deja sólo las líneas de pedidos sin cliente
+            asignado (detalle del grupo "Sense client" del Panell de Compres).
+          schema: { type: string, enum: [si] }
+        - name: ordre
+          in: query
+          description: >-
+            Tarea 41: `comanda` quita el "pendientes primero" del orden por
+            defecto (dataExpedicio, num, ordinal), para que una línea no
+            cambie de sitio al guardarla.
+          schema: { type: string, enum: [comanda] }
       responses:
         '200':
           description: Panel con totales
@@ -1332,6 +1345,68 @@ paths:
                         FilaPanellEmpaquetatApi (@dpages/shared). Incluye
                         `categoria` (string, nullable) desde el 29/09/2026.
                   paginacio: { $ref: '#/components/schemas/Paginacio' }
+
+  /api/v1/panells/compres:
+    get:
+      tags: [Panells]
+      summary: Panell de Compres — lo mismo que Empaquetat, acumulado por cliente (tarea 41)
+      description: >-
+        Una fila por cliente con la suma de sus líneas. Acepta exactamente los
+        mismos filtros que /panells/empaquetat (ver ahí) y excluye igual los
+        pedidos cancellada y esborrany. Paginado por clientes
+        (paginacio.total = número de clientes). Orden: nombre del cliente;
+        el grupo sin cliente (client null), al final. El detalle de un
+        cliente se pide a /panells/empaquetat con clientId (o
+        senseClient=si) y ordre=comanda, y se edita con PATCH .../lliurament.
+        Módulo panell-compres.
+      parameters:
+        - name: pagina
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: mida
+          in: query
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totals:
+                    type: object
+                    properties:
+                      clients: { type: integer }
+                      comandes: { type: integer }
+                      linies: { type: integer }
+                      unitatsDemanades: { type: string }
+                      unitatsLliurades: { type: string }
+                      kgDemanats: { type: string }
+                      kgLliurats: { type: string }
+                      liniesConfirmades: { type: integer }
+                      liniesPendents: { type: integer }
+                  dades:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        client:
+                          type: object
+                          nullable: true
+                          properties:
+                            id: { type: integer }
+                            codi: { type: string, nullable: true }
+                            nom: { type: string, nullable: true }
+                        comandes: { type: integer }
+                        linies: { type: integer }
+                        liniesConfirmades: { type: integer }
+                        unitatsDemanades: { type: string }
+                        unitatsLliurades: { type: string }
+                        kgDemanats: { type: string }
+                        kgLliurats: { type: string }
+                  paginacio: { $ref: '#/components/schemas/Paginacio' }
+        '400': { $ref: '#/components/responses/Validacio' }
 
   /api/v1/origens-comanda:
     get:
@@ -1467,6 +1542,7 @@ paths:
                       - panell-oficina
                       - panell-obrador
                       - panell-empaquetat
+                      - panell-compres
                       - panell-produccio
                       - usuaris
                       - rols
@@ -2430,6 +2506,7 @@ components:
               panell-oficina,
               panell-obrador,
               panell-empaquetat,
+              panell-compres,
               panell-produccio,
               usuaris,
               rols,
@@ -2458,6 +2535,7 @@ components:
               - panell-oficina
               - panell-obrador
               - panell-empaquetat
+              - panell-compres
               - panell-produccio
               - usuaris
               - rols

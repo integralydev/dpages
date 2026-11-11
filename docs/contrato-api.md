@@ -87,8 +87,8 @@ Tres criterios de guard, según el endpoint:
   `/rendiments-porcs`.
 - **De apoyo** — la lectura (`GET`) de `/categories`, `/productes`,
   `/tarifes/matriu`, `/transportistes` y `/clients` acepta CUALQUIERA de
-  los 5 módulos operativos (`comandes`, `panell-oficina`, `panell-obrador`,
-  `panell-empaquetat`, `panell-produccio`) — son datos de referencia que
+  los 6 módulos operativos (`comandes`, `panell-oficina`, `panell-obrador`,
+  `panell-empaquetat`, `panell-compres`, `panell-produccio`) — son datos de referencia que
   varias pantallas necesitan mostrar (ej. el nombre del transportista en el
   Panell d'Oficina) sin que eso implique poder gestionar ese recurso. La
   escritura de esos mismos 5 recursos sigue siendo estricta (módulo dueño).
@@ -265,8 +265,8 @@ Etiquetas para mostrar (el backend no las envía, van en el frontend):
 
 > **`esborrany`** (03/10/2026, tareas 33 y 38): pedido pendiente de
 > revisar. Es el estado con el que se crean los pedidos que entran de
-> WooCommerce. **No cuenta** en `/panells/obrador` ni `/panells/empaquetat`
-> (ni filas ni totales); **sí** en `/panells/oficina` y
+> WooCommerce. **No cuenta** en `/panells/obrador`, `/panells/empaquetat` ni
+> `/panells/compres` (ni filas ni totales); **sí** en `/panells/oficina` y
 > `/panells/produccio` (que hasta ahora sólo contaba `oberta` y pasa a
 > contar `oberta` y `esborrany`). Se pasa a `oberta` (u otro estado) a mano
 > desde el formulario del pedido. Una incidencia del sync (artículo no
@@ -282,7 +282,7 @@ Etiquetas para mostrar (el backend no las envía, van en el frontend):
 > **`cancellada`** (29/09/2026, petición de Ari): el pedido sigue existiendo
 > y se ve en `GET /comandes` (también con `?estat=cancellada`), pero **no
 > cuenta en ningún panel**: `/panells/oficina`, `/panells/obrador`,
-> `/panells/empaquetat` y `/panells/produccio` lo excluyen de filas y
+> `/panells/empaquetat`, `/panells/compres` y `/panells/produccio` lo excluyen de filas y
 > totales. Única excepción: `/panells/oficina?estat=cancellada` sí los
 > devuelve (filtro explícito); sin `estat`, nunca. La sincronización con WooCommerce tampoco lo reabre: una
 > incidencia automática se registra igual, pero el pedido sigue
@@ -1496,11 +1496,20 @@ Respuesta `200`:
 
 ### 4.8 · Panell Empaquetat
 
-**Es el único panel con edición.** Todo lo demás es sólo lectura.
+**Panel con edición**, junto con el Panell de Compres (sección 4.8 bis),
+que edita las mismas líneas. Todo lo demás es sólo lectura.
 
-**`GET /panells/empaquetat`**
+**`GET /panells/empaquetat`** — módulo `panell-empaquetat` **o**
+`panell-compres` (el Panell de Compres lo usa para el detalle de un cliente).
 
-Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&producte=&cercaProducte=&categoriaId=&confirmacio=&origen=`
+Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&senseClient=&producte=&cercaProducte=&categoriaId=&confirmacio=&origen=&ordre=`
+
+> **`senseClient=si` y `ordre=comanda` (tarea 41, 11/11/2026):** los usa el
+> detalle de un cliente en el Panell de Compres. `senseClient=si` deja sólo
+> las líneas de pedidos sin cliente asignado. `ordre=comanda` quita el
+> "pendientes primero" del orden por defecto: las líneas salen por
+> `dataExpedicio`, `num` y `ordinal`, de modo que una línea no cambia de
+> sitio al guardarla. Cualquier otro valor de `ordre` se ignora.
 
 > **`cercaProducte` (tarea 45, Ari 20/10/2026):** filtra mientras se
 > escribe, mismo criterio que `cerca` en `GET /productes`: líneas cuyo
@@ -1596,6 +1605,65 @@ Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramen
 > `ComandaLiniaApi.unitatsDemanades` (sección 4.5). Los dos `totals` (SUM
 > agregados) recibieron el mismo cast explícito que ya tenían `kgDemanats`/
 > `kgLliurats`, por el mismo motivo.
+
+---
+
+### 4.8 bis · Panell de Compres
+
+Tarea 41 del Excel del cliente (11/11/2026). La **misma información que el
+Panell Empaquetat, acumulada por cliente**: una fila por cliente con la suma
+de sus líneas. Módulo `panell-compres` (migración `0025`: lo reciben todos
+los roles que ya tenían `panell-empaquetat`).
+
+**`GET /panells/compres`**
+
+Filtros: exactamente los mismos que `GET /panells/empaquetat` (sección 4.8),
+con las mismas exclusiones (`cancellada` y `esborrany` no cuentan). Paginado
+**por clientes** (`pagina`, `mida`): `paginacio.total` es el número de
+clientes, no de líneas. Orden: nombre del cliente (case-insensitive), y el
+grupo sin cliente al final. A propósito **no** hay "pendientes primero": al
+guardar la última línea pendiente de un cliente, su fila saltaría de sitio
+mientras se trabaja en él.
+
+```json
+{
+  "totals": {
+    "clients": 2,
+    "comandes": 3,
+    "linies": 4,
+    "unitatsDemanades": "10.00",
+    "unitatsLliurades": "1.00",
+    "kgDemanats": "20.000",
+    "kgLliurats": "1.850",
+    "liniesConfirmades": 1,
+    "liniesPendents": 3
+  },
+  "dades": [
+    {
+      "client": { "id": 31, "codi": "CLI31", "nom": "Restaurant Example" },
+      "comandes": 2,
+      "linies": 3,
+      "liniesConfirmades": 1,
+      "unitatsDemanades": "6.00",
+      "unitatsLliurades": "1.00",
+      "kgDemanats": "12.000",
+      "kgLliurats": "1.850"
+    }
+  ],
+  "paginacio": { "pagina": 1, "mida": 100, "total": 2, "totalPagines": 1 }
+}
+```
+
+- `client` es `null` para los pedidos sin cliente asignado: forman un único
+  grupo, que cuenta como un cliente más en `totals.clients`.
+- **Detalle de un cliente:** `GET /panells/empaquetat` con los mismos
+  filtros más `clientId=<id>` (o `senseClient=si` para el grupo sin
+  cliente) y `ordre=comanda`.
+- **Edición:** el mismo `PATCH /comandes/:comandaId/linies/:liniaId/lliurament`
+  y `.../lliurament/desfer` del Panell Empaquetat (sección 5), con la misma
+  regla: unidades y kilos enviados obligatorios, pueden valer 0, y guardar
+  confirma la línea. Esos dos endpoints aceptan el módulo
+  `panell-empaquetat` **o** `panell-compres`.
 
 ---
 
@@ -1964,8 +2032,8 @@ seguridad arriba); sin él, `403 SENSE_PERMIS`.
 >
 > `categories`, `catalog`, `tarifes`, `tarifes-clients`, `comandes`,
 > `rendiments-porcs`, `panell-oficina`, `panell-obrador`,
-> `panell-empaquetat`, `panell-produccio`, `usuaris`, `rols`,
-> `transportistes`.
+> `panell-empaquetat`, `panell-compres`, `panell-produccio`, `usuaris`,
+> `rols`, `transportistes`.
 >
 > **Esta lista puede quedar desactualizada acá** (ya pasó con
 > `transportistes`, agregado a `MODULS_VALIDS` sin actualizar este

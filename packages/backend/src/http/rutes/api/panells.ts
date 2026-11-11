@@ -1,8 +1,10 @@
 import type {
+  FilaPanellCompresApi,
   FilaPanellEmpaquetatApi,
   FilaPanellObradorAcumulatApi,
   FilaPanellObradorApi,
   FilaPanellOficinaApi,
+  PanellCompresApi,
   PanellProduccioFilaApi,
 } from '@dpages/shared';
 import type { FastifyInstance, FastifyReply } from 'fastify';
@@ -13,6 +15,7 @@ import {
   crearGuardaModul,
   enviarValidacio,
   formatearDataApi,
+  MODULS_LLIURAMENT,
   parsearIdPublic,
   parsearPaginacio,
   patroComencaPer,
@@ -193,6 +196,117 @@ export async function construirFiltresObrador(
   }
   return { condicions, valors };
 }
+
+/**
+ * Filtres compartits del Panell Empaquetat (GET /panells/empaquetat) i del
+ * Panell de Compres (GET /panells/compres, tasca 41): el segon és la mateixa
+ * informació acumulada per client, així que han de filtrar exactament igual.
+ * Les condicions fan servir els àlies de `BASE_EMPAQUETAT`. Retorna `null`
+ * si ja s'ha respost amb un error de validació.
+ */
+async function construirFiltresEmpaquetat(
+  reply: FastifyReply,
+  query: Record<string, unknown>,
+): Promise<{ condicions: string[]; valors: unknown[] } | null> {
+  // Fora: cancel·lades i esborranys (tasca 33), mateix criteri que Obrador.
+  const condicions: string[] = ['NOT cl.esborrat', `c.estat NOT IN ('cancellada', 'esborrany')`];
+  const valors: unknown[] = [];
+
+  if (typeof query.dataExpedicioDes === 'string' && query.dataExpedicioDes !== '') {
+    condicions.push(`c.data_expedicio >= $${valors.length + 1}`);
+    valors.push(query.dataExpedicioDes);
+  }
+  if (typeof query.dataExpedicioFins === 'string' && query.dataExpedicioFins !== '') {
+    condicions.push(condicioDataFinsInclusiva('c.data_expedicio', valors.length + 1));
+    valors.push(query.dataExpedicioFins);
+  }
+  // Mismo criterio que dataExpedicioDes/Fins de arriba, sobre la fecha
+  // de entrega del pedido.
+  if (typeof query.dataLliuramentDes === 'string' && query.dataLliuramentDes !== '') {
+    condicions.push(`c.data_lliurament >= $${valors.length + 1}`);
+    valors.push(query.dataLliuramentDes);
+  }
+  if (typeof query.dataLliuramentFins === 'string' && query.dataLliuramentFins !== '') {
+    condicions.push(condicioDataFinsInclusiva('c.data_lliurament', valors.length + 1));
+    valors.push(query.dataLliuramentFins);
+  }
+  // Un o més transportistes (tasca 22): OR entre ells.
+  const transportistaUuids = await resolverFiltreEntitats(
+    reply,
+    query.transportistaId,
+    'transportistaId',
+    (id) => resolverTransportistaUuid(pool, id),
+  );
+  if (transportistaUuids === null) return null;
+  if (transportistaUuids !== undefined) {
+    condicions.push(`c.transportista_id = ANY($${valors.length + 1}::uuid[])`);
+    valors.push(transportistaUuids);
+  }
+  const clientUuid = await resolverFiltreEntitat(reply, query.clientId, 'clientId', (id) =>
+    resolverClientUuid(pool, id),
+  );
+  if (clientUuid === null) return null;
+  if (clientUuid !== undefined) {
+    condicions.push(`c.client_id = $${valors.length + 1}`);
+    valors.push(clientUuid);
+  }
+  // Tasca 41: comandes sense client assignat (el grup "Sense client" del
+  // Panell de Compres demana així el seu detall).
+  if (query.senseClient === 'si') condicions.push('c.client_id IS NULL');
+  // Tasca 48 (Ari, 20/10/2026): origen de la comanda (`OrigenComandaApi.codi`,
+  // coincidència exacta), mateix criteri que `?origen=` a GET /comandes.
+  if (typeof query.origen === 'string' && query.origen !== '') {
+    condicions.push(`oc.codi = $${valors.length + 1}`);
+    valors.push(query.origen);
+  }
+  afegirFiltreProductes(query.producte, condicions, valors);
+  afegirCercaProducte(query.cercaProducte, condicions, valors);
+  // Peticions d'Ari (29/09/2026): categoria de l'article (mateix criteri
+  // que a /panells/obrador) i línies pendents / ja enviades.
+  const categoriaUuid = await resolverFiltreEntitat(reply, query.categoriaId, 'categoriaId', (id) =>
+    resolverCategoriaUuid(pool, id),
+  );
+  if (categoriaUuid === null) return null;
+  if (categoriaUuid !== undefined) {
+    condicions.push(`p.categoria_id = $${valors.length + 1}`);
+    valors.push(categoriaUuid);
+  }
+  if (query.confirmacio !== undefined && query.confirmacio !== '') {
+    if (query.confirmacio === 'pendents') {
+      condicions.push('cl.confirmat_a IS NULL');
+    } else if (query.confirmacio === 'confirmades') {
+      condicions.push('cl.confirmat_a IS NOT NULL');
+    } else {
+      enviarValidacio(reply, 'confirmacio ha de ser pendents o confirmades', [
+        { camp: 'confirmacio', missatge: 'ha de ser pendents o confirmades' },
+      ]);
+      return null;
+    }
+  }
+  // Tasca 23 (01/10/2026): línies amb / sense observacions d'EMPAQUETAT
+  // (camp de línia de la tasca 7).
+  const ambObservacions = `COALESCE(TRIM(cl.obs_empaquetat), '') <> ''`;
+  if (query.observacions === 'si') condicions.push(ambObservacions);
+  else if (query.observacions === 'no') condicions.push(`NOT ${ambObservacions}`);
+  else if (query.observacions !== undefined && query.observacions !== '') {
+    enviarValidacio(reply, 'observacions ha de ser si o no', [
+      { camp: 'observacions', missatge: 'ha de ser si o no' },
+    ]);
+    return null;
+  }
+  return { condicions, valors };
+}
+
+/** FROM + JOINs que acompanyen `construirFiltresEmpaquetat` (sense el WHERE). */
+const BASE_EMPAQUETAT = `
+  FROM comanda_linia cl
+  JOIN comanda c ON c.id = cl.comanda_id
+  JOIN origen_comanda oc ON oc.id = c.origen_id
+  LEFT JOIN client cli ON cli.id = c.client_id
+  LEFT JOIN transportista tr ON tr.id = c.transportista_id
+  LEFT JOIN producte p ON p.id = cl.producte_id
+  LEFT JOIN categoria_producte cat ON cat.id = p.categoria_id
+`;
 
 export function registrarRutesPanells(fastify: FastifyInstance): void {
   // ── 4.6 · Panell Oficina ─────────────────────────────────────────────
@@ -587,113 +701,24 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
     },
   );
 
-  // ── 4.8 · Panell Empaquetat (único con edición — GET es sólo lectura, PATCH en lliurament.ts) ──
+  // ── 4.8 · Panell Empaquetat (GET es sólo lectura, PATCH en lliurament.ts) ──
+  // También lo lee el Panell de Compres (tasca 41) para el detalle de cada
+  // cliente: por eso basta con cualquiera de los dos módulos.
   fastify.get(
     '/panells/empaquetat',
-    { preHandler: crearGuardaModul('panell-empaquetat') },
+    { preHandler: crearGuardaModul(MODULS_LLIURAMENT) },
     async (req, reply) => {
       const query = req.query as Record<string, unknown>;
       const { pagina, mida, offset } = parsearPaginacio(query);
 
-      // Fora: cancel·lades i esborranys (tasca 33), mateix criteri que Obrador.
-      const condicions: string[] = [
-        'NOT cl.esborrat',
-        `c.estat NOT IN ('cancellada', 'esborrany')`,
-      ];
-      const valors: unknown[] = [];
-
-      if (typeof query.dataExpedicioDes === 'string' && query.dataExpedicioDes !== '') {
-        condicions.push(`c.data_expedicio >= $${valors.length + 1}`);
-        valors.push(query.dataExpedicioDes);
-      }
-      if (typeof query.dataExpedicioFins === 'string' && query.dataExpedicioFins !== '') {
-        condicions.push(condicioDataFinsInclusiva('c.data_expedicio', valors.length + 1));
-        valors.push(query.dataExpedicioFins);
-      }
-      // Mismo criterio que dataExpedicioDes/Fins de arriba, sobre la fecha
-      // de entrega del pedido.
-      if (typeof query.dataLliuramentDes === 'string' && query.dataLliuramentDes !== '') {
-        condicions.push(`c.data_lliurament >= $${valors.length + 1}`);
-        valors.push(query.dataLliuramentDes);
-      }
-      if (typeof query.dataLliuramentFins === 'string' && query.dataLliuramentFins !== '') {
-        condicions.push(condicioDataFinsInclusiva('c.data_lliurament', valors.length + 1));
-        valors.push(query.dataLliuramentFins);
-      }
-      // Un o més transportistes (tasca 22): OR entre ells.
-      const transportistaUuids = await resolverFiltreEntitats(
-        reply,
-        query.transportistaId,
-        'transportistaId',
-        (id) => resolverTransportistaUuid(pool, id),
-      );
-      if (transportistaUuids === null) return;
-      if (transportistaUuids !== undefined) {
-        condicions.push(`c.transportista_id = ANY($${valors.length + 1}::uuid[])`);
-        valors.push(transportistaUuids);
-      }
-      const clientUuid = await resolverFiltreEntitat(reply, query.clientId, 'clientId', (id) =>
-        resolverClientUuid(pool, id),
-      );
-      if (clientUuid === null) return;
-      if (clientUuid !== undefined) {
-        condicions.push(`c.client_id = $${valors.length + 1}`);
-        valors.push(clientUuid);
-      }
-      // Tasca 48 (Ari, 20/10/2026): origen de la comanda (`OrigenComandaApi.codi`,
-      // coincidència exacta), mateix criteri que `?origen=` a GET /comandes.
-      if (typeof query.origen === 'string' && query.origen !== '') {
-        condicions.push(`oc.codi = $${valors.length + 1}`);
-        valors.push(query.origen);
-      }
-      afegirFiltreProductes(query.producte, condicions, valors);
-      afegirCercaProducte(query.cercaProducte, condicions, valors);
-      // Peticions d'Ari (29/09/2026): categoria de l'article (mateix criteri
-      // que a /panells/obrador) i línies pendents / ja enviades.
-      const categoriaUuid = await resolverFiltreEntitat(
-        reply,
-        query.categoriaId,
-        'categoriaId',
-        (id) => resolverCategoriaUuid(pool, id),
-      );
-      if (categoriaUuid === null) return;
-      if (categoriaUuid !== undefined) {
-        condicions.push(`p.categoria_id = $${valors.length + 1}`);
-        valors.push(categoriaUuid);
-      }
-      if (query.confirmacio !== undefined && query.confirmacio !== '') {
-        if (query.confirmacio === 'pendents') {
-          condicions.push('cl.confirmat_a IS NULL');
-        } else if (query.confirmacio === 'confirmades') {
-          condicions.push('cl.confirmat_a IS NOT NULL');
-        } else {
-          return enviarValidacio(reply, 'confirmacio ha de ser pendents o confirmades', [
-            { camp: 'confirmacio', missatge: 'ha de ser pendents o confirmades' },
-          ]);
-        }
-      }
-      // Tasca 23 (01/10/2026): línies amb / sense observacions d'EMPAQUETAT
-      // (camp de línia de la tasca 7).
-      const ambObservacions = `COALESCE(TRIM(cl.obs_empaquetat), '') <> ''`;
-      if (query.observacions === 'si') condicions.push(ambObservacions);
-      else if (query.observacions === 'no') condicions.push(`NOT ${ambObservacions}`);
-      else if (query.observacions !== undefined && query.observacions !== '') {
-        return enviarValidacio(reply, 'observacions ha de ser si o no', [
-          { camp: 'observacions', missatge: 'ha de ser si o no' },
-        ]);
-      }
-      const where = `WHERE ${condicions.join(' AND ')}`;
-
-      const base = `
-      FROM comanda_linia cl
-      JOIN comanda c ON c.id = cl.comanda_id
-      JOIN origen_comanda oc ON oc.id = c.origen_id
-      LEFT JOIN client cli ON cli.id = c.client_id
-      LEFT JOIN transportista tr ON tr.id = c.transportista_id
-      LEFT JOIN producte p ON p.id = cl.producte_id
-      LEFT JOIN categoria_producte cat ON cat.id = p.categoria_id
-      ${where}
-    `;
+      const filtres = await construirFiltresEmpaquetat(reply, query);
+      if (filtres === null) return;
+      const { condicions, valors } = filtres;
+      const base = `${BASE_EMPAQUETAT} WHERE ${condicions.join(' AND ')}`;
+      // Tasca 41: `?ordre=comanda` (detall d'un client al Panell de Compres)
+      // manté les línies de cada comanda juntes i en el seu ordre, sense
+      // "pendents primer": una línia no canvia de lloc en desar-la.
+      const ordrePerComanda = query.ordre === 'comanda';
 
       const totals = await pool.query<{
         linies: string;
@@ -744,7 +769,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
        -- Mismo criterio que /panells/obrador (ver comentario ahí): pendents
        -- (confirmat_a IS NULL) primer, per defecte, sense tocar la resta de
        -- l'ordre existent.
-       ORDER BY (cl.confirmat_a IS NOT NULL) ASC,
+       ORDER BY ${ordrePerComanda ? '' : '(cl.confirmat_a IS NOT NULL) ASC,'}
                 c.data_expedicio ASC NULLS LAST, c.num ASC, cl.ordinal ASC
        LIMIT $${valors.length + 1} OFFSET $${valors.length + 2}`,
         [...valors, mida, offset],
@@ -790,6 +815,108 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         dades,
         paginacio: construirPaginacio(pagina, mida, totalLinies),
       };
+    },
+  );
+
+  // ── 4.8 bis · Panell de Compres (tasca 41) ───────────────────────────
+  // La mateixa informació que Empaquetat (mateixos filtres, mateixes
+  // exclusions de cancel·lades i esborranys) acumulada per client: una fila
+  // per client amb la suma de les seves línies. El detall d'un client és
+  // GET /panells/empaquetat amb `clientId` (o `senseClient=si`), i s'edita
+  // amb el mateix PATCH de lliurament. Paginat per clients: a diferència de
+  // l'acumulat d'Obrador (com a molt una fila per article), el nombre de
+  // clients no té sostre.
+  fastify.get(
+    '/panells/compres',
+    { preHandler: crearGuardaModul('panell-compres') },
+    async (req, reply) => {
+      const query = req.query as Record<string, unknown>;
+      const { pagina, mida, offset } = parsearPaginacio(query);
+
+      const filtres = await construirFiltresEmpaquetat(reply, query);
+      if (filtres === null) return;
+      const { condicions, valors } = filtres;
+      const base = `${BASE_EMPAQUETAT} WHERE ${condicions.join(' AND ')}`;
+
+      const sumes = `
+              COALESCE(SUM(cl.unitats_demanades), 0)::numeric(10,2) AS unitats_demanades,
+              COALESCE(SUM(cl.unitats_lliurades), 0)::numeric(10,2) AS unitats_lliurades,
+              COALESCE(SUM(cl.pes_calculat_kg), 0)::numeric(14,3) AS kg_demanats,
+              COALESCE(SUM(cl.kg_lliurats), 0)::numeric(14,3) AS kg_lliurats,
+              count(DISTINCT c.id) AS comandes,
+              count(*) AS linies,
+              count(*) FILTER (WHERE cl.confirmat_a IS NOT NULL) AS linies_confirmades`;
+      interface Sumes {
+        unitats_demanades: string;
+        unitats_lliurades: string;
+        kg_demanats: string;
+        kg_lliurats: string;
+        comandes: string;
+        linies: string;
+        linies_confirmades: string;
+      }
+
+      // Les comandes sense client fan un sol grup ("Sense client").
+      const totals = await pool.query<Sumes & { clients: string }>(
+        `SELECT ${sumes},
+              (count(DISTINCT c.client_id)
+                + COALESCE(bool_or(c.client_id IS NULL), false)::int) AS clients
+       ${base}`,
+        valors,
+      );
+
+      const files = await pool.query<
+        Sumes & {
+          client_id_seq: string | null;
+          client_codi: string | null;
+          client_nom: string | null;
+        }
+      >(
+        `SELECT cli.id_seq AS client_id_seq, cli.codi AS client_codi, cli.nom AS client_nom,
+              ${sumes}
+       ${base}
+       GROUP BY cli.id
+       -- Per nom, i "Sense client" al final. A propòsit NO "pendents primer"
+       -- com a Empaquetat: en desar l'última línia pendent d'un client, la
+       -- seva fila saltaria al final de la llista mentre s'hi està treballant.
+       ORDER BY (cli.id IS NULL) ASC, LOWER(cli.nom) ASC NULLS LAST, cli.id_seq ASC
+       LIMIT $${valors.length + 1} OFFSET $${valors.length + 2}`,
+        [...valors, mida, offset],
+      );
+
+      const dades: FilaPanellCompresApi[] = files.rows.map((f) => ({
+        client:
+          f.client_id_seq === null
+            ? null
+            : { id: Number(f.client_id_seq), codi: f.client_codi, nom: f.client_nom },
+        comandes: Number(f.comandes),
+        linies: Number(f.linies),
+        liniesConfirmades: Number(f.linies_confirmades),
+        unitatsDemanades: f.unitats_demanades,
+        unitatsLliurades: f.unitats_lliurades,
+        kgDemanats: f.kg_demanats,
+        kgLliurats: f.kg_lliurats,
+      }));
+
+      const t = totals.rows[0];
+      const totalLinies = Number(t?.linies ?? 0);
+      const liniesConfirmades = Number(t?.linies_confirmades ?? 0);
+      const totalClients = Number(t?.clients ?? 0);
+      return {
+        totals: {
+          clients: totalClients,
+          comandes: Number(t?.comandes ?? 0),
+          linies: totalLinies,
+          unitatsDemanades: t?.unitats_demanades ?? '0.00',
+          unitatsLliurades: t?.unitats_lliurades ?? '0.00',
+          kgDemanats: t?.kg_demanats ?? '0.000',
+          kgLliurats: t?.kg_lliurats ?? '0.000',
+          liniesConfirmades,
+          liniesPendents: totalLinies - liniesConfirmades,
+        },
+        dades,
+        paginacio: construirPaginacio(pagina, mida, totalClients),
+      } satisfies PanellCompresApi;
     },
   );
 

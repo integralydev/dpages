@@ -681,6 +681,41 @@ export interface PanellEmpaquetatApi {
   paginacio: Paginacio;
 }
 
+// ── 4.8 bis · Panell de Compres (tasca 41) ───────────────────────────────
+
+/** Els mateixos totals que Empaquetat, més quants clients i comandes hi ha. */
+export interface TotalsPanellCompresApi extends TotalsPanellEmpaquetatApi {
+  clients: number;
+  comandes: number;
+}
+
+/**
+ * Una fila per client a `GET /panells/compres`, amb la suma de les seves
+ * línies que compleixen els filtres (els mateixos de `GET /panells/empaquetat`).
+ * El detall es demana a `GET /panells/empaquetat` amb `clientId` (o
+ * `senseClient=si` quan `client` és `null`).
+ */
+export interface FilaPanellCompresApi {
+  /** `null` = comandes sense client assignat (un sol grup). */
+  client: { id: number; codi: string | null; nom: string | null } | null;
+  comandes: number;
+  linies: number;
+  liniesConfirmades: number;
+  /** SUM de NUMERIC(10,2) com a string. */
+  unitatsDemanades: string;
+  unitatsLliurades: string;
+  /** SUM de NUMERIC(14,3) com a string. */
+  kgDemanats: string;
+  kgLliurats: string;
+}
+
+export interface PanellCompresApi {
+  totals: TotalsPanellCompresApi;
+  dades: FilaPanellCompresApi[];
+  /** Paginat per clients (`total` = nombre de clients). */
+  paginacio: Paginacio;
+}
+
 // ── 4.9 · Panell Producció ────────────────────────────────────────────────
 
 /**

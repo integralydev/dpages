@@ -1,7 +1,13 @@
 import type { LliuramentDesferRespostaApi } from '@dpages/shared';
 import type { FastifyInstance } from 'fastify';
 import { pool } from '../../../db/pool.js';
-import { crearGuardaModul, enviarConflicte, enviarNoTrobat, parsearIdPublic } from './comu.js';
+import {
+  crearGuardaModul,
+  enviarConflicte,
+  enviarNoTrobat,
+  MODULS_LLIURAMENT,
+  parsearIdPublic,
+} from './comu.js';
 import { reobrirSiTancada } from './estat-automatic.js';
 
 /**
@@ -22,7 +28,7 @@ import { reobrirSiTancada } from './estat-automatic.js';
 export function registrarRutaDesferLliurament(fastify: FastifyInstance): void {
   fastify.patch(
     '/comandes/:comandaId/linies/:liniaId/lliurament/desfer',
-    { preHandler: crearGuardaModul('panell-empaquetat') },
+    { preHandler: crearGuardaModul(MODULS_LLIURAMENT) },
     async (req, reply) => {
       const params = req.params as { comandaId: string; liniaId: string };
       const comandaIdPublic = parsearIdPublic(params.comandaId);

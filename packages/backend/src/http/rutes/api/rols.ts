@@ -39,6 +39,7 @@ export const MODULS_VALIDS = [
   'panell-oficina',
   'panell-obrador',
   'panell-empaquetat',
+  'panell-compres',
   'panell-produccio',
   'usuaris',
   'rols',

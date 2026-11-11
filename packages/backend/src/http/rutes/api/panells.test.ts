@@ -1,5 +1,6 @@
 import type {
   ComandaDetallApi,
+  PanellCompresApi,
   PanellEmpaquetatApi,
   PanellObradorAcumulatApi,
   PanellObradorApi,
@@ -1513,6 +1514,155 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
       // Pel principi, no substring: "llom" no troba "Cap de llom".
       expect(await cerca('llom Tasca45')).toEqual([]);
     }
+
+    await fastify.close();
+  });
+
+  it('tasca 41 — GET /panells/compres acumula per client i el detall es pot editar', async () => {
+    const fastify = construirServidor();
+    const producte = await entorn.poolTest.query<{ id_seq: string }>(
+      `INSERT INTO producte (codi, descripcio, pes_kg, preu_venda, tipus)
+       VALUES ('T41P', 'Producte Tasca41', '2.000', '5.00', 'simple') RETURNING id_seq`,
+    );
+    const producteT41 = Number(producte.rows[0]!.id_seq);
+    const clients: number[] = [];
+    for (const nom of ['Tasca41 Bar', 'Tasca41 Alberg']) {
+      const client = await entorn.poolTest.query<{ id_seq: string }>(
+        `INSERT INTO client (nom, poblacio) VALUES ($1, 'Vic') RETURNING id_seq`,
+        [nom],
+      );
+      clients.push(Number(client.rows[0]!.id_seq));
+    }
+    const [bar, alberg] = clients as [number, number];
+
+    const crear = async (clientId: number | undefined, unitats: number[]) => {
+      const res = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          ...(clientId !== undefined ? { clientId } : {}),
+          linies: unitats.map((unitatsDemanades) => ({
+            dataProduccio: '2026-08-01T00:00:00Z',
+            producteId: producteT41,
+            unitatsDemanades,
+          })),
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      return cuerpoJson<ComandaDetallApi>(res);
+    };
+    // Bar: dues comandes (3 línies). Alberg: una comanda (1 línia).
+    const comandaBar = await crear(bar, [1, 2]);
+    await crear(bar, [3]);
+    await crear(alberg, [4]);
+    // Les comandes creades amb POST neixen en esborrany: s'obren perquè
+    // comptin al panell (mateix criteri que Empaquetat).
+    await entorn.poolTest.query(
+      `UPDATE comanda SET estat = 'oberta'
+       WHERE id IN (SELECT comanda_id FROM comanda_linia cl
+                    JOIN producte p ON p.id = cl.producte_id WHERE p.codi = 'T41P')`,
+    );
+
+    const compres = async (extra = '') => {
+      const res = await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/panells/compres?cercaProducte=T41P${extra}`,
+      });
+      expect(res.statusCode).toBe(200);
+      return cuerpoJson<PanellCompresApi>(res);
+    };
+
+    const tot = await compres();
+    expect(tot.totals).toMatchObject({
+      clients: 2,
+      comandes: 3,
+      linies: 4,
+      unitatsDemanades: '10.00',
+      kgDemanats: '20.000',
+      liniesConfirmades: 0,
+      liniesPendents: 4,
+    });
+    expect(tot.paginacio.total).toBe(2);
+    // Ordenats per nom.
+    expect(tot.dades.map((fila) => fila.client?.nom)).toEqual(['Tasca41 Alberg', 'Tasca41 Bar']);
+    expect(tot.dades[1]).toMatchObject({
+      client: { id: bar },
+      comandes: 2,
+      linies: 3,
+      liniesConfirmades: 0,
+      unitatsDemanades: '6.00',
+      kgDemanats: '12.000',
+      unitatsLliurades: '0.00',
+      kgLliurats: '0.000',
+    });
+
+    // Paginat per clients.
+    const pagina2 = await compres('&mida=1&pagina=2');
+    expect(pagina2.dades.map((fila) => fila.client?.nom)).toEqual(['Tasca41 Bar']);
+    expect(pagina2.totals.clients).toBe(2);
+
+    // Mateixos filtres que Empaquetat.
+    const nomesBar = await compres(`&clientId=${bar}`);
+    expect(nomesBar.dades).toHaveLength(1);
+    expect(nomesBar.totals.linies).toBe(3);
+
+    // El detall d'un client surt de /panells/empaquetat amb clientId.
+    const detall = cuerpoJson<PanellEmpaquetatApi>(
+      await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/panells/empaquetat?cercaProducte=T41P&clientId=${bar}`,
+      }),
+    );
+    expect(detall.dades).toHaveLength(3);
+
+    // Editar una línia (unitats i kg lliurats) es reflecteix a l'acumulat.
+    const linia = comandaBar.linies[0]!;
+    const patch = await fastify.inject({
+      method: 'PATCH',
+      url: `/api/v1/comandes/${comandaBar.id}/linies/${linia.id}/lliurament`,
+      payload: { unitatsLliurades: 1, kgLliurats: '1.850' },
+    });
+    expect(patch.statusCode).toBe(200);
+    const despres = await compres(`&clientId=${bar}`);
+    expect(despres.dades[0]).toMatchObject({
+      liniesConfirmades: 1,
+      unitatsLliurades: '1.00',
+      kgLliurats: '1.850',
+    });
+    expect((await compres('&confirmacio=confirmades')).dades).toHaveLength(1);
+
+    // Amb ordre=comanda la línia desada no salta al final (sense "pendents
+    // primer"); per defecte, sí.
+    const idsDetall = async (extra: string) =>
+      cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: `/api/v1/panells/empaquetat?cercaProducte=T41P&clientId=${bar}${extra}`,
+        }),
+      ).dades.map((fila) => fila.liniaId);
+    expect((await idsDetall('&ordre=comanda'))[0]).toBe(linia.id);
+    expect((await idsDetall('')).at(-1)).toBe(linia.id);
+
+    // Comandes sense client: un sol grup, i el seu detall amb senseClient=si.
+    await crear(undefined, [5]);
+    await entorn.poolTest.query(
+      `UPDATE comanda SET estat = 'oberta' WHERE client_id IS NULL AND id IN
+         (SELECT comanda_id FROM comanda_linia cl
+          JOIN producte p ON p.id = cl.producte_id WHERE p.codi = 'T41P')`,
+    );
+    const ambSenseClient = await compres();
+    expect(ambSenseClient.totals.clients).toBe(3);
+    expect(ambSenseClient.dades.at(-1)?.client).toBeNull();
+    const detallSenseClient = cuerpoJson<PanellEmpaquetatApi>(
+      await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/empaquetat?cercaProducte=T41P&senseClient=si',
+      }),
+    );
+    expect(detallSenseClient.dades).toHaveLength(1);
 
     await fastify.close();
   });
