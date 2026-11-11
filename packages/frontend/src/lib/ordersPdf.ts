@@ -651,5 +651,5 @@ export async function descarregarPdfComandes({
 
 /** Unitats sense decimals quan són enteres (3, no 3,00). */
 function formatUnitats(unitats: string): string {
-  return Number.isInteger(Number(unitats)) ? String(Number(unitats)) : formatDecimal(unitats, 2);
+  return formatDecimal(unitats, Number.isInteger(Number(unitats)) ? 0 : 2);
 }

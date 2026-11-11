@@ -142,6 +142,11 @@ Si un cambio de código contradice un ADR, se actualiza el ADR primero.
 - RGPD: nunca loggear datos personales (nombres, emails, teléfonos,
   direcciones, NIF). Fixtures y ejemplos siempre anonimizados
   (`[redactat]` donde haga falta).
+- Cantidades e importes en pantalla y en los PDF: punto de millares y coma
+  decimal (`1.058,465`), siempre con `formatDecimal`/`formatNombre` de
+  `packages/frontend/src/lib/decimals.ts` (petición del cliente, 11/11/2026).
+  Nunca en el valor de un campo editable: al escribir, el punto se acepta como
+  separador decimal.
 
 ## Pendiente de definición con el cliente
 

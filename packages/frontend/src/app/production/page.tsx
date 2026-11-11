@@ -13,7 +13,7 @@ import { StatCard } from '@/components/ui/StatCard';
 import { useCatalog } from '@/hooks/useCatalog';
 import { useProductionPanell } from '@/hooks/useProductionPanell';
 import type { PanellProduccioFilaApi } from '@/lib/api';
-import { formatDecimal } from '@/lib/decimals';
+import { agruparMilers, formatDecimal } from '@/lib/decimals';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
 
 const ALL = 'Totes';
@@ -22,11 +22,11 @@ const AGRUPACIONS_RENDIMENT = ['KG', 'MAGRE', 'PAQ'];
 /**
  * rendiment/diferencia ja arriben com a string amb la precisió que va
  * triar el backend segons el tipus d'agrupació (2 decimals a PAQ, 3 a KG,
- * `panells.ts`) — acá només es converteix el separador, mai es
- * reparseja/redondeja de nou.
+ * `panells.ts`) — acá només es converteix el separador (i s'hi posa el
+ * punt de milers), mai es reparseja/redondeja de nou.
  */
 function formatBackendDecimal(value: string | null): string {
-  return value !== null ? value.replace('.', ',') : '—';
+  return value !== null ? agruparMilers(value.replace('.', ',')) : '—';
 }
 
 function isNegative(value: string | null): boolean {
