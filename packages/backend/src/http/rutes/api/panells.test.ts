@@ -1490,10 +1490,13 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
     });
 
     for (const panell of ['obrador', 'empaquetat'] as const) {
-      const cerca = async (text: string) => {
+      const cerca = async (text: string | string[]) => {
+        const params = (Array.isArray(text) ? text : [text])
+          .map((item) => `cercaProducte=${encodeURIComponent(item)}`)
+          .join('&');
         const res = await fastify.inject({
           method: 'GET',
-          url: `/api/v1/panells/${panell}?cercaProducte=${encodeURIComponent(text)}&mida=200`,
+          url: `/api/v1/panells/${panell}?${params}&mida=200`,
         });
         expect(res.statusCode).toBe(200);
         const cos = cuerpoJson<{ dades: { producte: { descripcio: string } | string }[] }>(res);
@@ -1512,6 +1515,13 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
       expect(await cerca('t45bott')).toEqual(['Botifarra Tasca45 tallada']);
       // Pel principi, no substring: "llom" no troba "Cap de llom".
       expect(await cerca('llom Tasca45')).toEqual([]);
+      // Tasca 52: diverses cerques alhora = OR dels prefixos.
+      expect(await cerca(['t45bott', 'CAP DE LLOM TASCA45'])).toEqual([
+        'Botifarra Tasca45 tallada',
+        'Cap de llom Tasca45',
+      ]);
+      // Un % o _ escrit per l'usuari és literal, no comodí.
+      expect(await cerca(['t45%', 'T45_OTT'])).toEqual([]);
     }
 
     await fastify.close();
