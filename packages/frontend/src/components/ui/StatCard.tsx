@@ -1,3 +1,5 @@
+import { formatNombre } from '@/lib/decimals';
+
 export function StatCard({
   label,
   value,
@@ -15,7 +17,7 @@ export function StatCard({
       <p
         className={`mt-1 text-2xl font-bold whitespace-nowrap ${alert ? 'text-red-600' : 'text-gray-900'}`}
       >
-        {value}
+        {typeof value === 'number' ? formatNombre(value) : value}
       </p>
       {secondary && (
         <p title={secondary} className="mt-1 text-2xl font-bold break-words text-gray-500">

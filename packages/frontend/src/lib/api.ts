@@ -63,6 +63,9 @@ export type {
   PanellEmpaquetatApi,
   FilaPanellEmpaquetatApi,
   TotalsPanellEmpaquetatApi,
+  PanellCompresApi,
+  FilaPanellCompresApi,
+  TotalsPanellCompresApi,
   PanellProduccioApi,
   PanellProduccioFilaApi,
 } from '@dpages/shared';

@@ -14,7 +14,7 @@ Monorepo con npm workspaces:
   compilado (`dist/`), no vía paths de TypeScript.
 - `packages/backend` — API (Fastify), integración de sólo lectura con
   WooCommerce, acceso a datos (PostgreSQL, sin ORM).
-- `packages/frontend` — app Next.js con los cuatro paneles operativos
+- `packages/frontend` — app Next.js con los cinco paneles operativos
   (oficina, obrador, empaquetado, producción) y las pantallas de gestión
   (comandes, catàleg, tarifes, clients, usuaris).
 

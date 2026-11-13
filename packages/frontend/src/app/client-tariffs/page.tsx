@@ -98,8 +98,8 @@ export default function ClientTariffsPage() {
   return (
     <div>
       <PageHeader
-        title="Tarifes per client"
-        subtitle="Assignació de tarifes als clients."
+        title="Fitxes de clients"
+        subtitle="Fitxes dels clients"
         action={{
           label: 'Nou client',
           icon: <Plus className="h-4 w-4" />,

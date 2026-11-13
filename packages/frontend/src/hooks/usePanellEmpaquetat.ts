@@ -24,6 +24,10 @@ export type PackagingPanelFilters = {
   /** Un o més transportistes (tasca 22); el backend en fa un OR. */
   transportistaId?: number[];
   clientId?: number;
+  /** Tasca 41: comandes sense client (detall del grup "Sense client" del Panell de Compres). */
+  senseClient?: 'si';
+  /** Tasca 41: línies agrupades per comanda, sense "pendents primer" (no salten en desar-les). */
+  ordre?: 'comanda';
   dataLliuramentDes?: string;
   dataLliuramentFins?: string;
   /** Un o més productes (descripció exacta); el backend en fa un OR. */

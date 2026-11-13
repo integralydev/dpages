@@ -31,8 +31,11 @@ export type WorkshopPanelFilters = {
   treball?: 'pendents' | 'fets';
   /** Un o més productes (descripció exacta); el backend en fa un OR. */
   producte?: string[];
-  /** Tasca 45: codi o descripció que comença pel text. */
-  cercaProducte?: string;
+  /**
+   * Tasca 45: codi o descripció que comença pel text. Tasca 52: un o més
+   * textos; el backend en fa un OR.
+   */
+  cercaProducte?: string[];
   /** Tasca 29: les línies d'un sol producte (desplegar la vista acumulada). */
   producteId?: number;
   format?: string;

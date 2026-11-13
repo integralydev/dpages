@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { pool } from '../../../db/pool.js';
 import {
   crearGuardaModul,
+  MODULS_LLIURAMENT,
   enviarConflicte,
   enviarNoTrobat,
   enviarValidacio,
@@ -29,7 +30,7 @@ import { tancarSiTotLliurat } from './estat-automatic.js';
 export function registrarRutaLliurament(fastify: FastifyInstance): void {
   fastify.patch(
     '/comandes/:comandaId/linies/:liniaId/lliurament',
-    { preHandler: crearGuardaModul('panell-empaquetat') },
+    { preHandler: crearGuardaModul(MODULS_LLIURAMENT) },
     async (req, reply) => {
       const params = req.params as { comandaId: string; liniaId: string };
       const comandaIdPublic = parsearIdPublic(params.comandaId);

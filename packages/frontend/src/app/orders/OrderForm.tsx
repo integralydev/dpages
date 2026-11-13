@@ -33,7 +33,7 @@ import {
   type TransportistaApi,
 } from '@/lib/api';
 import { ESTAT_LABELS } from '@/lib/comandaEstat';
-import { formatDecimal, parseDecimalInput } from '@/lib/decimals';
+import { formatDecimal, formatNombre, parseDecimalInput } from '@/lib/decimals';
 import { calculateOrderedWeightKg } from '@/lib/orderCalculations';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
 
@@ -542,7 +542,7 @@ function LineFormCard({
           {!line.kgEditable ? (
             <input
               type="text"
-              value={Number(line.kgDemanats).toFixed(3).replace('.', ',')}
+              value={formatDecimal(line.kgDemanats, 3)}
               disabled
               className="w-full rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-right text-sm text-gray-400"
             />
@@ -559,7 +559,7 @@ function LineFormCard({
         <div className="flex flex-col gap-1 text-sm">
           <span className="text-xs text-gray-500">Pes lliurat (kg)</span>
           <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-right text-gray-500">
-            {line.kgLliurats}
+            {formatDecimal(line.kgLliurats, 3)}
           </span>
         </div>
       </div>
@@ -1309,7 +1309,7 @@ export const OrderForm = forwardRef<
             />
           ))}
           <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-right text-sm font-semibold text-gray-900">
-            Total pes demanat (kg): {totalOrderedWeightKg.toFixed(3).replace('.', ',')}
+            Total pes demanat (kg): {formatNombre(totalOrderedWeightKg, 3)}
           </div>
         </div>
 
@@ -1443,7 +1443,7 @@ export const OrderForm = forwardRef<
                         {!line.kgEditable ? (
                           <input
                             type="text"
-                            value={Number(line.kgDemanats).toFixed(3).replace('.', ',')}
+                            value={formatDecimal(line.kgDemanats, 3)}
                             disabled
                             className="w-full rounded-md border border-gray-200 bg-gray-50 px-1.5 py-1 text-right text-sm text-gray-400"
                           />
@@ -1461,7 +1461,9 @@ export const OrderForm = forwardRef<
                           />
                         )}
                       </td>
-                      <td className="px-1.5 py-2 text-right text-gray-500">{line.kgLliurats}</td>
+                      <td className="px-1.5 py-2 text-right text-gray-500">
+                        {formatDecimal(line.kgLliurats, 3)}
+                      </td>
                       <td className="px-1.5 py-2">
                         <div className="flex items-center justify-end gap-1">
                           {renderMoveButtons(line, index)}
@@ -1520,7 +1522,7 @@ export const OrderForm = forwardRef<
                   colSpan={11}
                   className="px-2 py-3 text-right text-sm font-semibold text-gray-900"
                 >
-                  Total pes demanat (kg): {totalOrderedWeightKg.toFixed(3).replace('.', ',')}
+                  Total pes demanat (kg): {formatNombre(totalOrderedWeightKg, 3)}
                 </td>
               </tr>
             </tfoot>

@@ -16,7 +16,7 @@ la orientación general en `CLAUDE.md`.
 packages/
   shared/     @dpages/shared — tipos compartidos backend↔frontend, se consume compilado (dist/, ADR-010)
   backend/    @dpages/backend — API Fastify, migraciones SQL, ingesta/transformación WooCommerce
-  frontend/   Next.js (App Router) — paneles oficina/obrador/empaquetado/producció
+  frontend/   Next.js (App Router) — paneles oficina/obrador/empaquetado/compres/producció
 docs/         contexto de negocio, ADRs, contrato de API (openapi.yaml), infraestructura GCP
 infra/gcp/    notas de infraestructura de Google Cloud
 .github/      workflows de CI (ci.yml) y deploy manual (deploy.yml)
@@ -70,6 +70,9 @@ infra/gcp/    notas de infraestructura de Google Cloud
 - **Google Cloud Run** (región `europe-west1`, RGPD) — backend y frontend,
   cada uno con su `Dockerfile`.
 - Imágenes en **Artifact Registry** (`europe-west1-docker.pkg.dev`).
+- **Cloud Monitoring**: alerta por correo si la tarea `sync-comandes`
+  falla 3+ veces en 20 min (métrica de logs `sync_comandes_fallades`; ver
+  `infra/gcp/README.md`).
 - **GitHub Actions**: `ci.yml` (lint, typecheck, test, build en cada push) y
   `deploy.yml` (deploy **manual** vía `workflow_dispatch`).
 

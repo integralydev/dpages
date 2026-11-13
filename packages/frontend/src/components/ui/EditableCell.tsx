@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { formatNombre } from '@/lib/decimals';
 
 function defaultFormat(value: number) {
-  return `${value.toFixed(2).replace('.', ',')} €`;
+  return `${formatNombre(value, 2)} €`;
 }
 
 export function EditableCell({

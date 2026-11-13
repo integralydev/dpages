@@ -372,6 +372,23 @@ describe('API negoci — guard por módulo, contra los 6 roles reales (B1, halla
       await denegat.close();
     });
 
+    it('tasca 41 — GET /panells/compres: Empaquetat 200, Oficina i Obrador 403', async () => {
+      const ok = construirServidor();
+      await promoureARol(entorn, ok, 'empaquetat');
+      expect((await ok.inject({ method: 'GET', url: '/api/v1/panells/compres' })).statusCode).toBe(
+        200,
+      );
+      await ok.close();
+
+      for (const rol of ['oficina', 'obrador'] as const) {
+        const denegat = construirServidor();
+        await promoureARol(entorn, denegat, rol);
+        const res = await denegat.inject({ method: 'GET', url: '/api/v1/panells/compres' });
+        expect(res.statusCode).toBe(403);
+        await denegat.close();
+      }
+    });
+
     it('GET /panells/produccio: Producció 200 (con nombrePorcs), Oficina 403', async () => {
       const ok = construirServidor();
       await promoureARol(entorn, ok, 'produccio');
@@ -473,6 +490,61 @@ describe('API negoci — guard por módulo, contra los 6 roles reales (B1, halla
       });
       expect(resDenegat.statusCode).toBe(403);
       await denegat.close();
+    });
+
+    // Tasca 41: els 6 rols reals que tenen Empaquetat també tenen Compres
+    // (migració 0025), així que no serveixen per provar cada mòdul per
+    // separat. Aquí sí que cal un rol sintètic amb UN sol dels dos mòduls:
+    // és el cas que justifica MODULS_LLIURAMENT (comu.ts).
+    async function assignarRolSintetic(
+      fastify: { inject: (opcions: { method: string; url: string }) => Promise<unknown> },
+      nom: string,
+      moduls: string[],
+    ): Promise<void> {
+      await fastify.inject({ method: 'GET', url: '/api/v1/jo' });
+      await entorn.poolTest.query(
+        `INSERT INTO rol (nom, moduls_permesos) VALUES ($1, $2)
+         ON CONFLICT (nom) DO UPDATE SET moduls_permesos = EXCLUDED.moduls_permesos`,
+        [nom, moduls],
+      );
+      await entorn.poolTest.query(
+        `UPDATE usuari SET rol_id = (SELECT id FROM rol WHERE nom = $1) WHERE firebase_uid = 'dev-sense-auth'`,
+        [nom],
+      );
+    }
+
+    it('tasca 41 — només panell-compres: llegeix i edita lliuraments, res més', async () => {
+      const fastify = construirServidor();
+      await assignarRolSintetic(fastify, 'Només Compres (test)', ['panell-compres']);
+      const estat = async (method: 'GET' | 'PATCH', url: string, payload?: object) =>
+        (await fastify.inject({ method, url: `/api/v1${url}`, ...(payload ? { payload } : {}) }))
+          .statusCode;
+
+      expect(await estat('GET', '/panells/compres')).toBe(200);
+      expect(await estat('GET', '/panells/empaquetat')).toBe(200);
+      const linia = `/comandes/${comandaId}/linies/${liniaId}`;
+      expect(
+        await estat('PATCH', `${linia}/lliurament`, { unitatsLliurades: 1, kgLliurats: '1.250' }),
+      ).toBe(200);
+      expect(await estat('PATCH', `${linia}/lliurament/desfer`)).toBe(200);
+
+      // Cap altre panell ni cap escriptura d'un altre mòdul.
+      expect(await estat('GET', '/panells/oficina')).toBe(403);
+      expect(await estat('GET', '/panells/obrador')).toBe(403);
+      expect(await estat('GET', '/panells/produccio?nombrePorcs=1')).toBe(403);
+      expect(await estat('GET', '/comandes')).toBe(403);
+      expect(await estat('PATCH', `${linia}/treball`, { marcat: true })).toBe(403);
+      await fastify.close();
+    });
+
+    it('tasca 41 — només panell-empaquetat: no veu el Panell de Compres', async () => {
+      const fastify = construirServidor();
+      await assignarRolSintetic(fastify, 'Només Empaquetat (test)', ['panell-empaquetat']);
+      const compres = await fastify.inject({ method: 'GET', url: '/api/v1/panells/compres' });
+      expect(compres.statusCode).toBe(403);
+      const empaquetat = await fastify.inject({ method: 'GET', url: '/api/v1/panells/empaquetat' });
+      expect(empaquetat.statusCode).toBe(200);
+      await fastify.close();
     });
   });
 

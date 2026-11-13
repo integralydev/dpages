@@ -15,17 +15,18 @@ import { useEditableRow } from '@/hooks/useEditableRow';
 import { usePigYields, type PigYieldPatch } from '@/hooks/usePigYields';
 import { ApiError, type RendimentPorcApi } from '@/lib/api';
 import { parseDecimalInput } from '@/lib/decimals';
+import { formatNombre } from '@/lib/decimals';
 import { calculatePigYieldTotal } from '@/lib/pigYieldCalculations';
 import { PigYieldFormModal } from './PigYieldFormModal';
 
 const ALL_CATEGORIES = 'Totes';
 
 function formatUnits(value: number) {
-  return value.toFixed(2).replace('.', ',');
+  return formatNombre(value, 2);
 }
 
 function formatKg(value: number) {
-  return value.toFixed(3).replace('.', ',');
+  return formatNombre(value, 3);
 }
 
 function PigYieldRow({

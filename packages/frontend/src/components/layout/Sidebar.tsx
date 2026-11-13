@@ -16,6 +16,7 @@ import {
   Menu,
   PackageCheck,
   PiggyBank,
+  ShoppingBasket,
   ShoppingCart,
   Truck,
   UserCog,
@@ -63,7 +64,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: 'Llistat de Tarifes', href: '/rates', modul: 'tarifes', icon: Euro },
       {
-        label: 'Tarifes per client',
+        label: 'Fitxes de clients',
         href: '/client-tariffs',
         modul: 'tarifes-clients',
         icon: ContactRound,
@@ -73,7 +74,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Panells',
     // Una icona per panell, relacionada amb el que s'hi fa: oficina,
-    // elaboració de la carn, caixes preparades i producció.
+    // elaboració de la carn, caixes preparades, compra de cada client i
+    // producció.
     items: [
       { label: 'Panell Oficina', href: '/office', modul: 'panell-oficina', icon: Briefcase },
       { label: 'Panell Obrador', href: '/workshop', modul: 'panell-obrador', icon: Beef },
@@ -82,6 +84,13 @@ const NAV_GROUPS: NavGroup[] = [
         href: '/packaging',
         modul: 'panell-empaquetat',
         icon: PackageCheck,
+      },
+      // Tasca 41: el mateix que Empaquetat, acumulat per client.
+      {
+        label: 'Panell Compres',
+        href: '/purchases',
+        modul: 'panell-compres',
+        icon: ShoppingBasket,
       },
       {
         label: 'Panell Producció',

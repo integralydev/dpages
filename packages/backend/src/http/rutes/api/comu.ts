@@ -136,8 +136,18 @@ export const MODULS_OPERATIUS_APOYO = [
   'panell-oficina',
   'panell-obrador',
   'panell-empaquetat',
+  'panell-compres',
   'panell-produccio',
 ] as const;
+
+/**
+ * Tasca 41: el Panell de Compres és la mateixa informació que Empaquetat
+ * acumulada per client, i també edita unitats/kg lliurats. Per això els
+ * endpoints de lliurament (PATCH .../lliurament i .../lliurament/desfer) i
+ * la lectura de línies (GET /panells/empaquetat) accepten qualsevol dels
+ * dos mòduls.
+ */
+export const MODULS_LLIURAMENT = ['panell-empaquetat', 'panell-compres'] as const;
 
 /**
  * Primer endpoint que restringió por módulo (`POST /usuaris`) — hasta ahora
