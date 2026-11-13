@@ -70,6 +70,9 @@ infra/gcp/    notas de infraestructura de Google Cloud
 - **Google Cloud Run** (región `europe-west1`, RGPD) — backend y frontend,
   cada uno con su `Dockerfile`.
 - Imágenes en **Artifact Registry** (`europe-west1-docker.pkg.dev`).
+- **Cloud Monitoring**: alerta por correo si la tarea `sync-comandes`
+  falla 3+ veces en 20 min (métrica de logs `sync_comandes_fallades`; ver
+  `infra/gcp/README.md`).
 - **GitHub Actions**: `ci.yml` (lint, typecheck, test, build en cada push) y
   `deploy.yml` (deploy **manual** vía `workflow_dispatch`).
 
