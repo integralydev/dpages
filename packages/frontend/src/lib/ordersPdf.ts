@@ -417,17 +417,65 @@ export function descarregarPdfObradorPantalla({
       ]);
     }
   }
-  const nomProductes = grups.length === 1 ? 'producte' : 'productes';
-  const nomLinies = totals.linies === 1 ? 'línia' : 'línies';
   return descarregarPdfLlistat({
-    titol: "Panell d'Obrador",
-    nomFitxer: 'panell-obrador',
+    titol: "Panell d'Obrador (desglossat)",
+    nomFitxer: 'panell-obrador-desglossat',
     columnes: COLUMNES_OBRADOR_PANTALLA,
-    resum: `${grups.length} ${nomProductes} · ${totals.linies} ${nomLinies} · ${formatDecimal(totals.totalKg, 3)} kg · ${formatDecimal(totals.totalUnitats, 2)} unitats`,
+    resum: resumObrador(grups, totals),
     filtres,
     senseFiltres: 'Filtres: cap (totes les línies)',
     filesDestacades: destacades,
     files,
+  });
+}
+
+function resumObrador(
+  grups: FilaPanellObradorAcumulatApi[],
+  totals: { linies: number; totalKg: string; totalUnitats: string },
+): string {
+  const nomProductes = grups.length === 1 ? 'producte' : 'productes';
+  const nomLinies = totals.linies === 1 ? 'línia' : 'línies';
+  return `${grups.length} ${nomProductes} · ${totals.linies} ${nomLinies} · ${formatDecimal(totals.totalKg, 3)} kg · ${formatDecimal(totals.totalUnitats, 2)} unitats`;
+}
+
+// ── Panell Obrador agrupat (tasca 49) ────────────────────────────────────
+
+// 273 mm útils.
+const COLUMNES_OBRADOR_AGRUPAT: ColumnaPdf[] = [
+  { titol: 'Agrupació producció', ample: 70 },
+  { titol: 'Producte', ample: 126, negreta: true },
+  { titol: 'Unitats', ample: 25, alineacio: 'right' },
+  { titol: 'Pes (kg)', ample: 30, alineacio: 'right' },
+  { titol: 'Fet', ample: 22, alineacio: 'center' },
+];
+
+/**
+ * El mateix llistat que el desglossat però només amb la fila d'acumulats de
+ * cada producte, sense les línies de comanda de sota (versió resumida).
+ */
+export function descarregarPdfObradorAgrupat({
+  grups,
+  totals,
+  filtres,
+}: {
+  grups: FilaPanellObradorAcumulatApi[];
+  totals: { linies: number; totalKg: string; totalUnitats: string };
+  filtres: string[];
+}): Promise<void> {
+  return descarregarPdfLlistat({
+    titol: "Panell d'Obrador (agrupat)",
+    nomFitxer: 'panell-obrador-agrupat',
+    columnes: COLUMNES_OBRADOR_AGRUPAT,
+    resum: resumObrador(grups, totals),
+    filtres,
+    senseFiltres: 'Filtres: cap (totes les línies)',
+    files: grups.map((grup) => [
+      grup.agrupacioProduccio ?? '-',
+      `${grup.producte.descripcio} (${grup.linies} ${grup.linies === 1 ? 'línia' : 'línies'})`,
+      formatDecimal(grup.unitats, 2),
+      formatDecimal(grup.kg, 3),
+      `${grup.liniesFetes}/${grup.linies}`,
+    ]),
   });
 }
 
