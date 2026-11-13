@@ -505,6 +505,13 @@ mismo `woo_order_id` en transacciones concurrentes.
   queda marcado con el error — no hay reintento automático del lado del
   servidor, pero el próximo polling (`/tasques/sync-comandes` o
   `/tasques/reconciliar`) va a traer igual el pedido por versión.
+  **Ojo con la CPU (13/11/2026):** desde ese día `dpages-backend` corre con
+  la CPU asignada solo durante las peticiones (`--cpu-throttling`, por coste;
+  ver `docs/coste-cloud-run-2026-11-12.md`). Con eso, el trabajo que sigue
+  después de responder queda congelado hasta la siguiente petición. Hoy no
+  importa porque no llega ningún webhook, pero **antes de activarlo** hay que
+  volver a `--no-cpu-throttling` o mover el `GET` + transformación antes de
+  la respuesta.
 
 - **Las tareas de Cloud Scheduler son síncronas**: `/tasques/sync-comandes`,
   `/tasques/sync-cataleg` y `/tasques/reconciliar` esperan a que termine la

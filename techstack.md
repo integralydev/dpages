@@ -69,6 +69,12 @@ infra/gcp/    notas de infraestructura de Google Cloud
 
 - **Google Cloud Run** (región `europe-west1`, RGPD) — backend y frontend,
   cada uno con su `Dockerfile`.
+  - `dpages-backend`: 1 vCPU, 512 MiB, `minScale=1`, `maxScale=2`, **CPU
+    solo durante las peticiones** (`--cpu-throttling`, desde el 13/11/2026;
+    ver `docs/coste-cloud-run-2026-11-12.md`). Salida por Direct VPC egress
+    (`dpages-vpc`/`dpages-egress`, `all-traffic`) con Cloud NAT e IP fija
+    `dpages-egress-ip`. `deploy.yml` solo cambia la imagen, así que esta
+    configuración se conserva entre despliegues.
 - Imágenes en **Artifact Registry** (`europe-west1-docker.pkg.dev`).
 - **Cloud Monitoring**: alerta por correo si la tarea `sync-comandes`
   falla 3+ veces en 20 min (métrica de logs `sync_comandes_fallades`; ver
