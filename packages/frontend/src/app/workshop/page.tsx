@@ -10,7 +10,7 @@ import { DataCard, DataCardField, DataCardGrid } from '@/components/ui/DataCard'
 import { DateInput } from '@/components/ui/DateInput';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Pagination } from '@/components/ui/Pagination';
-import { SearchInput } from '@/components/ui/SearchInput';
+import { TagSearchInput } from '@/components/ui/TagSearchInput';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { StatCard } from '@/components/ui/StatCard';
 import { useCatalog } from '@/hooks/useCatalog';
@@ -370,6 +370,13 @@ export default function WorkshopPage() {
   // Tasca 45 (Ari, 20/10/2026): cerca per codi o descripció mentre
   // s'escriu, com al Catàleg ("botifarra" les troba totes).
   const [productSearch, setProductSearch] = useState('');
+  // Tasca 52 (Ari): diverses cerques alhora ("BOTI" i "HAMB"), fixades com
+  // a etiquetes; el text que s'està escrivint també filtra (OR de tots).
+  const [productSearchTags, setProductSearchTags] = useState<string[]>([]);
+  const productSearches = useMemo(
+    () => [...productSearchTags, productSearch.trim()].filter(Boolean),
+    [productSearchTags, productSearch],
+  );
   // Tasca 24 (01/10/2026): filtre de categoria. Tasca 50 (Ari, 20/10/2026):
   // una o més categories alhora (el backend en fa un OR).
   const { data: categories } = useCategories();
@@ -447,7 +454,7 @@ export default function WorkshopPage() {
       ...(selectedProducts.length > 0
         ? { producte: selectedProducts.map((product) => product.label) }
         : {}),
-      ...(productSearch.trim() ? { cercaProducte: productSearch.trim() } : {}),
+      ...(productSearches.length > 0 ? { cercaProducte: productSearches } : {}),
       ...(envasatFilter !== ALL ? { envasat: envasatFilter } : {}),
       ...(formatFilter !== ALL ? { format: formatFilter } : {}),
       ...(productionDateFilter
@@ -461,7 +468,7 @@ export default function WorkshopPage() {
       treballFilter,
       selectedCategories,
       selectedProducts,
-      productSearch,
+      productSearches,
       envasatFilter,
       formatFilter,
       productionDateFilter,
@@ -547,7 +554,7 @@ export default function WorkshopPage() {
         `Categories: ${selectedCategories.map((item) => item.label).join(', ')}`,
       selectedProducts.length > 0 &&
         `Productes: ${selectedProducts.map((item) => item.label).join(', ')}`,
-      productSearch.trim() && `Cerca producte: ${productSearch.trim()}`,
+      productSearches.length > 0 && `Cerca producte: ${productSearches.join(', ')}`,
       selectedClient && `Client: ${selectedClient.label}`,
       observacionsFilter !== ALL_FEM && observacionsFilter,
       envasatFilter !== ALL && `Envasat: ${envasatFilter}`,
@@ -661,6 +668,7 @@ export default function WorkshopPage() {
     setTreballFilter(ALL_FEM);
     setSelectedProducts([]);
     setProductSearch('');
+    setProductSearchTags([]);
     setSelectedCategories([]);
     setEnvasatFilter(ALL);
     setFormatFilter(ALL);
@@ -796,11 +804,14 @@ export default function WorkshopPage() {
           />
         </div>
         <div className="flex w-full flex-wrap gap-4">
-          <SearchInput
+          <TagSearchInput
             label="Cerca producte"
             placeholder="Codi o descripció..."
-            value={productSearch}
-            onChange={setProductSearch}
+            addMorePlaceholder="Afegir una altra cerca..."
+            values={productSearchTags}
+            onValuesChange={setProductSearchTags}
+            draft={productSearch}
+            onDraftChange={setProductSearch}
           />
           <MultiCombobox
             label="Productes"

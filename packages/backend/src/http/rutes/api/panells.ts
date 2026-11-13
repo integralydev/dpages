@@ -33,14 +33,24 @@ import {
  * producte el codi o la descripció del qual COMENCEN pel text
  * ("botifarra" les troba totes, "bott" les de codi BOTT…).
  * Case-insensitive.
+ *
+ * Tasca 52 (Ari): repetible, `?cercaProducte=BOTI&cercaProducte=HAMB` =
+ * línies dels productes que comencen per BOTI o per HAMB. Un sol valor
+ * funciona igual que sempre.
  */
 function afegirCercaProducte(valor: unknown, condicions: string[], valors: unknown[]): void {
-  if (typeof valor !== 'string' || valor.trim() === '') return;
+  const patrons = (Array.isArray(valor) ? valor : [valor])
+    .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    .map((item) => patroComencaPer(item.trim().toLowerCase()));
+  if (patrons.length === 0) return;
+  // LIKE ANY no admet clàusula ESCAPE, però a PostgreSQL la barra invertida
+  // ja és el caràcter d'escapament per defecte (el que fa servir
+  // patroComencaPer).
   const n = valors.length + 1;
   condicions.push(
-    `(LOWER(p.descripcio) LIKE LOWER($${n}) ESCAPE '\\' OR LOWER(p.descripcio_venda) LIKE LOWER($${n}) ESCAPE '\\' OR LOWER(p.codi) LIKE LOWER($${n}) ESCAPE '\\')`,
+    `(LOWER(p.descripcio) LIKE ANY($${n}::text[]) OR LOWER(p.descripcio_venda) LIKE ANY($${n}::text[]) OR LOWER(p.codi) LIKE ANY($${n}::text[]))`,
   );
-  valors.push(patroComencaPer(valor.trim()));
+  valors.push(patrons);
 }
 
 /**
