@@ -41,6 +41,8 @@ export type PackagingPanelFilters = {
   confirmacio?: 'pendents' | 'confirmades';
   /** Tasca 23: amb / sense observacions de la línia. */
   observacions?: 'si' | 'no';
+  /** Tasca 57: línies que es produeixen / que surten d'estoc. */
+  produir?: 'si' | 'no';
 };
 
 /**

@@ -207,6 +207,19 @@ describe('API negoci — GET /panells/produccio (Postgres real, esquema aislado)
       comandaId,
       ordinal: 8,
     });
+
+    // Tasca 57: una línia que NO es produeix (surt d'estoc), del mateix
+    // producte que una de les de dalt i amb quantitats grans. Tots els
+    // totals exactes dels tests d'aquest fitxer només quadren si el panell
+    // la deixa fora.
+    await entorn.poolTest.query(
+      `INSERT INTO comanda_linia (
+         comanda_id, ordinal, producte_id, unitats_demanades, preu_unitari,
+         pes_calculat_kg, data_produccio, produir
+       ) VALUES ($1, 9, (SELECT id FROM producte WHERE codi = 'COSTELLETA'), 50, '0.00',
+                 '999.000', $2, false)`,
+      [comandaId, DATA],
+    );
   });
 
   afterAll(() => netejarEntornApi(entorn));
@@ -656,6 +669,16 @@ describe('API negoci — GET /panells/produccio (Postgres real, esquema aislado)
            pes_calculat_kg, data_produccio
          ) VALUES ($1, 0, $2, 100, '0.00', '999.000', $3)`,
         [comandaTancada.rows[0]!.id, producte.rows[0]!.id, DATA],
+      );
+
+      // Tasca 57: mateixa comanda oberta, però la línia no es produeix —
+      // tampoc no ha de sumar a totals.canals.
+      await entorn.poolTest.query(
+        `INSERT INTO comanda_linia (
+           comanda_id, ordinal, producte_id, unitats_demanades, preu_unitari,
+           pes_calculat_kg, data_produccio, produir
+         ) VALUES ($1, 1, $2, 40, '0.00', '400.000', $3, false)`,
+        [comanda.rows[0]!.id, producte.rows[0]!.id, DATA],
       );
     });
 

@@ -105,7 +105,7 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
 
     const linia = await poolTest.query(
       `SELECT producte_id, unitats_demanades, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-              data_produccio
+              data_produccio, produir
        FROM comanda_linia WHERE comanda_id = $1`,
       [resultado.comandaId],
     );
@@ -117,6 +117,8 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
       pes_editable: false,
       // Tarea 39: creada en dimarts 12/05 a les 10:15 (hora local) → sense data.
       data_produccio: null,
+      // Tasca 57: les línies de la web es produeixen per defecte.
+      produir: true,
     });
   });
 

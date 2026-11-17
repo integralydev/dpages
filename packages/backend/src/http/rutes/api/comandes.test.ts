@@ -3550,4 +3550,109 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
       await fastify.close();
     });
   });
+
+  describe('tasca 57 — camp produir de línia', () => {
+    it('per defecte sí; es pot posar a no en crear, afegir, editar, i la còpia el manté', async () => {
+      const fastify = construirServidor();
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [
+            { producteId: producteFitxaId, unitatsDemanades: 1 },
+            { producteId: producteFitxaId, unitatsDemanades: 2, produir: false },
+          ],
+        },
+      });
+      expect(creada.statusCode).toBe(201);
+      const comanda = cuerpoJson<ComandaDetallApi>(creada);
+      expect(comanda.linies.map((l) => l.produir)).toEqual([true, false]);
+
+      // Afegir una línia: per defecte sí, i amb produir:false, no.
+      const afegida = await fastify.inject({
+        method: 'POST',
+        url: `/api/v1/comandes/${comanda.id}/linies`,
+        payload: { producteId: producteFitxaId, unitatsDemanades: 3, produir: false },
+      });
+      expect(afegida.statusCode).toBe(201);
+      expect(cuerpoJson<ComandaDetallApi>(afegida).linies.map((l) => l.produir)).toEqual([
+        true,
+        false,
+        false,
+      ]);
+
+      // Editar: la primera passa a no, i la segona torna a sí.
+      const [primera, segona] = comanda.linies;
+      for (const [linia, produir] of [
+        [primera!, false],
+        [segona!, true],
+      ] as const) {
+        const res = await fastify.inject({
+          method: 'PATCH',
+          url: `/api/v1/comandes/${comanda.id}/linies/${linia.id}`,
+          payload: { produir },
+        });
+        expect(res.statusCode).toBe(200);
+      }
+      const despres = cuerpoJson<ComandaDetallApi>(
+        await fastify.inject({ method: 'GET', url: `/api/v1/comandes/${comanda.id}` }),
+      );
+      expect(despres.linies.map((l) => l.produir)).toEqual([false, true, false]);
+
+      // Duplicar: la còpia manté el valor de cada línia.
+      const dup = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes/duplicar',
+        payload: { ids: [comanda.id] },
+      });
+      expect(dup.statusCode).toBe(201);
+      const copiaId = cuerpoJson<{ comandes: ComandaDuplicadaApi[] }>(dup).comandes[0]!.id;
+      const copia = cuerpoJson<ComandaDetallApi>(
+        await fastify.inject({ method: 'GET', url: `/api/v1/comandes/${copiaId}` }),
+      );
+      expect(copia.linies.map((l) => l.produir)).toEqual([false, true, false]);
+
+      await fastify.close();
+    });
+
+    it('produir que no és un booleà rebutja amb 400 VALIDACIO', async () => {
+      const fastify = construirServidor();
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [{ producteId: producteFitxaId, unitatsDemanades: 1, produir: 'no' }],
+        },
+      });
+      expect(creada.statusCode).toBe(400);
+      expect(creada.json()).toMatchObject({ error: { codi: 'VALIDACIO' } });
+
+      const valida = cuerpoJson<ComandaDetallApi>(
+        await fastify.inject({
+          method: 'POST',
+          url: '/api/v1/comandes',
+          payload: {
+            dataComanda: '2026-08-01',
+            dataLliurament: '2026-08-30T00:00:00Z',
+            origen: 'manual',
+            linies: [{ producteId: producteFitxaId, unitatsDemanades: 1 }],
+          },
+        }),
+      );
+      const patch = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${valida.id}/linies/${valida.linies[0]!.id}`,
+        payload: { produir: 0 },
+      });
+      expect(patch.statusCode).toBe(400);
+
+      await fastify.close();
+    });
+  });
 });

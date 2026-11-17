@@ -98,7 +98,14 @@ están documentadas ahí mismo y en el agente `woocommerce-integration`.
   arriba (unidades/peso de línea, que sigue sin poder ser cero), estos dos
   campos SÍ pueden guardarse en 0 (rotura total, artículo agotado): la
   restricción de "mayor que cero" que tenían se sacó a propósito, reabriendo
-  y reemplazando una decisión anterior.
+  y reemplazando una decisión anterior. Tarea 57 (17/11/2026): la pantalla
+  deja confirmar una línea pendiente en 0 y pide confirmación antes de
+  guardar un 0.
+- Cada línea de pedido tiene «producir» (sí/no, por defecto sí; tarea 57,
+  acordado en reunión, 17/11/2026). En «no» (sale de stock, no se fabrica
+  pero se envía) la línea no cuenta en Obrador ni en Producción; sí en
+  Empaquetat, Compres y Oficina, que tienen un filtro para eso. El sync de
+  WooCommerce no lo toca.
 - Seis estados de pedido: `esborrany`, `oberta`, `en_proces`, `tancada`,
   `amb_incidencia`, `cancellada`. `esborrany` (tarea 33, 03/10/2026): no cuenta
   en los paneles de Obrador, Empaquetat ni Compres; sí en Oficina y Producció. Es el

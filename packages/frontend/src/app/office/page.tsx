@@ -30,6 +30,10 @@ import { formatData } from '@/lib/dates';
 import { formatDecimal } from '@/lib/decimals';
 import { descarregarPdfPanellOficina } from '@/lib/ordersPdf';
 
+// Tasca 57 (17/11/2026): el panell va per comanda; «Amb» = alguna línia que
+// surt d'estoc (no es produeix), «Sense» = cap.
+const SENSE_PRODUIR_OPTIONS = { Amb: 'si', Sense: 'no' } as const;
+
 const ALL = 'Tots';
 const ALL_FEM = 'Totes';
 
@@ -136,6 +140,13 @@ export default function OfficePage() {
     '',
   );
   const [deliveryDateTo, setDeliveryDateTo] = useFiltrePersistent('oficina.dataLliuramentFins', '');
+  // Tasca 57: comandes amb alguna línia que surt d'estoc (no es produeix).
+  const [senseProduirFilter, setSenseProduirFilter] = useFiltrePersistent(
+    'oficina.liniesSenseProduir',
+    ALL_FEM,
+  );
+  const liniesSenseProduir =
+    SENSE_PRODUIR_OPTIONS[senseProduirFilter as keyof typeof SENSE_PRODUIR_OPTIONS] ?? undefined;
 
   const statusCode = useMemo(
     () => Object.entries(ESTAT_LABELS).find(([, label]) => label === statusFilter)?.[0],
@@ -167,6 +178,7 @@ export default function OfficePage() {
       ...(shippingDateTo ? { dataExpedicioFins: shippingDateTo } : {}),
       ...(deliveryDateFrom ? { dataLliuramentDes: deliveryDateFrom } : {}),
       ...(deliveryDateTo ? { dataLliuramentFins: deliveryDateTo } : {}),
+      ...(liniesSenseProduir !== undefined ? { liniesSenseProduir } : {}),
     }),
     [
       statusCode,
@@ -180,6 +192,7 @@ export default function OfficePage() {
       shippingDateTo,
       deliveryDateFrom,
       deliveryDateTo,
+      liniesSenseProduir,
     ],
   );
 
@@ -321,6 +334,13 @@ export default function OfficePage() {
             options={tariffColumns.map((item) => item.nom)}
             value={tariffFilter}
             onChange={setTariffFilter}
+            allLabel={ALL_FEM}
+          />
+          <SimpleDropdown
+            label="Línies sense produir"
+            options={Object.keys(SENSE_PRODUIR_OPTIONS)}
+            value={senseProduirFilter}
+            onChange={setSenseProduirFilter}
             allLabel={ALL_FEM}
           />
         </div>

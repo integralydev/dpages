@@ -29,6 +29,8 @@ export type OfficePanelFilters = {
   dataComandaFins?: string;
   dataLliuramentDes?: string;
   dataLliuramentFins?: string;
+  /** Tasca 57: comandes amb (`si`) o sense (`no`) línies que no es produeixen. */
+  liniesSenseProduir?: 'si' | 'no';
 };
 
 type UsePanellOficinaResult = {

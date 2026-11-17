@@ -1,0 +1,12 @@
+-- Tasca 57 (Ari, acordat a la reunió; 17/11/2026): cada línia de comanda
+-- indica si s'ha de produir. Per defecte sí; l'oficina la posa a «no»
+-- quan el producte surt d'estoc (p. ex. salsitxes del congelat) i no s'ha
+-- de fabricar, però sí enviar.
+--
+-- Amb produir = false la línia no surt (ni a les files ni als totals) als
+-- panells d'Obrador i de Producció; sí que surt a Empaquetat, Compres i
+-- Oficina, que tenen un filtre per a aquest camp.
+--
+-- Propietat del sistema (ADR-005): el sync de WooCommerce no la toca mai;
+-- les línies que crea agafen el valor per defecte.
+ALTER TABLE comanda_linia ADD COLUMN produir BOOLEAN NOT NULL DEFAULT true;

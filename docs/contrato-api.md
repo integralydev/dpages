@@ -1548,6 +1548,30 @@ Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramen
 > `POST /comandes`), al añadir una línea (`POST .../linies`) y al editarla
 > (`PATCH .../linies/:liniaId`); `GET /comandes/:id` la devuelve en
 > `linies[]`. Vacía o sólo espacios = `null`.
+>
+> **`produir`** (tarea 57, 17/11/2026, migración `0026`): booleano de
+> **línea**, `true` por defecto. `false` = el producto sale de stock (por
+> ejemplo, congelado): no se fabrica, pero se envía. Se informa igual que
+> `obsEmpaquetat` (`linies[].produir` en `POST /comandes`, `produir` en
+> `POST .../linies` y en `PATCH .../linies/:liniaId`; si no viene, `true`;
+> un valor que no sea booleano es `400 VALIDACIO`), `GET /comandes/:id` y
+> cada fila de este panel lo devuelven, y `POST /comandes/duplicar` lo
+> copia. El sync de WooCommerce no lo toca nunca.
+>
+> - Con `produir = false` la línea **no aparece** en `/panells/obrador`
+>   (tampoco en `acumulat` ni en "marcar tot com a fet") ni en
+>   `/panells/produccio` (ni en `totals.canals`).
+> - En este panel y en `/panells/compres`, filtro `produir`: `si` / `no`
+>   (otro valor, `400 VALIDACIO`).
+> - En `/panells/oficina` (una fila por pedido), filtro
+>   `liniesSenseProduir`: `si` = pedidos con alguna línea en `false`,
+>   `no` = ninguna. Los totales del pedido siguen contando todas sus
+>   líneas.
+>
+> **Confirmar con 0** (tarea 57): `PATCH .../lliurament` ya aceptaba
+> `unitatsLliurades`/`kgLliurats` en `0` (issue #19). Desde la tarea 57 la
+> pantalla permite pulsar "Desar" en una línea pendiente aunque siga en 0,
+> y pide confirmación antes de guardar cualquier valor 0.
 
 > `dataExpedicioFins`/`dataLliuramentFins` incluyen el día completo — ver
 > "Filtros de rango de fecha" en la sección 2 (capa 36).

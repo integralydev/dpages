@@ -310,6 +310,12 @@ export interface ComandaLiniaApi {
   obsProduccio: string | null;
   /** Tasca 7 (01/10/2026): observació d'empaquetat de la línia. */
   obsEmpaquetat: string | null;
+  /**
+   * Tasca 57 (17/11/2026): si la línia s'ha de produir. Per defecte `true`;
+   * amb `false` (surt d'estoc) no apareix als panells d'Obrador ni de
+   * Producció, però sí a Empaquetat, Compres i Oficina.
+   */
+  produir: boolean;
   esborrat: boolean;
 }
 
@@ -386,6 +392,8 @@ export interface LiniaCreacioApi {
   obsProduccio?: string | null;
   /** Tasca 7 (01/10/2026): observació d'empaquetat de la línia. */
   obsEmpaquetat?: string | null;
+  /** Tasca 57: per defecte `true` si no ve. */
+  produir?: boolean;
 }
 
 export interface ComandaCreacioApi {
@@ -438,6 +446,8 @@ export interface LiniaAfegidaApi {
   unitatsDemanades: number;
   kgDemanats?: string;
   dataProduccio?: string | null;
+  /** Tasca 57: per defecte `true` si no ve. */
+  produir?: boolean;
 }
 
 /**
@@ -455,6 +465,8 @@ export interface LiniaEdicioApi {
   obsProduccio?: string | null;
   /** Tasca 7 (01/10/2026). */
   obsEmpaquetat?: string | null;
+  /** Tasca 57. */
+  produir?: boolean;
 }
 
 // ── 5 · Empaquetado ──────────────────────────────────────────────────────
@@ -673,6 +685,8 @@ export interface FilaPanellEmpaquetatApi {
   confirmatPer: string | null;
   /** Tasca 7 (01/10/2026): observació d'empaquetat de la línia. */
   obsEmpaquetat: string | null;
+  /** Tasca 57: `false` = surt d'estoc, no es produeix (però s'envia). */
+  produir: boolean;
 }
 
 export interface PanellEmpaquetatApi {
