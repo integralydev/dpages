@@ -207,8 +207,8 @@ async function crearComanda(
   // Obrador y Empaquetat.
   const origenId = await resolverOrigenWoocommerceUuid(client);
   const res = await client.query<{ id: string }>(
-    `INSERT INTO comanda (woo_order_id, origen_id, estat, estat_web, poblacio_desti, total, data_modificacio_woo, client_id, data_comanda, data_produccio, adreca_lliurament, obs_lliurament)
-     VALUES ($1, $2, 'esborrany', $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    `INSERT INTO comanda (woo_order_id, origen_id, estat, estat_web, poblacio_desti, total, data_modificacio_woo, client_id, data_comanda, data_produccio, adreca_lliurament, obs_lliurament, num_woo)
+     VALUES ($1, $2, 'esborrany', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      RETURNING id`,
     [
       wooOrder.id,
@@ -228,6 +228,9 @@ async function crearComanda(
       dataProduccio,
       construirAdrecaLliurament(wooOrder),
       construirObsLliurament(wooOrder),
+      // Tasca 53: només en crear-la; després és editable i el sync no el
+      // torna a escriure (no és a l'UPDATE de més avall).
+      wooOrder.number || String(wooOrder.id),
     ],
   );
   return res.rows[0]!.id;

@@ -857,6 +857,45 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
     });
   });
 
+  describe('núm. comanda WooCommerce (tasca 53, ampliación de ADR-025)', () => {
+    it('lo rellena con `number` al crear y una actualización posterior no pisa lo que Oficina haya cambiado', async () => {
+      const original = { ...comandaSimple, id: 96010, number: 'W-96010' };
+      const creado = await conClient((client) => transformarComanda(client, original));
+      const numWoo = async () =>
+        (
+          await poolTest.query<{ num_woo: string | null }>(
+            'SELECT num_woo FROM comanda WHERE id = $1',
+            [creado.comandaId],
+          )
+        ).rows[0]!.num_woo;
+      expect(await numWoo()).toBe('W-96010');
+
+      await poolTest.query(`UPDATE comanda SET num_woo = 'CORREGIT' WHERE id = $1`, [
+        creado.comandaId,
+      ]);
+      const actualizado = {
+        ...original,
+        date_modified_gmt: '2026-08-20T10:00:00',
+        number: 'ALTRE',
+      };
+      const resultado = await conClient((client) => transformarComanda(client, actualizado));
+      expect(resultado.actualitzada).toBe(true);
+      expect(await numWoo()).toBe('CORREGIT');
+    });
+
+    it('sin `number` (payload antiguo), usa el id de la web', async () => {
+      const { number: _sinNumber, ...sinNumber } = { ...comandaSimple, id: 96011, number: '' };
+      const creado = await conClient((client) =>
+        transformarComanda(client, sinNumber as typeof comandaSimple),
+      );
+      const fila = await poolTest.query<{ num_woo: string | null }>(
+        'SELECT num_woo FROM comanda WHERE id = $1',
+        [creado.comandaId],
+      );
+      expect(fila.rows[0]!.num_woo).toBe('96011');
+    });
+  });
+
   describe('protección de líneas tras edición de Oficina (ADR-026, tarea del 08/10/2026)', () => {
     async function crearPedidoBase(wooOrderId: number) {
       const original = {

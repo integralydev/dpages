@@ -67,6 +67,8 @@ export interface WooBilling {
 
 export interface WooOrder {
   id: number;
+  /** Número de la comanda a la web (tasca 53). Sense extensions, igual que `id`. */
+  number: string;
   status: string;
   currency: string;
   date_created_gmt: string;

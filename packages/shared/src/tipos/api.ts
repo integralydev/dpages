@@ -232,6 +232,11 @@ export interface OrigenComandaEntradaApi {
 export interface ComandaResumApi {
   id: number;
   num: string;
+  /**
+   * Tasca 53: «Núm. comanda WooCommerce». A les de WooCommerce, per defecte
+   * el número de la web; editable. `null` si no en té.
+   */
+  numWoo: string | null;
   /** `OrigenComandaApi.codi` (hoy "woocommerce" o "manual") — extensible sin tocar código, ver sección 3 del contrato. */
   origen: string;
   estat: string;
@@ -335,6 +340,8 @@ export interface ComandaDuplicadaApi {
 export interface ComandaDetallApi {
   id: number;
   num: string;
+  /** Tasca 53 (ver `ComandaResumApi.numWoo`). */
+  numWoo: string | null;
   /** `OrigenComandaApi.codi` (hoy "woocommerce" o "manual") — extensible sin tocar código, ver sección 3 del contrato. */
   origen: string;
   estat: string;
@@ -413,6 +420,8 @@ export interface ComandaCreacioApi {
   dataLliurament: string;
   transportistaId?: number;
   obsLliurament?: string;
+  /** Tasca 53: opcional, buit = sense número. */
+  numWoo?: string;
   linies: LiniaCreacioApi[];
 }
 
@@ -532,6 +541,8 @@ export interface TotalsPanellOficinaApi {
 export interface FilaPanellOficinaApi {
   comandaId: number;
   num: string;
+  /** Tasca 53 (ver `ComandaResumApi.numWoo`). */
+  numWoo: string | null;
   client: string | null;
   poblacioDesti: string | null;
   tarifa: string | null;
@@ -655,6 +666,8 @@ export interface FilaPanellEmpaquetatApi {
   liniaId: number;
   comandaId: number;
   num: string;
+  /** Tasca 53 (ver `ComandaResumApi.numWoo`). */
+  numWoo: string | null;
   dataExpedicio: string | null;
   dataLliurament: string | null;
   transportista: string | null;

@@ -1676,4 +1676,78 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
 
     await fastify.close();
   });
+
+  describe('tasca 53 — filtre numComanda (núm. de comanda o de la web)', () => {
+    it('Oficina i Empaquetat només tornen la comanda que coincideix, i mostren el núm. de la web', async () => {
+      const fastify = construirServidor();
+      async function crear(numWoo?: string) {
+        const res = await fastify.inject({
+          method: 'POST',
+          url: '/api/v1/comandes',
+          payload: {
+            dataComanda: '2026-08-01',
+            dataLliurament: '2026-08-30T00:00:00Z',
+            origen: 'manual',
+            ...(numWoo ? { numWoo } : {}),
+            linies: [{ producteId, unitatsDemanades: 1 }],
+          },
+        });
+        expect(res.statusCode).toBe(201);
+        return cuerpoJson<ComandaDetallApi>(res);
+      }
+      const ambWeb = await crear('WEB-53X');
+      const senseWeb = await crear();
+
+      const oficina = await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/oficina?numComanda=web-53',
+      });
+      expect(oficina.statusCode).toBe(200);
+      const filesOficina = cuerpoJson<{ dades: { comandaId: number; numWoo: string | null }[] }>(
+        oficina,
+      ).dades;
+      expect(filesOficina).toEqual([
+        expect.objectContaining({ comandaId: ambWeb.id, numWoo: 'WEB-53X' }),
+      ]);
+
+      // També pel número propi de la comanda.
+      const perNum = await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/panells/oficina?numComanda=${senseWeb.num}`,
+      });
+      expect(
+        cuerpoJson<{ dades: { comandaId: number }[] }>(perNum).dades.map((f) => f.comandaId),
+      ).toContain(senseWeb.id);
+
+      const empaquetat = await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/empaquetat?numComanda=WEB-53X',
+      });
+      expect(empaquetat.statusCode).toBe(200);
+      const filesEmpaquetat = cuerpoJson<{
+        dades: {
+          comandaId: number;
+          numWoo: string | null;
+        }[];
+      }>(empaquetat).dades;
+      expect(filesEmpaquetat.length).toBeGreaterThan(0);
+      expect(
+        filesEmpaquetat.every((f) => f.comandaId === ambWeb.id && f.numWoo === 'WEB-53X'),
+      ).toBe(true);
+
+      // `%` escrit es busca tal qual, no com a comodí.
+      const comodi = await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/oficina?numComanda=%25',
+      });
+      expect(cuerpoJson<{ dades: unknown[] }>(comodi).dades).toEqual([]);
+
+      for (const comanda of [ambWeb, senseWeb]) {
+        await entorn.poolTest.query(`UPDATE comanda SET estat = 'tancada' WHERE id_seq = $1`, [
+          comanda.id,
+        ]);
+      }
+      await fastify.close();
+    });
+  });
 });

@@ -82,6 +82,8 @@ export function usePackagingFilters() {
   // Tasca 45 (Ari, 20/10/2026): cerca per codi o descripció mentre
   // s'escriu, com al Catàleg ("botifarra" les troba totes).
   const [productSearch, setProductSearch] = useState('');
+  // Tasca 53: núm. de comanda o de la web.
+  const [orderNumberSearch, setOrderNumberSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState(ALL_FEM);
   // Tasca 48 (Ari, 20/10/2026): origen de la comanda (tots els orígens,
   // també WooCommerce), mateix filtre que a Comandes.
@@ -145,6 +147,7 @@ export function usePackagingFilters() {
         ? { producte: selectedProducts.map((product) => product.label) }
         : {}),
       ...(productSearch.trim() ? { cercaProducte: productSearch.trim() } : {}),
+      ...(orderNumberSearch.trim() ? { numComanda: orderNumberSearch.trim() } : {}),
       ...(categoriaId !== undefined ? { categoriaId } : {}),
       ...(originCode ? { origen: originCode } : {}),
       ...(confirmacio !== undefined ? { confirmacio } : {}),
@@ -158,6 +161,7 @@ export function usePackagingFilters() {
       deliveryDateFilter,
       selectedProducts,
       productSearch,
+      orderNumberSearch,
       categoriaId,
       originCode,
       confirmacio,
@@ -173,6 +177,7 @@ export function usePackagingFilters() {
     setDeliveryDateFilter('');
     setSelectedProducts([]);
     setProductSearch('');
+    setOrderNumberSearch('');
     setCategoryFilter(ALL_FEM);
     setOriginFilter(ALL);
     setConfirmacioFilter(ALL_FEM);
@@ -198,6 +203,8 @@ export function usePackagingFilters() {
       setSelectedProducts,
       productSearch,
       setProductSearch,
+      orderNumberSearch,
+      setOrderNumberSearch,
       categoryFilter,
       setCategoryFilter,
       originFilter,
@@ -279,6 +286,11 @@ export function PackagingFilterBar({ state }: { state: PackagingFiltersState }) 
           placeholder="Codi o descripció..."
           value={state.productSearch}
           onChange={state.setProductSearch}
+        />
+        <SearchInput
+          label="Núm. comanda o web"
+          value={state.orderNumberSearch}
+          onChange={state.setOrderNumberSearch}
         />
         <MultiCombobox
           label="Productes"

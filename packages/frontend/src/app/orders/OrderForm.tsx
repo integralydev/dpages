@@ -697,6 +697,9 @@ export const OrderForm = forwardRef<
   const [adrecaLliurament, setAdrecaLliurament] = useState(initialData?.adrecaLliurament ?? '');
   const [obsProduccio, setObsProduccio] = useState(initialData?.obsProduccio ?? '');
   const [obsLliurament, setObsLliurament] = useState(initialData?.obsLliurament ?? '');
+  // Tasca 53: «Núm. comanda WooCommerce» (a les de la web, per defecte el
+  // número de la web; editable).
+  const [numWoo, setNumWoo] = useState(initialData?.numWoo ?? '');
   const [lines, setLines] = useState<LineDraft[]>(initialData?.linies ?? []);
   // Qué líneas tiene "tocadas" el usuario en esta sesión de edición — se
   // marca EXPLÍCITAMENTE en el momento de la acción (updateLine/afegir
@@ -1030,6 +1033,7 @@ export const OrderForm = forwardRef<
           bultos,
           obsProduccio: obsProduccio || null,
           obsLliurament: obsLliurament || null,
+          numWoo: numWoo.trim() || null,
           poblacioDesti: poblacioDesti || null,
           adrecaLliurament: adrecaLliurament || null,
           estat,
@@ -1211,6 +1215,16 @@ export const OrderForm = forwardRef<
             onChange={(event) => {
               setHeaderTouched(true);
               setDataLliurament(event.target.value);
+            }}
+          />
+          <TextField
+            label="Núm. comanda WooCommerce"
+            disabled={isFrozen}
+            value={numWoo}
+            maxLength={50}
+            onChange={(event) => {
+              setHeaderTouched(true);
+              setNumWoo(event.target.value);
             }}
           />
           <TextField

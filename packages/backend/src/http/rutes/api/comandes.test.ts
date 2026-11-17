@@ -3550,4 +3550,54 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
       await fastify.close();
     });
   });
+
+  describe('tasca 53 — núm. comanda WooCommerce', () => {
+    it('POST i PATCH el desen (buit = sense número), la cerca el troba i es rebutja si és massa llarg', async () => {
+      const fastify = construirServidor();
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          numWoo: '  T53-777  ',
+          linies: [{ producteId: producteFitxaId, unitatsDemanades: 1 }],
+        },
+      });
+      expect(creada.statusCode).toBe(201);
+      const comanda = cuerpoJson<ComandaDetallApi>(creada);
+      expect(comanda.numWoo).toBe('T53-777');
+
+      const cerca = await fastify.inject({ method: 'GET', url: '/api/v1/comandes?cerca=t53-7' });
+      expect(cuerpoJson<{ dades: { id: number; numWoo: string | null }[] }>(cerca).dades).toEqual([
+        expect.objectContaining({ id: comanda.id, numWoo: 'T53-777' }),
+      ]);
+
+      const editada = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comanda.id}`,
+        payload: { numWoo: 'T53-888' },
+      });
+      expect(editada.statusCode).toBe(200);
+      expect(cuerpoJson<ComandaDetallApi>(editada).numWoo).toBe('T53-888');
+
+      const buidada = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comanda.id}`,
+        payload: { numWoo: '   ' },
+      });
+      expect(cuerpoJson<ComandaDetallApi>(buidada).numWoo).toBeNull();
+
+      const massaLlarg = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comanda.id}`,
+        payload: { numWoo: 'x'.repeat(51) },
+      });
+      expect(massaLlarg.statusCode).toBe(400);
+      expect(massaLlarg.json()).toMatchObject({ error: { codi: 'VALIDACIO' } });
+
+      await fastify.close();
+    });
+  });
 });

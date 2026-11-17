@@ -23,6 +23,8 @@ export type OfficePanelFilters = {
   clientId?: number;
   tarifaId?: number;
   poblacioDesti?: string;
+  /** Tasca 53: núm. de comanda o núm. de la web (conté el text). */
+  numComanda?: string;
   dataExpedicioDes?: string;
   dataExpedicioFins?: string;
   dataComandaDes?: string;

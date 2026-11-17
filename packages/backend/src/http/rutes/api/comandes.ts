@@ -71,6 +71,7 @@ const CODI_ORIGEN_WOOCOMMERCE = 'woocommerce';
 interface FilaComandaResum {
   id_seq: string;
   num: string;
+  num_woo: string | null;
   origen: string;
   estat: string;
   client_id_seq: string | null;
@@ -104,6 +105,7 @@ function aApiResum(fila: FilaComandaResum): ComandaResumApi {
   return {
     id: Number(fila.id_seq),
     num: fila.num,
+    numWoo: fila.num_woo,
     origen: fila.origen,
     estat: fila.estat,
     client:
@@ -145,7 +147,7 @@ function aApiResum(fila: FilaComandaResum): ComandaResumApi {
 // distinto); si hay más de un tipo mezclado, queda null — "resumen liviano",
 // el detalle completo por tipo está en GET /comandes/:id (incidencies[]).
 const SELECT_COMANDA_RESUM = `
-  SELECT c.id_seq, c.num, oc.codi AS origen, c.estat,
+  SELECT c.id_seq, c.num, c.num_woo, oc.codi AS origen, c.estat,
          cl.id_seq AS client_id_seq, cl.nom AS client_nom, cl.poblacio AS client_poblacio,
          t.id_seq AS tarifa_id_seq, t.nom AS tarifa_nom,
          tr.id_seq AS transportista_id_seq, tr.nom AS transportista_nom,
@@ -336,6 +338,26 @@ async function protegirLiniesSiEsDeWoocommerce(
     `UPDATE comanda SET linies_editades_a = now() WHERE id = $1 AND linies_editades_a IS NULL`,
     [comandaUuid],
   );
+}
+
+/** Tasca 53: llargada màxima del «Núm. comanda WooCommerce». */
+const MAX_NUM_WOO = 50;
+
+/**
+ * Tasca 53: normalitza `numWoo` del body. `undefined` = no ve (no es toca);
+ * text buit o `null` = sense número (`null`); si no, el text retallat.
+ * `false` = no vàlid (ja s'ha enviat el 400).
+ */
+function llegirNumWoo(reply: FastifyReply, valor: unknown): string | null | undefined | false {
+  if (valor === undefined) return undefined;
+  if (valor === null) return null;
+  if (typeof valor !== 'string' || valor.trim().length > MAX_NUM_WOO) {
+    enviarValidacio(reply, `numWoo ha de ser un text de com a màxim ${MAX_NUM_WOO} caràcters`, [
+      { camp: 'numWoo', missatge: `com a màxim ${MAX_NUM_WOO} caràcters` },
+    ]);
+    return false;
+  }
+  return valor.trim() === '' ? null : valor.trim();
 }
 
 /**
@@ -601,7 +623,10 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
     // tiene sentido de negocio, a diferencia de productes.ts/tarifes.ts,
     // regla 3.1). No toca `?clientId=` (filtro exacto, sin cambios).
     if (typeof query.cerca === 'string' && query.cerca.trim() !== '') {
-      condicions.push(`(c.num ILIKE $${valors.length + 1} OR cl.nom ILIKE $${valors.length + 1})`);
+      // Tasca 53: també pel «Núm. comanda WooCommerce».
+      condicions.push(
+        `(c.num ILIKE $${valors.length + 1} OR c.num_woo ILIKE $${valors.length + 1} OR cl.nom ILIKE $${valors.length + 1})`,
+      );
       valors.push(`%${query.cerca.trim()}%`);
     }
     const where = condicions.length > 0 ? `WHERE ${condicions.join(' AND ')}` : '';
@@ -642,6 +667,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       dataLliurament: string;
       transportistaId: number;
       obsLliurament: string;
+      numWoo: string;
       linies: {
         producteId: number;
         unitatsDemanades: number;
@@ -651,6 +677,9 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         obsEmpaquetat?: string | null;
       }[];
     }>;
+
+    const numWoo = llegirNumWoo(reply, cos.numWoo);
+    if (numWoo === false) return;
 
     // Issue #16 — dataComanda/dataLliurament de capçalera passen a ser
     // OBLIGATÒRIES, sense valor per defecte al
@@ -861,8 +890,9 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
 
       const comanda = await client.query<{ id: string }>(
         `INSERT INTO comanda (origen_id, estat, client_id, tarifa_id, poblacio_desti, total,
-                               data_lliurament, transportista_id, obs_lliurament, data_comanda)
-         VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9)
+                               data_lliurament, transportista_id, obs_lliurament, data_comanda,
+                               num_woo)
+         VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9, $10)
          RETURNING id`,
         [
           origenUuid,
@@ -879,6 +909,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           transportistaUuid,
           cos.obsLliurament ?? null,
           cos.dataComanda!,
+          numWoo ?? null,
         ],
       );
       comandaUuid = comanda.rows[0]!.id;
@@ -1117,12 +1148,16 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       bultos: number | null;
       obsProduccio: string | null;
       obsLliurament: string | null;
+      numWoo: string | null;
       poblacioDesti: string | null;
       adrecaLliurament: string | null;
       estat: string;
       detall: string;
       origen: string;
     }>;
+
+    const numWoo = llegirNumWoo(reply, cos.numWoo);
+    if (numWoo === false) return;
 
     // Issue #16 — dataComanda SÍ es editable después de creada (a diferencia
     // de producteId/categoriaId en otros endpoints): regla de negocio
@@ -1308,7 +1343,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
            adreca_lliurament = CASE WHEN $22 THEN $23 ELSE adreca_lliurament END,
            estat = CASE WHEN $24 THEN $25 ELSE estat END,
            data_comanda = CASE WHEN $26 THEN $27 ELSE data_comanda END,
-           origen_id = CASE WHEN $28 THEN $29 ELSE origen_id END
+           origen_id = CASE WHEN $28 THEN $29 ELSE origen_id END,
+           num_woo = CASE WHEN $30 THEN $31 ELSE num_woo END
          WHERE id = $1`,
         [
           comandaUuid,
@@ -1340,6 +1376,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           cos.dataComanda ?? null,
           origenUuid !== undefined,
           origenUuid ?? null,
+          numWoo !== undefined,
+          numWoo ?? null,
         ],
       );
 

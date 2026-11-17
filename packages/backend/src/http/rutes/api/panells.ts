@@ -304,7 +304,26 @@ async function construirFiltresEmpaquetat(
     ]);
     return null;
   }
+  afegirFiltreNumComanda(query.numComanda, condicions, valors);
   return { condicions, valors };
+}
+
+/**
+ * Tasca 53: `?numComanda=` busca, mentre s'escriu, pel número de la comanda
+ * o pel «Núm. comanda WooCommerce» (conté el text, sense distingir
+ * majúscules). Compartit per Oficina i Empaquetat (i Compres, que fa servir
+ * els filtres d'Empaquetat). Fa servir l'àlies `c` (comanda).
+ */
+function afegirFiltreNumComanda(valor: unknown, condicions: string[], valors: unknown[]): void {
+  if (typeof valor !== 'string' || valor.trim() === '') return;
+  const n = valors.length + 1;
+  condicions.push(`(c.num ILIKE $${n} ESCAPE '\\' OR c.num_woo ILIKE $${n} ESCAPE '\\')`);
+  valors.push(`%${escaparLike(valor.trim())}%`);
+}
+
+/** Escapa els comodins de LIKE perquè `%` o `_` escrits es busquin tal qual. */
+function escaparLike(text: string): string {
+  return text.replace(/[\\%_]/g, (caracter) => `\\${caracter}`);
 }
 
 /** FROM + JOINs que acompanyen `construirFiltresEmpaquetat` (sense el WHERE). */
@@ -401,6 +420,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         condicions.push(`LOWER(c.poblacio_desti) = LOWER($${valors.length + 1})`);
         valors.push(query.poblacioDesti.trim());
       }
+      afegirFiltreNumComanda(query.numComanda, condicions, valors);
       const where = condicions.length > 0 ? `WHERE ${condicions.join(' AND ')}` : '';
 
       const base = `
@@ -437,6 +457,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       const files = await pool.query<{
         id_seq: string;
         num: string;
+        num_woo: string | null;
         client_nom: string | null;
         poblacio_desti: string | null;
         tarifa_nom: string | null;
@@ -456,7 +477,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         total_incidencies: string;
         tipus_incidencia: string | null;
       }>(
-        `SELECT c.id_seq, c.num, cl.nom AS client_nom, c.poblacio_desti, t.nom AS tarifa_nom,
+        `SELECT c.id_seq, c.num, c.num_woo, cl.nom AS client_nom, c.poblacio_desti, t.nom AS tarifa_nom,
               tr.nom AS transportista_nom, c.estat, c.data_comanda, c.data_expedicio,
               c.data_lliurament, c.bultos, COALESCE(agg.linies, 0) AS linies,
               COALESCE(agg.total_kg, 0)::numeric(14,3) AS total_kg,
@@ -480,6 +501,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       const dades: FilaPanellOficinaApi[] = files.rows.map((f) => ({
         comandaId: Number(f.id_seq),
         num: f.num,
+        numWoo: f.num_woo,
         client: f.client_nom,
         poblacioDesti: f.poblacio_desti,
         tarifa: f.tarifa_nom,
@@ -755,6 +777,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         id_seq: string;
         comanda_id_seq: string;
         num: string;
+        num_woo: string | null;
         data_expedicio: Date | null;
         data_lliurament: Date | null;
         transportista_nom: string | null;
@@ -770,7 +793,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         confirmat_per: string | null;
         obs_empaquetat: string | null;
       }>(
-        `SELECT cl.id_seq, c.id_seq AS comanda_id_seq, c.num, c.data_expedicio, c.data_lliurament,
+        `SELECT cl.id_seq, c.id_seq AS comanda_id_seq, c.num, c.num_woo, c.data_expedicio, c.data_lliurament,
               tr.nom AS transportista_nom, cli.nom AS client_nom, cat.nom AS categoria_nom,
               p.codi, p.descripcio,
               cl.unitats_demanades, cl.pes_calculat_kg AS kg_demanats, cl.unitats_lliurades,
@@ -792,6 +815,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         liniaId: Number(f.id_seq),
         comandaId: Number(f.comanda_id_seq),
         num: f.num,
+        numWoo: f.num_woo,
         dataExpedicio: formatearDataApi(f.data_expedicio),
         dataLliurament: formatearDataApi(f.data_lliurament),
         transportista: f.transportista_nom,
