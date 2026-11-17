@@ -19,6 +19,7 @@ import { eliminarComanda, potEliminarComanda } from '@/lib/eliminarComanda';
 import { descarregarPdfComandes } from '@/lib/ordersPdf';
 import { OrderForm, type OrderFormHandle } from '../OrderForm';
 import { ResultatDuplicatDialog } from '../ResultatDuplicatDialog';
+import { useAlcadaBarraFixa } from '@/hooks/useAlcadaBarraFixa';
 
 // Avís específic quan el "Desar" falla DESPRÉS d'haver-hi hagut algun
 // DELETE de línia real i exitós en aquesta sessió d'edició — el pedido
@@ -43,6 +44,8 @@ export default function OrderDetailPage() {
   const { data: products } = useCatalog();
   const { data: origins } = useOrigensComanda();
   const formRef = useRef<OrderFormHandle>(null);
+  // Alçada de la barra fixa, per als títols fixos de les línies (OrderForm).
+  const { mesurar: mesurarBarraFixa, estil: estilBarraFixa } = useAlcadaBarraFixa();
   const { setIsDirty } = useNavigationGuard();
   // Còpia local de l'estat "canvis sense desar" per al botó Duplicar.
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -297,11 +300,14 @@ export default function OrderDetailPage() {
   }
 
   return (
-    <div>
+    <div style={estilBarraFixa}>
       {/* Issue #15 — mateix patró que orders/new/page.tsx: sticky (no
           fixed), sense marge negatiu, top-14 a mòbil per la barra fixa
           del Sidebar, lg:top-0 en desktop. */}
-      <div className="sticky top-14 z-20 mb-8 flex flex-wrap items-center justify-between gap-4 bg-[var(--background)] py-3 lg:top-0">
+      <div
+        ref={mesurarBarraFixa}
+        className="sticky top-14 z-20 mb-8 flex flex-wrap items-center justify-between gap-4 bg-[var(--background)] py-3 lg:top-0"
+      >
         <div className="flex items-center gap-4">
           <GuardedLink
             href="/orders"

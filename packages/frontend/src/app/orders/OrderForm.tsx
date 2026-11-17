@@ -1290,9 +1290,15 @@ export const OrderForm = forwardRef<
           </div>
         </div>
 
-        <div className="hidden overflow-x-auto rounded-lg border border-gray-200 xl:block">
+        {/* Sense overflow-x-auto: amb overflow el contenidor fa de "finestra"
+            del sticky i els títols no es quedarien fixos respecte de la
+            pàgina. La taula és table-fixed w-full, no desborda. */}
+        <div className="hidden rounded-lg border border-gray-200 xl:block">
           <table className="w-full table-fixed text-sm">
-            <thead className="border-b border-gray-200">
+            {/* Títols fixos en fer scroll, just a sota de la barra fixa de la
+                pàgina (--alcada-barra-fixa, ver useAlcadaBarraFixa). La vora
+                inferior va amb ombra: una border-b no es queda enganxada. */}
+            <thead className="sticky top-[var(--alcada-barra-fixa,0px)] z-10 bg-white shadow-[inset_0_-1px_0_theme(colors.gray.200)]">
               <tr>
                 {/* Tasca 46 (17/11/2026): per entrar comandes més de pressa,
                     les línies només mostren producte, data de producció,
