@@ -512,15 +512,36 @@ que ese artículo no tiene precio en esa tarifa.
 > cargado (las que ya existían antes de que el alta empezara a pedirlo como
 > obligatorio).
 
+> **`tarifes[].calculPerPes`** (tarea 40, 17/11/2026, migración `0027`):
+> cómo calculan el importe los pedidos con esta tarifa. `true` = peso ×
+> precio (los kg pedidos hasta que Empaquetat confirma la línea; desde
+> entonces, los kg enviados — 0 kg → 0 €); `false` = unidades × precio.
+> Por unidades: 01, MO, 08 y SARG; el resto, por peso (respuesta del
+> cliente). Cada pedido **guarda** el cálculo de su tarifa al crearse o al
+> cambiarle la tarifa (`ComandaDetallApi.calculPerPes`, trigger en la base):
+> cambiar la tarifa después no toca los pedidos existentes, y los pedidos
+> anteriores a la tarea 40 siguen por unidades. Sin tarifa, por unidades.
+> Afecta `totalLinia`, `totalEur` (listado, ficha, Panell Oficina) y el PDF.
+
 **`POST /tarifes`**
 
 ```json
-{ "codi": "VIP", "nom": "Clients VIP" }
+{ "codi": "VIP", "nom": "Clients VIP", "calculPerPes": true }
 ```
 
 Respuesta `201`, misma forma que una fila de `tarifes[]` de la matriz de
 arriba. `codi` es obligatorio y único — un `codi` repetido responde
-`409 CONFLICTE`.
+`409 CONFLICTE`. `calculPerPes` es opcional (por defecto `true`).
+
+**`PATCH /tarifes/:tarifaId`** (tarea 40)
+
+```json
+{ "calculPerPes": false }
+```
+
+Respuesta `200` con la tarifa. Sólo cambia el cálculo de los pedidos que se
+creen (o a los que se ponga esta tarifa) a partir de ahora. `400 VALIDACIO`
+si no es booleano, `404` si la tarifa no existe.
 
 **`PATCH /tarifes/:tarifaId/preus/:producteId`**
 
@@ -783,6 +804,7 @@ VALIDACIO`; un id inexistente no coincide con nada (no es error).
   "obsLliurament": "Entregar pels matins",
   "totalKg": "24.500",
   "totalEur": "312.40",
+  "calculPerPes": true,
   "congelada": false,
   "congelatA": null,
   "linies": [

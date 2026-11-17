@@ -24,6 +24,7 @@ import {
   resolverFiltreEntitats,
   resolverTarifaUuid,
   resolverTransportistaUuid,
+  sqlImportLinia,
 } from './comu.js';
 
 // Guard de módulo (B1): a diferencia de la mayoría de las rutas de negocio,
@@ -98,6 +99,7 @@ interface FilaComandaResum {
   total_eur: string;
   total_incidencies: string;
   tipus_incidencia: string | null;
+  calcul_per_pes: boolean;
 }
 
 function aApiResum(fila: FilaComandaResum): ComandaResumApi {
@@ -145,7 +147,7 @@ function aApiResum(fila: FilaComandaResum): ComandaResumApi {
 // distinto); si hay más de un tipo mezclado, queda null — "resumen liviano",
 // el detalle completo por tipo está en GET /comandes/:id (incidencies[]).
 const SELECT_COMANDA_RESUM = `
-  SELECT c.id_seq, c.num, oc.codi AS origen, c.estat,
+  SELECT c.id_seq, c.num, oc.codi AS origen, c.estat, c.calcul_per_pes,
          cl.id_seq AS client_id_seq, cl.nom AS client_nom, cl.poblacio AS client_poblacio,
          t.id_seq AS tarifa_id_seq, t.nom AS tarifa_nom,
          tr.id_seq AS transportista_id_seq, tr.nom AS transportista_nom,
@@ -163,9 +165,9 @@ const SELECT_COMANDA_RESUM = `
   LEFT JOIN tarifa t ON t.id = c.tarifa_id
   LEFT JOIN transportista tr ON tr.id = c.transportista_id
   LEFT JOIN LATERAL (
-    SELECT count(*) AS total_linies, SUM(pes_calculat_kg) AS total_kg,
-           SUM(unitats_demanades * preu_unitari) AS total_eur
-    FROM comanda_linia WHERE comanda_id = c.id AND NOT esborrat
+    SELECT count(*) AS total_linies, SUM(l.pes_calculat_kg) AS total_kg,
+           SUM(${sqlImportLinia('l', 'c')}) AS total_eur
+    FROM comanda_linia l WHERE l.comanda_id = c.id AND NOT l.esborrat
   ) agg ON true
   LEFT JOIN LATERAL (
     SELECT count(*) AS total_incidencies,
@@ -241,9 +243,10 @@ const SELECT_COMANDA_LINIA = `
          p.descripcio AS producte_descripcio, cat.nom AS categoria_nom, p.format, p.envasat,
          cl.unitats_demanades, cl.pes_calculat_kg AS kg_demanats,
          cl.pes_editable, cl.unitats_lliurades, cl.kg_lliurats, cl.confirmat_a, cl.preu_unitari,
-         (cl.unitats_demanades * cl.preu_unitari)::numeric(14,2) AS total_linia,
+         ${sqlImportLinia('cl', 'c')}::numeric(14,2) AS total_linia,
          cl.data_produccio, cl.obs_produccio, cl.obs_empaquetat, cl.esborrat
   FROM comanda_linia cl
+  JOIN comanda c ON c.id = cl.comanda_id
   LEFT JOIN producte p ON p.id = cl.producte_id
   LEFT JOIN categoria_producte cat ON cat.id = p.categoria_id
   WHERE cl.comanda_id = $1 AND NOT cl.esborrat
@@ -286,6 +289,7 @@ async function carregarDetallPerUuid(comandaUuid: string): Promise<ComandaDetall
     ...resum,
     obsProduccio: fila.obs_produccio,
     obsLliurament: fila.obs_lliurament,
+    calculPerPes: fila.calcul_per_pes,
     congelatA: formatearDataApi(fila.congelat_a),
     linies: linies.rows.map(aApiLinia),
     incidencies: incidencies.rows.map(aApiIncidencia),
@@ -376,7 +380,7 @@ async function resolverPreuLinia(
 /**
  * Recalcula `comanda.total` a partir de las líneas activas, con la MISMA
  * fórmula que ya usa `SELECT_COMANDA_RESUM.agg.total_eur`
- * (`SUM(unitats_demanades * preu_unitari) WHERE NOT esborrat`).
+ * (`sqlImportLinia`, tasca 40).
  *
  * IMPORTANTE, para quien lea esto después: ningún `GET` lee esta columna.
  * `ComandaResumApi.totalEur`/`ComandaDetallApi.totalEur` SIEMPRE se
@@ -391,11 +395,11 @@ async function resolverPreuLinia(
  */
 async function recalcularTotalComanda(client: PoolClient, comandaUuid: string): Promise<void> {
   await client.query(
-    `UPDATE comanda SET total = (
-       SELECT COALESCE(SUM(unitats_demanades * preu_unitari), 0)::numeric(14,2)
-       FROM comanda_linia WHERE comanda_id = $1 AND NOT esborrat
+    `UPDATE comanda c SET total = (
+       SELECT COALESCE(SUM(${sqlImportLinia('l', 'c')}), 0)::numeric(14,2)
+       FROM comanda_linia l WHERE l.comanda_id = c.id AND NOT l.esborrat
      )
-     WHERE id = $1`,
+     WHERE c.id = $1`,
     [comandaUuid],
   );
 }
@@ -917,6 +921,9 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           );
         }
       }
+      // Tasca 40: el total provisional d'abans (unitats × preu) es
+      // recalcula amb la fórmula de la tarifa ara que hi ha les línies.
+      await recalcularTotalComanda(client, comandaUuid);
 
       await client.query('COMMIT');
     } catch (err) {

@@ -99,6 +99,13 @@ están documentadas ahí mismo y en el agente `woocommerce-integration`.
   campos SÍ pueden guardarse en 0 (rotura total, artículo agotado): la
   restricción de "mayor que cero" que tenían se sacó a propósito, reabriendo
   y reemplazando una decisión anterior.
+- Importes (tarea 40, confirmado por el cliente el 17/11/2026): según la
+  tarifa, peso × precio o unidades × precio (`tarifa.calcul_per_pes`,
+  editable en Tarifes; por unidades 01, MO, 08 y SARG). Peso = kg pedidos
+  hasta que Empaquetat confirma la línea, después kg enviados. Sólo a partir
+  de la tarea 40: cada pedido guarda su cálculo (`comanda.calcul_per_pes`) y
+  los anteriores siguen por unidades. La fórmula vive en un solo sitio:
+  `sqlImportLinia` (`comu.ts`).
 - Seis estados de pedido: `esborrany`, `oberta`, `en_proces`, `tancada`,
   `amb_incidencia`, `cancellada`. `esborrany` (tarea 33, 03/10/2026): no cuenta
   en los paneles de Obrador, Empaquetat ni Compres; sí en Oficina y Producció. Es el

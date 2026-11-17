@@ -29,7 +29,7 @@ function Field({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function OrderLineCard({ line }: { line: ComandaLiniaApi }) {
+function OrderLineCard({ line, preuLabel }: { line: ComandaLiniaApi; preuLabel: string }) {
   return (
     <DataCard>
       <p className="font-semibold text-gray-900">
@@ -49,7 +49,7 @@ function OrderLineCard({ line }: { line: ComandaLiniaApi }) {
           </DataCardField>
           <DataCardField label="Pes demanat (kg)">{formatKg(line.kgDemanats)}</DataCardField>
           <DataCardField label="Pes lliurat (kg)">{formatKg(line.kgLliurats)}</DataCardField>
-          <DataCardField label="Preu unitari">{formatPrice(line.preuUnitari)}</DataCardField>
+          <DataCardField label={preuLabel}>{formatPrice(line.preuUnitari)}</DataCardField>
           <DataCardField label="Subtotal">
             <span className="font-semibold">{formatPrice(line.totalLinia)}</span>
           </DataCardField>
@@ -112,6 +112,9 @@ export default function OfficeOrderDetailPage() {
       cancelled = true;
     };
   }, [params.id, reloadToken]);
+
+  // Tasca 40: a les comandes per pes, el preu de la línia és per kg.
+  const preuLabel = order?.calculPerPes ? 'Preu/kg' : 'Preu unitari';
 
   return (
     <div>
@@ -189,7 +192,7 @@ export default function OfficeOrderDetailPage() {
 
             <div className="flex flex-col gap-3 xl:hidden">
               {order.linies.map((line) => (
-                <OrderLineCard key={line.id} line={line} />
+                <OrderLineCard key={line.id} line={line} preuLabel={preuLabel} />
               ))}
             </div>
 
@@ -216,7 +219,7 @@ export default function OfficeOrderDetailPage() {
                       Pes lliurat (kg)
                     </th>
                     <th className="px-3 py-2 text-right font-medium text-gray-500 break-words">
-                      Preu unitari
+                      {preuLabel}
                     </th>
                     <th className="px-3 py-2 text-right font-medium text-gray-500 break-words">
                       Subtotal
