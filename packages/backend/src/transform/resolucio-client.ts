@@ -2,6 +2,7 @@ import { DatabaseError } from 'pg';
 import type { Client, Pool, PoolClient } from 'pg';
 import type { WooMetaData, WooOrder } from '@dpages/shared';
 import { assignarCodiAutogenerat } from '../db/client-codi.js';
+import { CODI_TARIFA_WEB } from './tarifa-web.js';
 
 /** Sólo hace falta `.query()` — acepta Pool, PoolClient o Client suelto (mismo criterio que resolucio-article.ts). */
 type Consultable = Pool | PoolClient | Client;
@@ -109,6 +110,7 @@ export async function resolverOCrearClient(
     extraerOpcional(wooOrder.billing.city),
     wooOrder.customer_id > 0 ? wooOrder.customer_id : null,
     wooOrder.customer_id === 0,
+    CODI_TARIFA_WEB,
   ];
 
   // Sólo dos valores posibles, fijados acá mismo — nunca viene de la
@@ -126,8 +128,11 @@ export async function resolverOCrearClient(
   await client.query('SAVEPOINT resolucio_client');
   try {
     const res = await client.query<{ id: string; id_seq: string }>(
-      `INSERT INTO client (nif, email, nom, telefon, poblacio, woo_customer_id, es_convidat)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      // Tarea 42: un cliente nuevo de la web nace con la tarifa 01. El
+      // `DO UPDATE` no toca `tarifa_id` a propósito: la tarifa de un cliente
+      // que ya existía (con otra o sin ninguna) no se cambia.
+      `INSERT INTO client (nif, email, nom, telefon, poblacio, woo_customer_id, es_convidat, tarifa_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT id FROM tarifa WHERE codi = $8))
        ON CONFLICT (${columnaConflicto}) WHERE ${columnaConflicto} IS NOT NULL DO UPDATE SET
          nif = COALESCE(client.nif, EXCLUDED.nif),
          email = COALESCE(client.email, EXCLUDED.email),
