@@ -12,7 +12,7 @@ import {
 import { AsyncCombobox, type ComboboxOption } from '@/components/ui/AsyncCombobox';
 import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { DataCard, DataCardField, DataCardGrid } from '@/components/ui/DataCard';
+import { DataCard } from '@/components/ui/DataCard';
 import { DecimalInput } from '@/components/ui/DecimalInput';
 import { IconButton } from '@/components/ui/IconButton';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
@@ -473,14 +473,6 @@ function LineFormCard({
         />
       </div>
 
-      <div className="mt-3">
-        <DataCardGrid>
-          <DataCardField label="Categoria">{line.categoria ?? '—'}</DataCardField>
-          <DataCardField label="Format">{line.format ?? '—'}</DataCardField>
-          <DataCardField label="Envasat">{line.envasat ?? '—'}</DataCardField>
-        </DataCardGrid>
-      </div>
-
       <div className="mt-3 grid grid-cols-2 gap-3">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-xs text-gray-500">Data producció</span>
@@ -524,15 +516,6 @@ function LineFormCard({
             className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-right text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
           />
         </label>
-        {/* Unitats/pes lliurats: sólo lectura acá — únicamente el Panell
-            Empaquetat los edita (PATCH .../linies/:liniaId/lliurament),
-            nunca esta pantalla (regla de negocio confirmada). */}
-        <div className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-gray-500">Unitats lliurades</span>
-          <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-right text-gray-500">
-            {formatDecimal(line.unitatsLliurades, 2)}
-          </span>
-        </div>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-xs text-gray-500">Pes demanat (kg)</span>
           {/* kgEditable es el campo autoritativo del backend (contrato §4.5:
@@ -556,12 +539,6 @@ function LineFormCard({
             />
           )}
         </label>
-        <div className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-gray-500">Pes lliurat (kg)</span>
-          <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-right text-gray-500">
-            {formatDecimal(line.kgLliurats, 3)}
-          </span>
-        </div>
       </div>
 
       <label className="mt-3 flex flex-col gap-1 text-sm">
@@ -1317,34 +1294,23 @@ export const OrderForm = forwardRef<
           <table className="w-full table-fixed text-sm">
             <thead className="border-b border-gray-200">
               <tr>
-                <th className="w-[16%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
+                {/* Tasca 46 (17/11/2026): per entrar comandes més de pressa,
+                    les línies només mostren producte, data de producció,
+                    unitats i pes demanats. Categoria, format, envasat i el
+                    que s'ha lliurat continuen al sistema i als panells. */}
+                <th className="w-[43%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
                   Producte
                 </th>
-                <th className="w-[10%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
-                  Categoria
-                </th>
-                <th className="w-[8%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
-                  Format
-                </th>
-                <th className="w-[10%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
-                  Envasat
-                </th>
-                <th className="w-[13%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
+                <th className="w-[16%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
                   Data producció
                 </th>
-                <th className="w-[9%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
+                <th className="w-[14%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
                   Unitats demanades
                 </th>
-                <th className="w-[9%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
-                  Unitats lliurades
-                </th>
-                <th className="w-[8%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
+                <th className="w-[15%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
                   Pes demanat (kg)
                 </th>
-                <th className="w-[7%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
-                  Pes lliurat (kg)
-                </th>
-                <th className="w-[10%] px-1.5 py-2" />
+                <th className="w-[12%] px-1.5 py-2" />
               </tr>
             </thead>
             <tbody>
@@ -1382,15 +1348,6 @@ export const OrderForm = forwardRef<
                             Sense preu — cal completar més endavant.
                           </p>
                         )}
-                      </td>
-                      <td className="px-1.5 py-2 break-words text-gray-500">
-                        {line.categoria ?? '—'}
-                      </td>
-                      <td className="px-1.5 py-2 break-words text-gray-500">
-                        {line.format ?? '—'}
-                      </td>
-                      <td className="px-1.5 py-2 break-words text-gray-500">
-                        {line.envasat ?? '—'}
                       </td>
                       <td className="px-1.5 py-2">
                         <input
@@ -1435,10 +1392,6 @@ export const OrderForm = forwardRef<
                           className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-right text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
                         />
                       </td>
-                      {/* Sólo lectura: ver nota de Unitats/Pes lliurades en LineFormCard. */}
-                      <td className="px-1.5 py-2 text-right text-gray-500">
-                        {formatDecimal(line.unitatsLliurades, 2)}
-                      </td>
                       <td className="px-1.5 py-2">
                         {!line.kgEditable ? (
                           <input
@@ -1461,9 +1414,6 @@ export const OrderForm = forwardRef<
                           />
                         )}
                       </td>
-                      <td className="px-1.5 py-2 text-right text-gray-500">
-                        {formatDecimal(line.kgLliurats, 3)}
-                      </td>
                       <td className="px-1.5 py-2">
                         <div className="flex items-center justify-end gap-1">
                           {renderMoveButtons(line, index)}
@@ -1479,7 +1429,7 @@ export const OrderForm = forwardRef<
                     {/* Observacions a la fila de sota, a tota l'amplada (abans
                       eren dues columnes massa estretes). */}
                     <tr className="border-b border-gray-100 last:border-0">
-                      <td colSpan={10} className="px-1.5 pb-3">
+                      <td colSpan={5} className="px-1.5 pb-3">
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                           <label className="flex flex-col gap-1">
                             <span className="text-xs font-medium text-gray-500">
