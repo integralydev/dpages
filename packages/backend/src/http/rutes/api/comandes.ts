@@ -1122,7 +1122,22 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       estat: string;
       detall: string;
       origen: string;
+      aplicarDataProduccioALinies: boolean;
     }>;
+
+    // Tasca 44 (canvi massiu, 17/11/2026): amb aquesta marca, la nova
+    // dataProduccio de capçalera s'aplica també a totes les línies actives
+    // del pedido. Sense ella, la capçalera només és el valor per defecte de
+    // les línies noves (tasca 15) i les existents conserven la seva data —
+    // que és la que fan servir els panells d'Obrador i Producció.
+    const aplicarALinies = cos.aplicarDataProduccioALinies === true;
+    // Ni buida: buidar d'un cop la data de totes les línies les trauria dels
+    // panells, i el canvi massiu no ho ha de poder fer.
+    if (aplicarALinies && !cos.dataProduccio) {
+      return enviarValidacio(reply, 'Cal indicar la dataProduccio per aplicar-la a les línies', [
+        { camp: 'dataProduccio', missatge: 'és obligatòria amb aplicarDataProduccioALinies' },
+      ]);
+    }
 
     // Issue #16 — dataComanda SÍ es editable después de creada (a diferencia
     // de producteId/categoriaId en otros endpoints): regla de negocio
@@ -1248,9 +1263,11 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           dataExpedicio: dataExpedicioResultant,
           dataLliurament: dataLliuramentResultant,
         },
+        // Si la data s'aplica també a les línies, es validen amb la data
+        // nova (la que tindran després del canvi), no amb la que tenen ara.
         liniesExistents.rows.map((l) => ({
           etiqueta: `línia núm. ${l.id_seq}`,
-          dataProduccio: l.data_produccio,
+          dataProduccio: aplicarALinies ? dataProduccioResultant : l.data_produccio,
         })),
       );
       if (violacio) {
@@ -1342,6 +1359,20 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           origenUuid ?? null,
         ],
       );
+
+      if (aplicarALinies) {
+        // Les dates de línia es guarden a mitjanit UTC ("...T00:00:00Z"),
+        // igual que les que crea el formulari (OrderForm, createEmptyLine);
+        // la de capçalera arriba com a data sola ("AAAA-MM-DD").
+        const dataLinies =
+          cos.dataProduccio && /^\d{4}-\d{2}-\d{2}$/.test(cos.dataProduccio)
+            ? `${cos.dataProduccio}T00:00:00Z`
+            : (cos.dataProduccio ?? null);
+        await client.query(
+          `UPDATE comanda_linia SET data_produccio = $2 WHERE comanda_id = $1 AND NOT esborrat`,
+          [comandaUuid, dataLinies],
+        );
+      }
 
       // A diferencia de las incidencias automáticas (sense_preu,
       // article_no_resolt, etc.), ésta la dispara un usuario de oficina a

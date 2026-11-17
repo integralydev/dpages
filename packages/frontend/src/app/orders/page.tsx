@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Copy, FileText, Printer } from 'lucide-react';
+import { CalendarClock, Copy, FileText, Printer } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DataCard, DataCardActions, DataCardField, DataCardGrid } from '@/components/ui/DataCard';
@@ -34,6 +34,7 @@ import { formatData } from '@/lib/dates';
 import { duplicarComandes } from '@/lib/duplicarComandes';
 import { eliminarComanda, potEliminarComanda } from '@/lib/eliminarComanda';
 import { descarregarPdfComandes, descarregarPdfLlistatComandes } from '@/lib/ordersPdf';
+import { CanviMassiuDialog } from './CanviMassiuDialog';
 import { ResultatDuplicatDialog } from './ResultatDuplicatDialog';
 
 const ALL = 'Tots';
@@ -309,6 +310,9 @@ export default function OrdersPage() {
     }
   }
 
+  // Tasca 44: canvi massiu d'estat i/o data de producció.
+  const [isCanviMassiuOpen, setIsCanviMassiuOpen] = useState(false);
+
   // Tasca 13: detall de les comandes seleccionades en PDF (una per pàgina).
   const [isPrintingOrders, setIsPrintingOrders] = useState(false);
 
@@ -399,6 +403,18 @@ export default function OrdersPage() {
                 : seleccionades.length > 1
                   ? `Duplicar comanda (${seleccionades.length})`
                   : 'Duplicar comanda'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsCanviMassiuOpen(true)}
+              disabled={seleccionades.length === 0}
+              title={seleccionades.length === 0 ? 'Selecciona les comandes a canviar' : undefined}
+              className="flex items-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <CalendarClock className="h-4 w-4" />
+              {seleccionades.length > 1
+                ? `Canviar estat / data (${seleccionades.length})`
+                : 'Canviar estat / data'}
             </button>
             <button
               type="button"
@@ -675,6 +691,18 @@ export default function OrdersPage() {
         onCancel={() => {
           setDeleteTarget(null);
           setDeleteError(null);
+        }}
+      />
+
+      <CanviMassiuDialog
+        comandes={seleccionades}
+        isOpen={isCanviMassiuOpen}
+        onClose={(hiHaCanvis) => {
+          setIsCanviMassiuOpen(false);
+          if (hiHaCanvis) {
+            setSeleccio(new Set());
+            refetch();
+          }
         }}
       />
 
