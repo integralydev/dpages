@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { CheckCheck } from 'lucide-react';
 import { PackagingFilterBar, usePackagingFilters } from '@/components/packaging/PackagingFilters';
 import { PackagingCard, PackagingRow } from '@/components/packaging/PackagingLines';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -8,7 +9,7 @@ import { PageHeader } from '@/components/ui/PageHeader';
 import { Pagination } from '@/components/ui/Pagination';
 import { StatCard } from '@/components/ui/StatCard';
 import { usePanellEmpaquetat } from '@/hooks/usePanellEmpaquetat';
-import type { FilaPanellEmpaquetatApi } from '@/lib/api';
+import { api, ApiError, type FilaPanellEmpaquetatApi } from '@/lib/api';
 import { formatDecimal } from '@/lib/decimals';
 
 export default function PackagingPage() {
@@ -72,6 +73,42 @@ export default function PackagingPage() {
     return saveLliurament(comandaId, liniaId, { unitatsLliurades, kgLliurats });
   }
 
+  // Tasca 51 (Ari, 17/11/2026): com «Marcar totes com a fetes» d'Obrador,
+  // confirma d'un cop totes les línies pendents dels filtres actius amb les
+  // unitats i els quilos demanats. Les enviades amb menys (mermes) s'han de
+  // desar abans una per una; el diàleg ho recorda.
+  const pendents = totals?.liniesPendents ?? 0;
+  const [isConfirmingMarkAll, setIsConfirmingMarkAll] = useState(false);
+  const [isMarkingAll, setIsMarkingAll] = useState(false);
+  const [markAllError, setMarkAllError] = useState<string | null>(null);
+  const [markAllNotice, setMarkAllNotice] = useState<string | null>(null);
+
+  async function handleConfirmMarkAll() {
+    setIsMarkingAll(true);
+    setMarkAllError(null);
+    try {
+      // `confirmacio` no aplica: l'acció ja només toca les pendents.
+      const filtresAccio = { ...filters };
+      delete filtresAccio.confirmacio;
+      const resposta = await api.post<{ marcades: number; congeladesOmeses: number }>(
+        '/panells/empaquetat/marcar-lliurades',
+        {},
+        filtresAccio,
+      );
+      setIsConfirmingMarkAll(false);
+      setMarkAllNotice(
+        resposta.congeladesOmeses > 0
+          ? `${resposta.marcades} línies marcades com a enviades. ${resposta.congeladesOmeses} no s'han pogut marcar perquè la comanda està congelada.`
+          : `${resposta.marcades} línies marcades com a enviades.`,
+      );
+      refetch();
+    } catch (caught) {
+      setMarkAllError(caught instanceof ApiError ? caught.message : "No s'han pogut marcar.");
+    } finally {
+      setIsMarkingAll(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -88,9 +125,24 @@ export default function PackagingPage() {
               value={totals?.linies ?? 0}
               secondary={`${totals?.liniesConfirmades ?? 0} confirmades · ${totals?.liniesPendents ?? 0} pendents`}
             />
+            <button
+              type="button"
+              onClick={() => {
+                setMarkAllError(null);
+                setMarkAllNotice(null);
+                setIsConfirmingMarkAll(true);
+              }}
+              disabled={isLoading || pendents === 0}
+              className="flex items-center justify-center gap-2 self-center rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <CheckCheck className="h-4 w-4" />
+              Marcar tot com a lliurat ({pendents})
+            </button>
           </div>
         }
       />
+
+      {markAllNotice && <p className="-mt-6 mb-6 text-sm text-green-700">{markAllNotice}</p>}
 
       <PackagingFilterBar state={filterState} />
 
@@ -195,6 +247,17 @@ export default function PackagingPage() {
         onCancel={handleCancelUndo}
         errorMessage={undoError}
         isConfirming={isUndoing}
+      />
+      <ConfirmDialog
+        isOpen={isConfirmingMarkAll}
+        title="Marcar tot com a lliurat"
+        message={`Es marcaran com a enviades les ${pendents} línies pendents que compleixen els filtres actuals (no només les de la pàgina visible), amb les unitats i els quilos demanats. Les que s'hagin enviat amb menys, desa-les abans una per una. Vols continuar?`}
+        confirmLabel="Marcar tot"
+        confirmingLabel="Marcant..."
+        onConfirm={handleConfirmMarkAll}
+        onCancel={() => setIsConfirmingMarkAll(false)}
+        errorMessage={markAllError}
+        isConfirming={isMarkingAll}
       />
     </div>
   );

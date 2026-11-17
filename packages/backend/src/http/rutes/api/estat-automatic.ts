@@ -1,4 +1,4 @@
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
 /**
  * Tarea 16 (03/10/2026): cuando Empaquetat confirma la última línia activa
@@ -11,7 +11,12 @@ import type { Pool } from 'pg';
  * está grabada, así que de dos confirmaciones simultáneas la última siempre
  * ve las dos.
  */
-export async function tancarSiTotLliurat(dbPool: Pool, comandaUuid: string): Promise<void> {
+export async function tancarSiTotLliurat(
+  // Tasca 51: també un client de transacció, perquè «Marcar tot com a
+  // lliurat» tanqui les comandes dins de la mateixa transacció.
+  dbPool: Pool | PoolClient,
+  comandaUuid: string,
+): Promise<void> {
   await dbPool.query(
     `UPDATE comanda c SET estat = 'tancada'
      WHERE c.id = $1
