@@ -726,7 +726,24 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
     '/panells/empaquetat/marcar-lliurades',
     { preHandler: crearGuardaModul('panell-empaquetat') },
     async (req, reply) => {
-      const filtres = await construirFiltresEmpaquetat(reply, req.query as Record<string, unknown>);
+      const query = req.query as Record<string, unknown>;
+      // Exigeix almenys un filtre de data (d'expedició o de lliurament):
+      // sense, marcaria totes les pendents del sistema, i aquí un error
+      // afecta abonaments i càrrecs i tanca comandes sense desfer massiu.
+      const ambData = [
+        'dataExpedicioDes',
+        'dataExpedicioFins',
+        'dataLliuramentDes',
+        'dataLliuramentFins',
+      ].some((camp) => typeof query[camp] === 'string' && query[camp] !== '');
+      if (!ambData) {
+        enviarValidacio(
+          reply,
+          "Cal filtrar per data d'expedició o de lliurament per marcar-ho tot.",
+        );
+        return;
+      }
+      const filtres = await construirFiltresEmpaquetat(reply, query);
       if (filtres === null) return;
       const { condicions, valors } = filtres;
       const where = [...condicions, 'cl.confirmat_a IS NULL'].join(' AND ');

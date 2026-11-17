@@ -78,6 +78,14 @@ export default function PackagingPage() {
   // unitats i els quilos demanats. Les enviades amb menys (mermes) s'han de
   // desar abans una per una; el diàleg ho recorda.
   const pendents = totals?.liniesPendents ?? 0;
+  // El backend exigeix almenys una data (d'expedició o de lliurament): sense,
+  // es marcarien totes les pendents del sistema.
+  const ambFiltreData = Boolean(
+    filters.dataExpedicioDes ||
+    filters.dataExpedicioFins ||
+    filters.dataLliuramentDes ||
+    filters.dataLliuramentFins,
+  );
   const [isConfirmingMarkAll, setIsConfirmingMarkAll] = useState(false);
   const [isMarkingAll, setIsMarkingAll] = useState(false);
   const [markAllError, setMarkAllError] = useState<string | null>(null);
@@ -132,7 +140,12 @@ export default function PackagingPage() {
                 setMarkAllNotice(null);
                 setIsConfirmingMarkAll(true);
               }}
-              disabled={isLoading || pendents === 0}
+              disabled={isLoading || pendents === 0 || !ambFiltreData}
+              title={
+                ambFiltreData
+                  ? undefined
+                  : "Filtra per data d'expedició o de lliurament per poder marcar-ho tot"
+              }
               className="flex items-center justify-center gap-2 self-center rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <CheckCheck className="h-4 w-4" />
@@ -143,6 +156,11 @@ export default function PackagingPage() {
       />
 
       {markAllNotice && <p className="-mt-6 mb-6 text-sm text-green-700">{markAllNotice}</p>}
+      {!ambFiltreData && pendents > 0 && (
+        <p className="-mt-6 mb-6 text-sm text-gray-500">
+          Per marcar-ho tot com a lliurat, filtra per data d&apos;expedició o de lliurament.
+        </p>
+      )}
 
       <PackagingFilterBar state={filterState} />
 
