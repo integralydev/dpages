@@ -1549,10 +1549,9 @@ Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramen
 > `kgLliurats` = kg pedidos (`confirmatA` = ahora, `confirmatPer` = el
 > usuario), como si se guardaran una a una. Cierra los pedidos que queden
 > con todo entregado (igual que `PATCH .../lliurament`). Las de pedidos
-> congelados se dejan igual. **Exige al menos un filtro de fecha**
-> (`dataExpedicioDes/Fins` o `dataLliuramentDes/Fins`); sin él responde 400
-> `VALIDACIO` y no marca nada (decisión de Francesc, 17/11/2026: un error
-> aquí afecta abonos y cargos y cierra pedidos). Respuesta: `{ "marcades": 34,
+> congelados se dejan igual. Sin filtro mínimo a propósito (Francesc,
+> 17/11/2026): sin filtros marca todas las pendientes; el diálogo de
+> confirmación del frontend ya muestra cuántas son. Respuesta: `{ "marcades": 34,
 "congeladesOmeses": 0 }`. Exige el mòdul `panell-empaquetat`.
 >
 > **`obsEmpaquetat`** (tarea 7, 01/10/2026, migración `0022`): observación

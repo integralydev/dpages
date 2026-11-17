@@ -102,8 +102,7 @@ están documentadas ahí mismo y en el agente `woocommerce-integration`.
   excepción a la confirmación línea a línea — «Marcar tot com a lliurat»
   confirma de una vez todas las pendientes de los filtros activos con lo
   pedido, tras un diálogo que pide desar antes, una a una, las que se
-  enviaron con menos. Sólo con un filtro de fecha (expedición o entrega)
-  puesto: sin él, el backend responde 400.
+  enviaron con menos.
 - Seis estados de pedido: `esborrany`, `oberta`, `en_proces`, `tancada`,
   `amb_incidencia`, `cancellada`. `esborrany` (tarea 33, 03/10/2026): no cuenta
   en los paneles de Obrador, Empaquetat ni Compres; sí en Oficina y Producció. Es el

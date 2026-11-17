@@ -1720,17 +1720,9 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
       // D: un altre transportista → fora del filtre.
       const d = await crear(id('T51-fora'), [7]);
 
-      // Sense filtre de data, es rebutja i no es marca res.
-      const senseData = await fastify.inject({
-        method: 'POST',
-        url: `/api/v1/panells/empaquetat/marcar-lliurades?transportistaId=${id('T51-dins')}`,
-      });
-      expect(senseData.statusCode).toBe(400);
-      expect(cuerpoJson<{ error: { codi: string } }>(senseData).error.codi).toBe('VALIDACIO');
-
       const res = await fastify.inject({
         method: 'POST',
-        url: `/api/v1/panells/empaquetat/marcar-lliurades?transportistaId=${id('T51-dins')}&dataLliuramentDes=2026-08-30&dataLliuramentFins=2026-08-30`,
+        url: `/api/v1/panells/empaquetat/marcar-lliurades?transportistaId=${id('T51-dins')}`,
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ marcades: 3, congeladesOmeses: 1 });
@@ -1757,7 +1749,7 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
       // Un filtre no vàlid no marca res.
       const invalid = await fastify.inject({
         method: 'POST',
-        url: '/api/v1/panells/empaquetat/marcar-lliurades?dataExpedicioDes=2026-08-01&confirmacio=potser',
+        url: '/api/v1/panells/empaquetat/marcar-lliurades?confirmacio=potser',
       });
       expect(invalid.statusCode).toBe(400);
 
