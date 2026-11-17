@@ -56,6 +56,13 @@ function OrderLineCard({ line }: { line: ComandaLiniaApi }) {
         </DataCardGrid>
       </div>
 
+      {/* Tasca 56 (Ari, 17/11/2026): l'observació d'empaquetat de la línia
+          (p. ex. la unitat familiar en cooperatives), que passa als albarans. */}
+      <div className="mt-3 text-sm">
+        <span className="text-xs text-gray-500">Obs. empaquetat</span>
+        <p className="break-words whitespace-pre-line text-gray-900">{line.obsEmpaquetat || '—'}</p>
+      </div>
+
       <label className="mt-3 flex items-center gap-2 border-t border-gray-100 pt-3 text-sm text-gray-700">
         <input
           type="checkbox"
@@ -224,6 +231,10 @@ export default function OfficeOrderDetailPage() {
                     <th className="px-3 py-2 text-left font-medium text-gray-500 break-words">
                       Obs. producció
                     </th>
+                    {/* Tasca 56: observació d'empaquetat de la línia, amb el text. */}
+                    <th className="px-3 py-2 text-left font-medium text-gray-500 break-words">
+                      Obs. empaquetat
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -260,6 +271,9 @@ export default function OfficeOrderDetailPage() {
                           disabled
                           className="h-4 w-4 rounded border-gray-300 text-ink"
                         />
+                      </td>
+                      <td className="px-3 py-2 break-words whitespace-pre-line text-gray-900">
+                        {line.obsEmpaquetat || '—'}
                       </td>
                     </tr>
                   ))}
