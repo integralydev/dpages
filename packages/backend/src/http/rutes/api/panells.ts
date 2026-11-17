@@ -403,6 +403,21 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       }
       const where = condicions.length > 0 ? `WHERE ${condicions.join(' AND ')}` : '';
 
+      // Tasca 54 (Ari, 17/11/2026): `ordre=transportista` ordena per nom del
+      // transportista (A-Z, sense distingir majúscules; les comandes sense
+      // transportista, al final) i, dins de cada un, amb l'ordre de sempre.
+      // Sense `ordre`, l'ordre de sempre. Només dos valors fixos: mai
+      // s'interpola res que vingui de la petició.
+      const ordreHabitual = 'c.data_expedicio ASC NULLS LAST, c.creat_en ASC';
+      let ordre = ordreHabitual;
+      if (query.ordre === 'transportista') {
+        ordre = `LOWER(tr.nom) ASC NULLS LAST, ${ordreHabitual}`;
+      } else if (query.ordre !== undefined && query.ordre !== '') {
+        return enviarValidacio(reply, 'ordre només pot ser transportista', [
+          { camp: 'ordre', missatge: 'ha de ser transportista' },
+        ]);
+      }
+
       const base = `
       FROM comanda c
       LEFT JOIN client cl ON cl.id = c.client_id
@@ -472,7 +487,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
               c.obs_lliurament,
               COALESCE(inc.total_incidencies, 0) AS total_incidencies, inc.tipus_incidencia
        ${base}
-       ORDER BY c.data_expedicio ASC NULLS LAST, c.creat_en ASC
+       ORDER BY ${ordre}
        LIMIT $${valors.length + 1} OFFSET $${valors.length + 2}`,
         [...valors, mida, offset],
       );

@@ -29,6 +29,8 @@ export type OfficePanelFilters = {
   dataComandaFins?: string;
   dataLliuramentDes?: string;
   dataLliuramentFins?: string;
+  /** Tasca 54: per transportista (A-Z); sense valor, l'ordre de sempre. */
+  ordre?: 'transportista';
 };
 
 type UsePanellOficinaResult = {

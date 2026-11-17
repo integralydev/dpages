@@ -1676,4 +1676,65 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
 
     await fastify.close();
   });
+
+  describe('tasca 54 — GET /panells/oficina?ordre=transportista', () => {
+    it('ordena per transportista A-Z (sense majúscules), sense transportista al final; sense ordre, el de sempre', async () => {
+      const fastify = construirServidor();
+      const transportistes = await entorn.poolTest.query<{ nom: string; id_seq: string }>(
+        `INSERT INTO transportista (nom) VALUES ('T54-zeta'), ('T54-Alfa'), ('T54-beta')
+         RETURNING nom, id_seq`,
+      );
+      const id = (nom: string) => Number(transportistes.rows.find((t) => t.nom === nom)!.id_seq);
+
+      // Creades en aquest ordre (zeta, sense, Alfa, beta), totes amb la
+      // mateixa data de comanda pròpia per aïllar-les de la resta del fitxer.
+      for (const transportistaId of [id('T54-zeta'), undefined, id('T54-Alfa'), id('T54-beta')]) {
+        const res = await fastify.inject({
+          method: 'POST',
+          url: '/api/v1/comandes',
+          payload: {
+            dataComanda: '2026-07-15',
+            dataLliurament: '2026-07-30T00:00:00Z',
+            origen: 'manual',
+            ...(transportistaId !== undefined ? { transportistaId } : {}),
+            linies: [{ producteId, unitatsDemanades: 1 }],
+          },
+        });
+        expect(res.statusCode).toBe(201);
+      }
+
+      const filtre = 'dataComandaDes=2026-07-15&dataComandaFins=2026-07-15&mida=200';
+      const perTransportista = cuerpoJson<PanellOficinaApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: `/api/v1/panells/oficina?${filtre}&ordre=transportista`,
+        }),
+      );
+      expect(perTransportista.dades.map((f) => f.transportista)).toEqual([
+        'T54-Alfa',
+        'T54-beta',
+        'T54-zeta',
+        null,
+      ]);
+
+      // Sense ordre: el de sempre (cap té data d'expedició → per creació).
+      const habitual = cuerpoJson<PanellOficinaApi>(
+        await fastify.inject({ method: 'GET', url: `/api/v1/panells/oficina?${filtre}` }),
+      );
+      expect(habitual.dades.map((f) => f.transportista)).toEqual([
+        'T54-zeta',
+        null,
+        'T54-Alfa',
+        'T54-beta',
+      ]);
+
+      const invalid = await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/oficina?ordre=client',
+      });
+      expect(invalid.statusCode).toBe(400);
+
+      await fastify.close();
+    });
+  });
 });
