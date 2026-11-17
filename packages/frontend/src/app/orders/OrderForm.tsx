@@ -1,12 +1,13 @@
 'use client';
 
-import { ChevronDown, ChevronUp, Plus } from 'lucide-react';
+import { ChevronDown, ChevronUp, GripVertical, Plus } from 'lucide-react';
 import {
   forwardRef,
   Fragment,
   useEffect,
   useImperativeHandle,
   useState,
+  type DragEvent,
   type ReactNode,
 } from 'react';
 import { AsyncCombobox, type ComboboxOption } from '@/components/ui/AsyncCombobox';
@@ -718,14 +719,86 @@ export const OrderForm = forwardRef<
     setLineOrderTouched(true);
   }
 
+  // Tasca 37 (nota de l'Ari): a més de les fletxes, arrossegar la línia amb
+  // el ratolí fins on es vulgui (amb 15 línies, les fletxes no basten).
+  // Drag and drop natiu d'HTML: només amb ratolí; al mòbil, les fletxes.
+  // La línia arrossegada ocupa el lloc de la línia on es deixa anar.
+  const [draggedLineId, setDraggedLineId] = useState<number | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<number | null>(null);
+
+  function moveLineTo(id: number, targetId: number) {
+    if (id === targetId) return;
+    setLines((current) => {
+      const from = current.findIndex((line) => line.id === id);
+      const to = current.findIndex((line) => line.id === targetId);
+      if (from < 0 || to < 0) return current;
+      const next = [...current];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved!);
+      return next;
+    });
+    setLineOrderTouched(true);
+  }
+
+  function endDrag() {
+    setDraggedLineId(null);
+    setDropTargetId(null);
+  }
+
+  /** Handlers per a qualsevol element d'una línia on es pugui deixar anar. */
+  function dropTargetProps(line: LineDraft) {
+    return {
+      onDragOver: (event: DragEvent<HTMLElement>) => {
+        if (draggedLineId === null) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        if (dropTargetId !== line.id) setDropTargetId(line.id);
+      },
+      onDrop: (event: DragEvent<HTMLElement>) => {
+        if (draggedLineId === null) return;
+        event.preventDefault();
+        moveLineTo(draggedLineId, line.id);
+        endDrag();
+      },
+    };
+  }
+
+  /** Classes de la línia mentre s'arrossega: on aniria i la que es mou. */
+  function dragClassName(line: LineDraft) {
+    if (draggedLineId === null) return '';
+    if (line.id === draggedLineId) return 'opacity-50';
+    return line.id === dropTargetId ? 'bg-amber-50' : '';
+  }
+
   function renderMoveButtons(line: LineDraft, index: number) {
     return (
-      <MoveLineButtons
-        disabled={isFrozen}
-        isFirst={index === 0}
-        isLast={index === lines.length - 1}
-        onMove={(direction) => moveLine(line.id, direction)}
-      />
+      <div className="flex shrink-0 items-center">
+        {!isFrozen && lines.length > 1 && (
+          <span
+            draggable
+            title="Arrossega per moure la línia"
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = 'move';
+              // Firefox no arrenca l'arrossegament sense dades.
+              event.dataTransfer.setData('text/plain', String(line.id));
+              const linia = event.currentTarget.closest('[data-linia-arrossegable]');
+              if (linia instanceof HTMLElement) event.dataTransfer.setDragImage(linia, 16, 16);
+              setDraggedLineId(line.id);
+            }}
+            onDragEnd={endDrag}
+            className="flex h-10 w-5 cursor-grab items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 active:cursor-grabbing"
+          >
+            <GripVertical className="h-4 w-4" aria-hidden />
+            <span className="sr-only">Arrossega per moure la línia</span>
+          </span>
+        )}
+        <MoveLineButtons
+          disabled={isFrozen}
+          isFirst={index === 0}
+          isLast={index === lines.length - 1}
+          onMove={(direction) => moveLine(line.id, direction)}
+        />
+      </div>
     );
   }
 
@@ -1243,17 +1316,23 @@ export const OrderForm = forwardRef<
 
         <div className="flex flex-col gap-3 xl:hidden">
           {lines.map((line, index) => (
-            <LineFormCard
+            <div
               key={line.id}
-              line={line}
-              products={products}
-              tarifaId={tarifaId}
-              tariffCoverage={tariffCoverage}
-              disabled={isFrozen}
-              onUpdate={(patch) => updateLine(line.id, patch)}
-              onRemove={() => removeLine(line)}
-              moveButtons={renderMoveButtons(line, index)}
-            />
+              data-linia-arrossegable
+              {...dropTargetProps(line)}
+              className={`rounded-xl ${dragClassName(line)}`}
+            >
+              <LineFormCard
+                line={line}
+                products={products}
+                tarifaId={tarifaId}
+                tariffCoverage={tariffCoverage}
+                disabled={isFrozen}
+                onUpdate={(patch) => updateLine(line.id, patch)}
+                onRemove={() => removeLine(line)}
+                moveButtons={renderMoveButtons(line, index)}
+              />
+            </div>
           ))}
           <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-right text-sm font-semibold text-gray-900">
             Total pes demanat (kg): {formatNombre(totalOrderedWeightKg, 3)}
@@ -1292,7 +1371,11 @@ export const OrderForm = forwardRef<
                 const product = products.find((p) => p.id === line.producte?.id);
                 return (
                   <Fragment key={line.id}>
-                    <tr>
+                    <tr
+                      data-linia-arrossegable
+                      {...dropTargetProps(line)}
+                      className={dragClassName(line)}
+                    >
                       <td className="px-1.5 py-2">
                         <AsyncCombobox
                           value={line.producte?.id ?? null}
@@ -1369,7 +1452,10 @@ export const OrderForm = forwardRef<
                     </tr>
                     {/* Observacions a la fila de sota, a tota l'amplada (abans
                       eren dues columnes massa estretes). */}
-                    <tr className="border-b border-gray-100 last:border-0">
+                    <tr
+                      {...dropTargetProps(line)}
+                      className={`border-b border-gray-100 last:border-0 ${dragClassName(line)}`}
+                    >
                       <td colSpan={4} className="px-1.5 pb-3">
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                           <label className="flex flex-col gap-1">
