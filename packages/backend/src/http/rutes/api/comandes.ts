@@ -8,6 +8,7 @@ import type {
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { Pool, PoolClient } from 'pg';
 import { pool } from '../../../db/pool.js';
+import { calcularDatesComandaNova, diaMadrid } from '../../../transform/dates-per-defecte.js';
 import {
   condicioDataFinsInclusiva,
   construirPaginacio,
@@ -932,8 +933,10 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
 
   /**
    * Tarea 17 (03/10/2026): duplicar una o varias comandas. Cada copia nace
-   * en `esborrany`, con data_comanda = hoy (Europe/Madrid) y el resto de
-   * fechas en blanco (cabecera y líneas). Se copian cliente, tarifa,
+   * en `esborrany`, con data_comanda = hoy (Europe/Madrid), producción y
+   * expedición por defecto (punt 38, 17/11/2026: el lunes siguiente — hoy si
+   * es lunes — y el martes siguiente; la de producción también en las
+   * líneas) y data_lliurament en blanco. Se copian cliente, tarifa,
    * transportista, dirección y observaciones de cabecera; de las líneas,
    * producto, unidades y observaciones. No se copia nada de empaquetado
    * (unidades/kg enviados, confirmación, bultos) ni la congelación.
@@ -983,6 +986,11 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       ]);
     }
 
+    // Un solo "hoy" para todas las copias de la petición.
+    const ara = new Date();
+    const avui = diaMadrid(ara);
+    const datesNoves = calcularDatesComandaNova(ara);
+
     const client = await pool.connect();
     const creades: ComandaDuplicadaApi[] = [];
     try {
@@ -993,17 +1001,23 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         const nova = await client.query<{ id: string; id_seq: string; num: string }>(
           `INSERT INTO comanda (origen_id, estat, client_id, tarifa_id, transportista_id,
                                 poblacio_desti, adreca_lliurament, obs_lliurament, obs_produccio,
-                                data_comanda)
+                                data_comanda, data_produccio, data_expedicio)
            SELECT CASE WHEN o.codi = $2
                        THEN (SELECT id FROM origen_comanda WHERE codi = 'manual')
                        ELSE c.origen_id END,
                   'esborrany', c.client_id, c.tarifa_id, c.transportista_id,
                   c.poblacio_desti, c.adreca_lliurament, c.obs_lliurament, c.obs_produccio,
-                  (now() AT TIME ZONE 'Europe/Madrid')::date
+                  $3::date, $4::timestamptz, $5::timestamptz
            FROM comanda c JOIN origen_comanda o ON o.id = c.origen_id
            WHERE c.id = $1
            RETURNING id, id_seq, num`,
-          [original.id, CODI_ORIGEN_WOOCOMMERCE],
+          [
+            original.id,
+            CODI_ORIGEN_WOOCOMMERCE,
+            avui,
+            datesNoves.dataProduccio,
+            datesNoves.dataExpedicio,
+          ],
         );
         const novaUuid = nova.rows[0]!.id;
 
@@ -1050,8 +1064,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           await client.query(
             `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                          preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-                                         obs_produccio, obs_empaquetat)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                                         obs_produccio, obs_empaquetat, data_produccio)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
             [
               novaUuid,
               ordinal,
@@ -1063,6 +1077,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
               pesEditable,
               l.obs_produccio,
               l.obs_empaquetat,
+              datesNoves.dataProduccio,
             ],
           );
           if (sensePreu) {

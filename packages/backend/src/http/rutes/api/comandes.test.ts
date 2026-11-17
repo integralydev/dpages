@@ -4,6 +4,7 @@ import type {
   ComandaResumApi,
   RespostaPaginada,
 } from '@dpages/shared';
+import { calcularDatesPerDefecte } from '@dpages/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { construirServidor as construirServidorType } from '../../servidor.js';
 import {
@@ -3002,8 +3003,10 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
 
   describe('tasca 17 — POST /comandes/duplicar', () => {
     const avui = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Madrid' }).format(new Date());
+    // Punt 38: producció el dilluns següent (avui si és dilluns), expedició l'endemà.
+    const datesAvui = calcularDatesPerDefecte(avui)!;
 
-    it("copia capçalera i línies en esborrany, amb data d'avui, sense altres dates ni empaquetat", async () => {
+    it("copia capçalera i línies en esborrany, amb data d'avui, producció i expedició per defecte i sense empaquetat", async () => {
       const fastify = construirServidor();
       const creada = await fastify.inject({
         method: 'POST',
@@ -3066,8 +3069,8 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
         client: { id: clientId },
         obsLliurament: 'Porta del darrere',
         dataComanda: `${avui}T00:00:00Z`,
-        dataProduccio: null,
-        dataExpedicio: null,
+        dataProduccio: `${datesAvui.dataProduccio}T00:00:00Z`,
+        dataExpedicio: `${datesAvui.dataExpedicio}T00:00:00Z`,
         dataLliurament: null,
         bultos: null,
         congelada: false,
@@ -3079,7 +3082,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
         kgEditable: false,
         preuUnitari: '9.86',
         obsEmpaquetat: 'Família A',
-        dataProduccio: null,
+        dataProduccio: `${datesAvui.dataProduccio}T00:00:00Z`,
         unitatsLliurades: '0.00',
         kgLliurats: '0.000',
         confirmatA: null,

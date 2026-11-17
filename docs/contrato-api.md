@@ -273,11 +273,13 @@ Etiquetas para mostrar (el backend no las envía, van en el frontend):
 > resuelto, cliente sin datos…) se registra pero no saca el pedido de
 > `esborrany`.
 >
-> **Fecha de producción de los pedidos de WooCommerce** (tarea 39): al
-> crearse, la cabecera y sus líneas reciben `dataProduccio` = el lunes siguiente
-> (`AAAA-MM-DDT00:00:00Z`) si se crearon entre el martes a las 16:00 y el
-> domingo a las 24:00, hora de Europe/Madrid; si no, `null`. Las
-> actualizaciones posteriores del sync no la tocan.
+> **Fechas de producción y expedición de los pedidos de WooCommerce**
+> (punt 38, 17/11/2026; reemplaza la tarea 39): al crearse, la cabecera y
+> sus líneas reciben `dataProduccio` = el lunes siguiente al día de creación
+> en Europe/Madrid (ese mismo lunes si se creó un lunes), y la cabecera
+> `dataExpedicio` = el martes siguiente (`AAAA-MM-DDT00:00:00Z`). Ya no hay
+> corte del martes a las 16:00. Las actualizaciones posteriores del sync no
+> las tocan.
 >
 > **`cancellada`** (29/09/2026, petición de Ari): el pedido sigue existiendo
 > y se ve en `GET /comandes` (también con `?estat=cancellada`), pero **no
@@ -1025,8 +1027,10 @@ repetidos cuentan una vez). Respuesta `201`:
 }
 ```
 
-> - Cada copia nace en `esborrany`, con `dataComanda` = hoy (Europe/Madrid)
->   y el resto de fechas en `null` (cabecera y líneas).
+> - Cada copia nace en `esborrany`, con `dataComanda` = hoy (Europe/Madrid),
+>   `dataProduccio` = el lunes siguiente (hoy si es lunes; también en todas
+>   las líneas), `dataExpedicio` = el martes siguiente (punt 38, 17/11/2026)
+>   y `dataLliurament` en `null`.
 > - Se copian cliente, tarifa, transportista, población, dirección y
 >   observaciones de cabecera; de las líneas, producto, unidades, kg (sólo
 >   en artículos a medida) y observaciones de producción y empaquetado.

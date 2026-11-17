@@ -103,9 +103,12 @@ están documentadas ahí mismo y en el agente `woocommerce-integration`.
   `amb_incidencia`, `cancellada`. `esborrany` (tarea 33, 03/10/2026): no cuenta
   en los paneles de Obrador, Empaquetat ni Compres; sí en Oficina y Producció. Es el
   estado con el que entran los pedidos de WooCommerce (tarea 38); una
-  incidencia del sync no los saca de `esborrany`. Tarea 39: al crearse, la
-  cabecera y sus líneas reciben fecha de producción = lunes siguiente si entraron de martes
-  16:00 a domingo 24:00 (Europe/Madrid); si no, sin fecha. Petición de Ari (29/09/2026): un pedido `cancellada` no cuenta
+  incidencia del sync no los saca de `esborrany`. Punt 38 (17/11/2026,
+  reemplaza la regla de la tarea 39 y su corte de martes 16:00): los pedidos nuevos,
+  duplicados y de WooCommerce nacen con producción = lunes siguiente a la fecha del
+  pedido (ese mismo lunes si es lunes; Europe/Madrid) y expedición = el martes
+  siguiente; sólo valores iniciales, editables (`calcularDatesPerDefecte` en
+  `packages/shared`). Petición de Ari (29/09/2026): un pedido `cancellada` no cuenta
   en **ninguno** de los cinco paneles (ni en filas ni en totales), pero sigue
   visible en la pantalla de pedidos (filtro de estado incluido). Única
   excepción: en el Panel Oficina aparece si se filtra explícitamente por

@@ -4,7 +4,7 @@ import { env } from '../config/env.js';
 import { pool as poolPerDefecte } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
 import { parsearFechaGmt } from '../sync/fechas.js';
-import { calcularDataProduccioWoo } from './data-produccio-woo.js';
+import { calcularDatesComandaNova, diaMadrid, type DatesComandaNova } from './dates-per-defecte.js';
 import { calcularPesLinia } from './pes.js';
 import { resolverArticle } from './resolucio-article.js';
 import { ConflicteIdentitatClient, resolverOCrearClient } from './resolucio-client.js';
@@ -200,15 +200,15 @@ async function crearComanda(
   client: PoolClient,
   wooOrder: WooOrder,
   clientId: string | null,
-  dataProduccio: Date | null,
+  dates: DatesComandaNova,
 ): Promise<string> {
   // Tarea 38 (03/10/2026): toda comanda de WooCommerce nace en esborrany —
   // oficina la revisa y la pasa a oberta, y sólo entonces cuenta en
   // Obrador y Empaquetat.
   const origenId = await resolverOrigenWoocommerceUuid(client);
   const res = await client.query<{ id: string }>(
-    `INSERT INTO comanda (woo_order_id, origen_id, estat, estat_web, poblacio_desti, total, data_modificacio_woo, client_id, data_comanda, data_produccio, adreca_lliurament, obs_lliurament)
-     VALUES ($1, $2, 'esborrany', $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    `INSERT INTO comanda (woo_order_id, origen_id, estat, estat_web, poblacio_desti, total, data_modificacio_woo, client_id, data_comanda, data_produccio, data_expedicio, adreca_lliurament, obs_lliurament)
+     VALUES ($1, $2, 'esborrany', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      RETURNING id`,
     [
       wooOrder.id,
@@ -224,8 +224,13 @@ async function crearComanda(
       // proxy correcto — mejor que date_modified_gmt (cambia con cada
       // actualización posterior) o que "ahora" (el momento del sync, que
       // puede ir minutos u horas detrás del pedido real).
-      parsearFechaGmt(wooOrder.date_created_gmt),
-      dataProduccio,
+      //
+      // Punt 38: se guarda el día en hora de Cataluña (antes la columna DATE
+      // se quedaba con el día UTC), que es el mismo del que salen las fechas
+      // de producción y expedición por defecto.
+      diaMadrid(parsearFechaGmt(wooOrder.date_created_gmt)),
+      dates.dataProduccio,
+      dates.dataExpedicio,
       construirAdrecaLliurament(wooOrder),
       construirObsLliurament(wooOrder),
     ],
@@ -554,7 +559,8 @@ export async function transformarComanda(
     conflicteIdentitat = err.index;
   }
 
-  // Tarea 39: la data de producció de la CABECERA sólo se calcula al crear
+  // Punt 38 (antes tarea 39): las fechas de producción y expedición de la
+  // CABECERA sólo se calculan al crear
   // la comanda; en actualizaciones posteriores es del sistema (ADR-005) y
   // no se toca (ver crearComanda vs actualitzarCapcaleraSiCorrespon, que no
   // la incluye). Para las LÍNEAS es distinto (ajuste del 08/10/2026,
@@ -562,14 +568,15 @@ export async function transformarComanda(
   // comanda ya existente hereda la fecha que la cabecera YA tiene (si la
   // tiene) — antes quedaba siempre en NULL, invisible para Obrador/Producció
   // (que filtran por `comanda_linia.data_produccio`, ver `panells.ts`).
-  const dataProduccioNoves = existent
-    ? existent.data_produccio
-    : calcularDataProduccioWoo(parsearFechaGmt(wooOrder.date_created_gmt));
+  const datesNoves = existent
+    ? null
+    : calcularDatesComandaNova(parsearFechaGmt(wooOrder.date_created_gmt));
+  const dataProduccioNoves = existent ? existent.data_produccio : datesNoves!.dataProduccio;
 
   let comandaId: string;
 
   if (!existent) {
-    comandaId = await crearComanda(client, wooOrder, clientId, dataProduccioNoves);
+    comandaId = await crearComanda(client, wooOrder, clientId, datesNoves!);
   } else {
     comandaId = existent.id;
     await vincularClientSiFalta(client, comandaId, clientId);

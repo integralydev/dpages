@@ -1,5 +1,6 @@
 'use client';
 
+import { calcularDatesPerDefecte } from '@dpages/shared';
 import { ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import {
   forwardRef,
@@ -212,7 +213,10 @@ function dateOnly(value: string | null): string {
 
 /** Únic default real dels 3 camps de data obligatoris (issue #16) — cap dels dos (dataComanda/dataLliurament) té default al backend, ver docblock de ComandaCreacioApi a @dpages/shared. */
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  // Dia d'avui a Catalunya, no en UTC: entre les 00:00 i les 01:00/02:00
+  // l'UTC encara és el dia anterior (i d'aquest dia surten les dates per
+  // defecte del punt 38).
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Madrid' }).format(new Date());
 }
 
 /**
@@ -670,12 +674,20 @@ export const OrderForm = forwardRef<
   // només s'activa en mode creació.
   //
   const [dataComanda, setDataComanda] = useState(initialData?.dataComanda?.slice(0, 10) ?? today());
+  // Punt 38 (17/11/2026): en creació, producció i expedició surten
+  // precarregades segons la Data comanda (dilluns següent — o aquell
+  // mateix dilluns — i el dimarts següent, ver calcularDatesPerDefecte).
+  // Es recalculen si canvia la Data comanda, fins que l'usuari toca a mà
+  // cadascuna d'elles; en edició no hi ha cap valor per defecte.
+  const datesInicials = mode === 'create' ? calcularDatesPerDefecte(dataComanda) : null;
+  const [produccioManual, setProduccioManual] = useState(mode !== 'create');
+  const [expedicioManual, setExpedicioManual] = useState(mode !== 'create');
   // Tasca 15 (01/10/2026): data de producció de CAPÇALERA, camp propi
   // (abans fusionada amb dataComanda). Fa de valor per defecte de les
   // línies (ver addLine i handleHeaderProductionDateChange) i de mínim de
-  // les seves dates. Sense valor per defecte en creació.
+  // les seves dates. En creació, valor per defecte del punt 38.
   const [dataProduccio, setDataProduccio] = useState(
-    initialData?.dataProduccio?.slice(0, 10) ?? '',
+    initialData?.dataProduccio?.slice(0, 10) ?? datesInicials?.dataProduccio ?? '',
   );
   // Issue #16 — passa a OBLIGATÒRIA només en creació (POST /comandes la
   // rebutja buida); en edició segueix sent nullable de veritat a la base
@@ -691,7 +703,7 @@ export const OrderForm = forwardRef<
     initialData?.dataLliurament?.slice(0, 10) ?? '',
   );
   const [dataExpedicio, setDataExpedicio] = useState(
-    initialData?.dataExpedicio?.slice(0, 10) ?? '',
+    initialData?.dataExpedicio?.slice(0, 10) ?? datesInicials?.dataExpedicio ?? '',
   );
   const [bultos, setBultos] = useState(initialData?.bultos ?? 1);
   const [adrecaLliurament, setAdrecaLliurament] = useState(initialData?.adrecaLliurament ?? '');
@@ -746,9 +758,8 @@ export const OrderForm = forwardRef<
   // Tasca 15: en canviar la data de producció de capçalera, s'actualitzen
   // les línies que encara seguien la de capçalera (o no en tenien cap); les
   // que l'usuari ha canviat a mà es respecten.
-  function handleHeaderProductionDateChange(value: string) {
+  function applyHeaderProductionDate(value: string) {
     const anterior = dataProduccio;
-    setHeaderTouched(true);
     setDataProduccio(value);
     for (const line of lines) {
       const actual = dateOnly(line.dataProduccio);
@@ -756,6 +767,23 @@ export const OrderForm = forwardRef<
         updateLine(line.id, { dataProduccio: value ? `${value}T00:00:00Z` : null });
       }
     }
+  }
+
+  function handleHeaderProductionDateChange(value: string) {
+    setHeaderTouched(true);
+    setProduccioManual(true);
+    applyHeaderProductionDate(value);
+  }
+
+  // Punt 38: mentre no s'hagin tocat a mà, producció i expedició segueixen
+  // la Data comanda.
+  function handleDataComandaChange(value: string) {
+    setHeaderTouched(true);
+    setDataComanda(value);
+    const dates = calcularDatesPerDefecte(value);
+    if (!dates) return;
+    if (!produccioManual) applyHeaderProductionDate(dates.dataProduccio);
+    if (!expedicioManual) setDataExpedicio(dates.dataExpedicio);
   }
 
   // Tasca 37: la línia nova s'afegeix a dalt de tot, no a baix.
@@ -1176,10 +1204,7 @@ export const OrderForm = forwardRef<
             type="date"
             disabled={isFrozen}
             value={dataComanda}
-            onChange={(event) => {
-              setHeaderTouched(true);
-              setDataComanda(event.target.value);
-            }}
+            onChange={(event) => handleDataComandaChange(event.target.value)}
             error={headerDateErrors.dataComanda}
           />
           {/* Tasca 15: es copia per defecte a les línies (cada línia la pot
@@ -1199,6 +1224,7 @@ export const OrderForm = forwardRef<
             value={dataExpedicio}
             onChange={(event) => {
               setHeaderTouched(true);
+              setExpedicioManual(true);
               setDataExpedicio(event.target.value);
             }}
             error={headerDateErrors.dataExpedicio}
