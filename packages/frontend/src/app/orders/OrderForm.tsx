@@ -1,6 +1,6 @@
 'use client';
 
-import { GripVertical, Plus } from 'lucide-react';
+import { ChevronDown, ChevronUp, GripVertical, Plus } from 'lucide-react';
 import {
   forwardRef,
   Fragment,
@@ -357,6 +357,49 @@ function resolvePriceRisk(
   return { risk: status === 'not-covered', isChecking: false };
 }
 
+/**
+ * Tasca 37 (Ari, 20/10/2026): moure una línia amunt o avall (p. ex. posar
+ * un afegit de pollastre amb la resta de pollastre). Botons petits, un
+ * sobre l'altre, per no eixamplar la columna d'accions. Només a les
+ * targetes (mòbil), on no es pot arrossegar (18/11/2026).
+ */
+function MoveLineButtons({
+  disabled,
+  isFirst,
+  isLast,
+  onMove,
+}: {
+  disabled: boolean;
+  isFirst: boolean;
+  isLast: boolean;
+  onMove: (direction: -1 | 1) => void;
+}) {
+  const className =
+    'flex h-5 w-7 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:cursor-not-allowed disabled:text-gray-300 disabled:hover:bg-transparent';
+  return (
+    <div className="flex shrink-0 flex-col">
+      <button
+        type="button"
+        aria-label="Moure la línia amunt"
+        disabled={disabled || isFirst}
+        onClick={() => onMove(-1)}
+        className={className}
+      >
+        <ChevronUp className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        aria-label="Moure la línia avall"
+        disabled={disabled || isLast}
+        onClick={() => onMove(1)}
+        className={className}
+      >
+        <ChevronDown className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
 function LineFormCard({
   line,
   products,
@@ -665,11 +708,23 @@ export const OrderForm = forwardRef<
     setDirtyLineIds((current) => new Set(current).add(newLine.id));
   }
 
+  function moveLine(id: number, direction: -1 | 1) {
+    setLines((current) => {
+      const index = current.findIndex((line) => line.id === id);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target]!, next[index]!];
+      return next;
+    });
+    setLineOrderTouched(true);
+  }
+
   // Tasca 37 (nota de l'Ari): arrossegar la línia amb el ratolí fins on es
-  // vulgui. Al principi també hi havia fletxes amunt/avall, però tenir les
-  // dues coses confonia i es van treure (Francesc, 18/11/2026): només queda
-  // l'arrossegament. Drag and drop natiu d'HTML: només amb ratolí, no amb
-  // pantalla tàctil.
+  // vulgui. Tenir alhora fletxes amunt/avall i l'asa confonia (Francesc,
+  // 18/11/2026): a la taula (escriptori) només l'asa; a les targetes
+  // (mòbil), on el drag and drop natiu d'HTML no funciona amb el dit, només
+  // les fletxes.
   // La línia arrossegada ocupa el lloc de la línia on es deixa anar.
   const [draggedLineId, setDraggedLineId] = useState<number | null>(null);
   const [dropTargetId, setDropTargetId] = useState<number | null>(null);
@@ -739,6 +794,19 @@ export const OrderForm = forwardRef<
         <GripVertical className="h-4 w-4" aria-hidden />
         <span className="sr-only">Arrossega per moure la línia</span>
       </span>
+    );
+  }
+
+  /** Tasca 37: fletxes amunt/avall de les targetes (mòbil). */
+  function renderCardMoveButtons(line: LineDraft, index: number) {
+    if (lines.length < 2) return null;
+    return (
+      <MoveLineButtons
+        disabled={isFrozen}
+        isFirst={index === 0}
+        isLast={index === lines.length - 1}
+        onMove={(direction) => moveLine(line.id, direction)}
+      />
     );
   }
 
@@ -1255,13 +1323,8 @@ export const OrderForm = forwardRef<
         )}
 
         <div className="flex flex-col gap-3 xl:hidden">
-          {lines.map((line) => (
-            <div
-              key={line.id}
-              data-linia-arrossegable
-              {...dropTargetProps(line)}
-              className={`rounded-xl ${dragClassName(line)}`}
-            >
+          {lines.map((line, index) => (
+            <div key={line.id} className="rounded-xl">
               <LineFormCard
                 line={line}
                 products={products}
@@ -1270,7 +1333,7 @@ export const OrderForm = forwardRef<
                 disabled={isFrozen}
                 onUpdate={(patch) => updateLine(line.id, patch)}
                 onRemove={() => removeLine(line)}
-                moveButtons={renderMoveButtons(line)}
+                moveButtons={renderCardMoveButtons(line, index)}
               />
             </div>
           ))}
