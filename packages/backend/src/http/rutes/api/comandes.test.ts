@@ -3550,4 +3550,48 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
       await fastify.close();
     });
   });
+
+  describe('punt 35 — GET /comandes?tipusClient=', () => {
+    it('filtra les comandes pel tipus del client', async () => {
+      const fastify = construirServidor();
+      const clients = await entorn.poolTest.query<{ id: string }>(
+        `INSERT INTO client (nom, poblacio, tipus)
+         VALUES ('Fix [redactat]', 'Vic', 'fix'), ('Esporàdic [redactat]', 'Vic', 'esporadic')
+         RETURNING id`,
+      );
+      const comandes = await entorn.poolTest.query<{ id_seq: string }>(
+        `INSERT INTO comanda (origen_id, estat, data_comanda, client_id)
+         SELECT (SELECT id FROM origen_comanda WHERE codi = 'manual'), 'oberta', '2026-11-18', id
+         FROM unnest($1::uuid[]) WITH ORDINALITY AS u(id, ordre)
+         ORDER BY ordre
+         RETURNING id_seq`,
+        [clients.rows.map((fila) => fila.id)],
+      );
+      const [delFix, delEsporadic] = comandes.rows.map((fila) => Number(fila.id_seq));
+
+      const fixos = cuerpoJson<RespostaPaginada<ComandaResumApi>>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/comandes?tipusClient=fix&mida=200' }),
+      );
+      const idsFixos = fixos.dades.map((comanda) => comanda.id);
+      expect(idsFixos).toContain(delFix);
+      expect(idsFixos).not.toContain(delEsporadic);
+
+      const esporadics = cuerpoJson<RespostaPaginada<ComandaResumApi>>(
+        await fastify.inject({
+          method: 'GET',
+          url: '/api/v1/comandes?tipusClient=esporadic&mida=200',
+        }),
+      );
+      const idsEsporadics = esporadics.dades.map((comanda) => comanda.id);
+      expect(idsEsporadics).toContain(delEsporadic);
+      expect(idsEsporadics).not.toContain(delFix);
+
+      const invalid = await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/comandes?tipusClient=habitual',
+      });
+      expect(invalid.statusCode).toBe(400);
+      await fastify.close();
+    });
+  });
 });

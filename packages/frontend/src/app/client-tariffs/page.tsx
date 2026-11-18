@@ -12,13 +12,22 @@ import { SearchInput } from '@/components/ui/SearchInput';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { useClientTariffs, type ClientFormValues } from '@/hooks/useClientTariffs';
 import { useRates } from '@/hooks/useRates';
-import type { ClientApi } from '@/lib/api';
+import type { ClientApi, TipusClient } from '@/lib/api';
 import { ClientFormModal } from './ClientFormModal';
+import { TipusClientSelect } from './TipusClientSelect';
 import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
 
 const ALL_FEM = 'Totes';
 
-function ClientTariffCard({ client, onEdit }: { client: ClientApi; onEdit: () => void }) {
+function ClientTariffCard({
+  client,
+  onEdit,
+  onTipusChange,
+}: {
+  client: ClientApi;
+  onEdit: () => void;
+  onTipusChange: (id: number, tipus: TipusClient) => Promise<void>;
+}) {
   return (
     <DataCard>
       <p className="font-semibold text-gray-900">{client.codi}</p>
@@ -29,6 +38,9 @@ function ClientTariffCard({ client, onEdit }: { client: ClientApi; onEdit: () =>
           <DataCardField label="Població">{client.poblacio ?? '—'}</DataCardField>
           <DataCardField label="Tarifa assignada">
             {client.tarifa ? <Badge>{client.tarifa.nom}</Badge> : '—'}
+          </DataCardField>
+          <DataCardField label="Tipus de client">
+            <TipusClientSelect client={client} onChange={onTipusChange} />
           </DataCardField>
         </DataCardGrid>
       </div>
@@ -83,8 +95,17 @@ export default function ClientTariffsPage() {
     }),
     [search, tarifaId],
   );
-  const { data, paginacio, setPagina, isLoading, error, refetch, createClient, editClient } =
-    useClientTariffs(clientFilters, { mida: MIDA_PAGINA_LLISTATS });
+  const {
+    data,
+    paginacio,
+    setPagina,
+    isLoading,
+    error,
+    refetch,
+    createClient,
+    editClient,
+    setClientTipus,
+  } = useClientTariffs(clientFilters, { mida: MIDA_PAGINA_LLISTATS });
 
   async function handleSave(values: ClientFormValues) {
     if (formState?.mode === 'edit' && formState.client) {
@@ -141,6 +162,7 @@ export default function ClientTariffsPage() {
                 key={client.id}
                 client={client}
                 onEdit={() => setFormState({ mode: 'edit', client })}
+                onTipusChange={setClientTipus}
               />
             ))}
           </div>
@@ -149,19 +171,22 @@ export default function ClientTariffsPage() {
             <table className="w-full table-fixed text-sm">
               <thead className="border-b border-gray-200">
                 <tr>
-                  <th className="w-[15%] px-2 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[12%] px-2 py-2 text-left font-medium text-gray-500 break-words">
                     Codi
                   </th>
-                  <th className="w-[28%] px-2 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[26%] px-2 py-2 text-left font-medium text-gray-500 break-words">
                     Client
                   </th>
-                  <th className="w-[20%] px-2 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[18%] px-2 py-2 text-left font-medium text-gray-500 break-words">
                     Població
                   </th>
-                  <th className="w-[22%] px-2 py-2 text-left font-medium text-gray-500 break-words">
+                  <th className="w-[18%] px-2 py-2 text-left font-medium text-gray-500 break-words">
                     Tarifa assignada
                   </th>
-                  <th className="w-[15%] px-2 py-2 text-right font-medium text-gray-500 break-words">
+                  <th className="w-[14%] px-2 py-2 text-left font-medium text-gray-500 break-words">
+                    Tipus de client
+                  </th>
+                  <th className="w-[12%] px-2 py-2 text-right font-medium text-gray-500 break-words">
                     Accions
                   </th>
                 </tr>
@@ -178,6 +203,9 @@ export default function ClientTariffsPage() {
                     </td>
                     <td className="px-2 py-3 break-words">
                       {client.tarifa ? <Badge>{client.tarifa.nom}</Badge> : '—'}
+                    </td>
+                    <td className="px-2 py-3">
+                      <TipusClientSelect client={client} onChange={setClientTipus} />
                     </td>
                     <td className="px-2 py-3 text-right">
                       <div className="flex justify-end">

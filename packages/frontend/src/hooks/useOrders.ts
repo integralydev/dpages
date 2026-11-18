@@ -11,6 +11,7 @@ import {
   type LiniaEdicioApi,
   type Paginacio,
   type RespostaPaginada,
+  type TipusClient,
 } from '@/lib/api';
 import { usePageClamp } from './usePageClamp';
 import { MIDA_PAGINA_LLISTATS } from '@/lib/paginacio';
@@ -28,6 +29,8 @@ export type OrderListFilters = {
   dataLliuramentDes?: string;
   dataLliuramentFins?: string;
   cerca?: string;
+  /** Punt 35: comandes dels clients d'aquest tipus (GET /comandes?tipusClient=). */
+  tipusClient?: TipusClient;
 };
 
 export type OrderFormValues = {

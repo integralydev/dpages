@@ -1,3 +1,4 @@
+import { TIPUS_CLIENT, type TipusClient } from '@dpages/shared';
 import type {
   ComandaDetallApi,
   ComandaDuplicadaApi,
@@ -603,6 +604,17 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
     if (typeof query.cerca === 'string' && query.cerca.trim() !== '') {
       condicions.push(`(c.num ILIKE $${valors.length + 1} OR cl.nom ILIKE $${valors.length + 1})`);
       valors.push(`%${query.cerca.trim()}%`);
+    }
+    // Punt 35 (18/11/2026): comandes dels clients d'un tipus (fix /
+    // esporadic). Una comanda sense client no és de cap tipus: no surt.
+    if (query.tipusClient !== undefined && query.tipusClient !== '') {
+      if (!TIPUS_CLIENT.includes(query.tipusClient as TipusClient)) {
+        return enviarValidacio(reply, 'tipusClient no és vàlid', [
+          { camp: 'tipusClient', missatge: `ha de ser ${TIPUS_CLIENT.join(' o ')}` },
+        ]);
+      }
+      condicions.push(`cl.tipus = $${valors.length + 1}`);
+      valors.push(query.tipusClient);
     }
     const where = condicions.length > 0 ? `WHERE ${condicions.join(' AND ')}` : '';
 

@@ -6,13 +6,14 @@ import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { TextField } from '@/components/ui/TextField';
 import type { ClientFormValues } from '@/hooks/useClientTariffs';
 import { ApiError, type ClientApi, type TarifaResumApi } from '@/lib/api';
+import { TIPUS_CLIENT_LABELS, TIPUS_CLIENT_OPTIONS, tipusClientPerLabel } from '@/lib/tipusClient';
 
 const NO_TARIFF = 'Sense tarifa';
 
 // codi no es editable acá: el backend lo autogenera siempre, así que un
 // error de ese campo no tiene dónde mostrarse junto a un input
 // — cae al mensaje genérico.
-type FieldErrors = { nom?: string; poblacio?: string; tarifaId?: string };
+type FieldErrors = { nom?: string; poblacio?: string; tarifaId?: string; tipus?: string };
 
 export function ClientFormModal({
   mode,
@@ -32,6 +33,10 @@ export function ClientFormModal({
   const [poblacio, setPoblacio] = useState(initialData?.poblacio ?? '');
   const [nom, setNom] = useState(initialData?.nom ?? '');
   const [tariffName, setTariffName] = useState(initialData?.tarifa?.nom ?? NO_TARIFF);
+  // Punt 35: per defecte, esporàdic (com al backend).
+  const [tipusLabel, setTipusLabel] = useState(
+    TIPUS_CLIENT_LABELS[initialData?.tipus ?? 'esporadic'],
+  );
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -52,12 +57,18 @@ export function ClientFormModal({
         nif: initialData?.nif ?? null,
         email: initialData?.email ?? null,
         telefon: initialData?.telefon ?? null,
+        tipus: tipusClientPerLabel(tipusLabel) ?? 'esporadic',
       });
     } catch (caught) {
       if (caught instanceof ApiError) {
         const nextFieldErrors: FieldErrors = {};
         for (const detall of caught.detalls ?? []) {
-          if (detall.camp === 'nom' || detall.camp === 'poblacio' || detall.camp === 'tarifaId') {
+          if (
+            detall.camp === 'nom' ||
+            detall.camp === 'poblacio' ||
+            detall.camp === 'tarifaId' ||
+            detall.camp === 'tipus'
+          ) {
             nextFieldErrors[detall.camp] = detall.missatge;
           }
         }
@@ -115,6 +126,15 @@ export function ClientFormModal({
           {fieldErrors.tarifaId && (
             <p className="mt-1.5 text-xs text-red-600">{fieldErrors.tarifaId}</p>
           )}
+        </div>
+        <div>
+          <SimpleDropdown
+            label="Tipus de client"
+            options={TIPUS_CLIENT_OPTIONS.map((opcio) => opcio.label)}
+            value={tipusLabel}
+            onChange={setTipusLabel}
+          />
+          {fieldErrors.tipus && <p className="mt-1.5 text-xs text-red-600">{fieldErrors.tipus}</p>}
         </div>
         {formError && <p className="text-sm text-red-600">{formError}</p>}
       </div>

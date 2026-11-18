@@ -1,4 +1,4 @@
-import type { ClientApi } from '@dpages/shared';
+import { TIPUS_CLIENT, type ClientApi, type TipusClient } from '@dpages/shared';
 import type { FastifyInstance } from 'fastify';
 import { assignarCodiAutogenerat } from '../../../db/client-codi.js';
 import { pool } from '../../../db/pool.js';
@@ -25,11 +25,20 @@ interface FilaClient {
   telefon: string | null;
   poblacio: string | null;
   actiu: boolean;
+  tipus: TipusClient;
   tarifa_id_seq: string | null;
   tarifa_nom: string | null;
   transportista_id_seq: string | null;
   transportista_nom: string | null;
 }
+
+/** Punt 35: `undefined` si no ve; `false` si ve amb un valor que no és vàlid. */
+function llegirTipus(valor: unknown): TipusClient | undefined | false {
+  if (valor === undefined) return undefined;
+  return TIPUS_CLIENT.includes(valor as TipusClient) ? (valor as TipusClient) : false;
+}
+
+const MISSATGE_TIPUS = `ha de ser ${TIPUS_CLIENT.join(' o ')}`;
 
 function aApi(fila: FilaClient): ClientApi {
   return {
@@ -49,11 +58,12 @@ function aApi(fila: FilaClient): ClientApi {
         ? { id: Number(fila.transportista_id_seq), nom: fila.transportista_nom }
         : null,
     actiu: fila.actiu,
+    tipus: fila.tipus,
   };
 }
 
 const SELECT_CLIENT = `
-  SELECT cl.id_seq, cl.codi, cl.nom, cl.nif, cl.email, cl.telefon, cl.poblacio, cl.actiu,
+  SELECT cl.id_seq, cl.codi, cl.nom, cl.nif, cl.email, cl.telefon, cl.poblacio, cl.actiu, cl.tipus,
          t.id_seq AS tarifa_id_seq, t.nom AS tarifa_nom,
          tr.id_seq AS transportista_id_seq, tr.nom AS transportista_nom
   FROM client cl
@@ -88,6 +98,16 @@ export function registrarRutesClients(fastify: FastifyInstance): void {
         const tarifaUuid = await resolverTarifaUuid(pool, tarifaIdPublic);
         condicions.push(`cl.tarifa_id = $${valors.length + 1}`);
         valors.push(tarifaUuid ?? '00000000-0000-0000-0000-000000000000');
+      }
+      if (query.tipus !== undefined && query.tipus !== '') {
+        const tipus = llegirTipus(query.tipus);
+        if (!tipus) {
+          return enviarValidacio(reply, 'tipus no és vàlid', [
+            { camp: 'tipus', missatge: MISSATGE_TIPUS },
+          ]);
+        }
+        condicions.push(`cl.tipus = $${valors.length + 1}`);
+        valors.push(tipus);
       }
       if (query.actiu === 'true' || query.actiu === 'false') {
         condicions.push(`cl.actiu = $${valors.length + 1}`);
@@ -137,9 +157,12 @@ export function registrarRutesClients(fastify: FastifyInstance): void {
         email: string;
         telefon: string;
         nif: string;
+        tipus: string;
       }>;
 
       const detalls: { camp: string; missatge: string }[] = [];
+      const tipus = llegirTipus(cos.tipus);
+      if (tipus === false) detalls.push({ camp: 'tipus', missatge: MISSATGE_TIPUS });
       if (!cos.nom || cos.nom.trim() === '') {
         detalls.push({ camp: 'nom', missatge: 'és obligatori' });
       }
@@ -161,8 +184,8 @@ export function registrarRutesClients(fastify: FastifyInstance): void {
       }
 
       const insertat = await pool.query<{ id: string; id_seq: string }>(
-        `INSERT INTO client (nom, poblacio, tarifa_id, email, telefon, nif)
-       VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO client (nom, poblacio, tarifa_id, email, telefon, nif, tipus)
+       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, 'esporadic'))
        RETURNING id, id_seq`,
         [
           cos.nom!.trim(),
@@ -171,6 +194,7 @@ export function registrarRutesClients(fastify: FastifyInstance): void {
           cos.email ?? null,
           cos.telefon ?? null,
           cos.nif ?? null,
+          tipus ?? null,
         ],
       );
 
@@ -214,7 +238,16 @@ export function registrarRutesClients(fastify: FastifyInstance): void {
         tarifaId: number | null;
         transportistaDefecteId: number | null;
         actiu: boolean;
+        tipus: string;
       }>;
+
+      // Punt 35: el llistat de clients el canvia directament (sense obrir la fitxa).
+      const tipus = llegirTipus(cos.tipus);
+      if (tipus === false) {
+        return enviarValidacio(reply, 'tipus no és vàlid', [
+          { camp: 'tipus', missatge: MISSATGE_TIPUS },
+        ]);
+      }
 
       let tarifaUuid: string | null | undefined;
       if (cos.tarifaId !== undefined) {
@@ -254,7 +287,8 @@ export function registrarRutesClients(fastify: FastifyInstance): void {
            poblacio = CASE WHEN $10 THEN $11 ELSE poblacio END,
            tarifa_id = CASE WHEN $12 THEN $13 ELSE tarifa_id END,
            transportista_defecte_id = CASE WHEN $14 THEN $15 ELSE transportista_defecte_id END,
-           actiu = COALESCE($16, actiu)
+           actiu = COALESCE($16, actiu),
+           tipus = COALESCE($17, tipus)
          WHERE id_seq = $1
          RETURNING id`,
           [
@@ -274,6 +308,7 @@ export function registrarRutesClients(fastify: FastifyInstance): void {
             transportistaUuid !== undefined,
             transportistaUuid ?? null,
             cos.actiu ?? null,
+            tipus ?? null,
           ],
         );
 

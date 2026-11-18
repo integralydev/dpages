@@ -178,7 +178,16 @@ export interface ClientApi {
   tarifa: ReferenciaApi | null;
   transportistaDefecte: ReferenciaApi | null;
   actiu: boolean;
+  /** Punt 35: tipus de client; per defecte `esporadic`. */
+  tipus: TipusClient;
 }
+
+/**
+ * Punt 35 (18/11/2026): valors de `ClientApi.tipus`. A pantalla: «Fix» i
+ * «Esporàdic». Per afegir-ne un, també el CHECK de la columna `client.tipus`.
+ */
+export const TIPUS_CLIENT = ['fix', 'esporadic'] as const;
+export type TipusClient = (typeof TIPUS_CLIENT)[number];
 
 /**
  * `POST /clients` — alta manual (teléfono/WhatsApp no traen cliente de
@@ -196,6 +205,7 @@ export interface ClientCreacioApi {
   email?: string;
   telefon?: string;
   nif?: string;
+  tipus?: TipusClient;
 }
 
 export interface TransportistaApi {

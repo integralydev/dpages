@@ -110,6 +110,10 @@ están documentadas ahí mismo y en el agente `woocommerce-integration`.
   visible en la pantalla de pedidos (filtro de estado incluido). Única
   excepción: en el Panel Oficina aparece si se filtra explícitamente por
   `estat=cancellada` (nunca con "Tots").
+- Tipo de cliente (punt 35, 18/11/2026): `client.tipus` = `fix` o `esporadic`
+  (por defecto `esporadic`); se edita desde el listado de clientes y filtra
+  Comandes (`?tipusClient=`). Valores en `TIPUS_CLIENT` (`packages/shared`)
+  y en el CHECK de la columna.
 - Cinco paneles: oficina, obrador, empaquetado, compres, producció/planificació.
   **Sólo empaquetado y compres editan**; los otros tres son de sólo lectura con
   filtros y subtotales. El Panell de Compres (tarea 41 del Excel del cliente,

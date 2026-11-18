@@ -98,6 +98,13 @@ Puesta en producción objetivo: **finales de septiembre de 2026**.
   (hora de Cataluña) se producen el lunes siguiente; los que entran el
   lunes o el martes antes de las 16:00 quedan sin fecha. Sólo al crear el
   pedido, en la cabecera y en todas sus líneas; después la fecha es del sistema.
+- Tipo de cliente (punt 35, reformulado con el cliente el 18/11/2026): cada
+  cliente es «Fix» o «Esporàdic» (todos empiezan como esporádicos; oficina
+  marca los fijos). Se cambia desde el listado de Fitxes de clients sin
+  abrir la ficha, y Comandes tiene un filtro «Tipus de client» para ver los
+  pedidos de los fijos o de los esporádicos. De momento sólo esos dos
+  valores. Sustituye la petición original del punto 35 (pegar una lista de
+  clientes separada por comas).
 - El sistema sólo lee de WooCommerce. Nunca escribe de vuelta. La credencial
   de API es de sólo lectura.
 
