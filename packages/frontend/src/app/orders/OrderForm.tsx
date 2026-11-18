@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronDown, ChevronUp, GripVertical, Plus } from 'lucide-react';
+import { GripVertical, Plus } from 'lucide-react';
 import {
   forwardRef,
   Fragment,
@@ -357,48 +357,6 @@ function resolvePriceRisk(
   return { risk: status === 'not-covered', isChecking: false };
 }
 
-/**
- * Tasca 37 (Ari, 20/10/2026): moure una línia amunt o avall (p. ex. posar
- * un afegit de pollastre amb la resta de pollastre). Botons petits, un
- * sobre l'altre, per no eixamplar la columna d'accions.
- */
-function MoveLineButtons({
-  disabled,
-  isFirst,
-  isLast,
-  onMove,
-}: {
-  disabled: boolean;
-  isFirst: boolean;
-  isLast: boolean;
-  onMove: (direction: -1 | 1) => void;
-}) {
-  const className =
-    'flex h-5 w-7 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:cursor-not-allowed disabled:text-gray-300 disabled:hover:bg-transparent';
-  return (
-    <div className="flex shrink-0 flex-col">
-      <button
-        type="button"
-        aria-label="Moure la línia amunt"
-        disabled={disabled || isFirst}
-        onClick={() => onMove(-1)}
-        className={className}
-      >
-        <ChevronUp className="h-4 w-4" />
-      </button>
-      <button
-        type="button"
-        aria-label="Moure la línia avall"
-        disabled={disabled || isLast}
-        onClick={() => onMove(1)}
-        className={className}
-      >
-        <ChevronDown className="h-4 w-4" />
-      </button>
-    </div>
-  );
-}
-
 function LineFormCard({
   line,
   products,
@@ -707,21 +665,11 @@ export const OrderForm = forwardRef<
     setDirtyLineIds((current) => new Set(current).add(newLine.id));
   }
 
-  function moveLine(id: number, direction: -1 | 1) {
-    setLines((current) => {
-      const index = current.findIndex((line) => line.id === id);
-      const target = index + direction;
-      if (index < 0 || target < 0 || target >= current.length) return current;
-      const next = [...current];
-      [next[index], next[target]] = [next[target]!, next[index]!];
-      return next;
-    });
-    setLineOrderTouched(true);
-  }
-
-  // Tasca 37 (nota de l'Ari): a més de les fletxes, arrossegar la línia amb
-  // el ratolí fins on es vulgui (amb 15 línies, les fletxes no basten).
-  // Drag and drop natiu d'HTML: només amb ratolí; al mòbil, les fletxes.
+  // Tasca 37 (nota de l'Ari): arrossegar la línia amb el ratolí fins on es
+  // vulgui. Al principi també hi havia fletxes amunt/avall, però tenir les
+  // dues coses confonia i es van treure (Francesc, 18/11/2026): només queda
+  // l'arrossegament. Drag and drop natiu d'HTML: només amb ratolí, no amb
+  // pantalla tàctil.
   // La línia arrossegada ocupa el lloc de la línia on es deixa anar.
   const [draggedLineId, setDraggedLineId] = useState<number | null>(null);
   const [dropTargetId, setDropTargetId] = useState<number | null>(null);
@@ -770,35 +718,27 @@ export const OrderForm = forwardRef<
     return line.id === dropTargetId ? 'bg-amber-50' : '';
   }
 
-  function renderMoveButtons(line: LineDraft, index: number) {
+  /** Tasca 37: l'asa (⋮⋮) per arrossegar la línia; no n'hi ha si no es pot moure. */
+  function renderMoveButtons(line: LineDraft) {
+    if (isFrozen || lines.length < 2) return null;
     return (
-      <div className="flex shrink-0 items-center">
-        {!isFrozen && lines.length > 1 && (
-          <span
-            draggable
-            title="Arrossega per moure la línia"
-            onDragStart={(event) => {
-              event.dataTransfer.effectAllowed = 'move';
-              // Firefox no arrenca l'arrossegament sense dades.
-              event.dataTransfer.setData('text/plain', String(line.id));
-              const linia = event.currentTarget.closest('[data-linia-arrossegable]');
-              if (linia instanceof HTMLElement) event.dataTransfer.setDragImage(linia, 16, 16);
-              setDraggedLineId(line.id);
-            }}
-            onDragEnd={endDrag}
-            className="flex h-10 w-5 cursor-grab items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 active:cursor-grabbing"
-          >
-            <GripVertical className="h-4 w-4" aria-hidden />
-            <span className="sr-only">Arrossega per moure la línia</span>
-          </span>
-        )}
-        <MoveLineButtons
-          disabled={isFrozen}
-          isFirst={index === 0}
-          isLast={index === lines.length - 1}
-          onMove={(direction) => moveLine(line.id, direction)}
-        />
-      </div>
+      <span
+        draggable
+        title="Arrossega per moure la línia"
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = 'move';
+          // Firefox no arrenca l'arrossegament sense dades.
+          event.dataTransfer.setData('text/plain', String(line.id));
+          const linia = event.currentTarget.closest('[data-linia-arrossegable]');
+          if (linia instanceof HTMLElement) event.dataTransfer.setDragImage(linia, 16, 16);
+          setDraggedLineId(line.id);
+        }}
+        onDragEnd={endDrag}
+        className="flex h-10 w-5 cursor-grab items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 active:cursor-grabbing"
+      >
+        <GripVertical className="h-4 w-4" aria-hidden />
+        <span className="sr-only">Arrossega per moure la línia</span>
+      </span>
     );
   }
 
@@ -1315,7 +1255,7 @@ export const OrderForm = forwardRef<
         )}
 
         <div className="flex flex-col gap-3 xl:hidden">
-          {lines.map((line, index) => (
+          {lines.map((line) => (
             <div
               key={line.id}
               data-linia-arrossegable
@@ -1330,7 +1270,7 @@ export const OrderForm = forwardRef<
                 disabled={isFrozen}
                 onUpdate={(patch) => updateLine(line.id, patch)}
                 onRemove={() => removeLine(line)}
-                moveButtons={renderMoveButtons(line, index)}
+                moveButtons={renderMoveButtons(line)}
               />
             </div>
           ))}
@@ -1367,7 +1307,7 @@ export const OrderForm = forwardRef<
               </tr>
             </thead>
             <tbody>
-              {lines.map((line, index) => {
+              {lines.map((line) => {
                 const product = products.find((p) => p.id === line.producte?.id);
                 return (
                   <Fragment key={line.id}>
@@ -1440,7 +1380,7 @@ export const OrderForm = forwardRef<
                       </td>
                       <td className="px-1.5 py-2">
                         <div className="flex items-center justify-end gap-1">
-                          {renderMoveButtons(line, index)}
+                          {renderMoveButtons(line)}
                           <IconButton
                             variant="delete"
                             label="Eliminar línia"
