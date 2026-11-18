@@ -19,6 +19,7 @@ import {
   ShoppingBasket,
   ShoppingCart,
   Truck,
+  Warehouse,
   UserCog,
   X,
 } from 'lucide-react';
@@ -69,6 +70,8 @@ const NAV_GROUPS: NavGroup[] = [
         modul: 'tarifes-clients',
         icon: ContactRound,
       },
+      // Punt 55: proveïdors, al costat de les fitxes de clients.
+      { label: 'Proveïdors', href: '/proveidors', modul: 'proveidors', icon: Warehouse },
     ],
   },
   {

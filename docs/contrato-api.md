@@ -468,6 +468,10 @@ Filtros: `?categoriaId=1&tipus=simple&actiu=true&cerca=llom&agrupacioProduccio=L
 
 ---
 
+> **`proveidorDefecte` (punt 55, 18/11/2026):** `{ id, nom }` o `null`, el
+> «proveïdor preferit» del artículo. Se escribe con `proveidorDefecteId` en
+> `POST`/`PATCH /productes` (`null` lo quita; inexistente → `400 VALIDACIO`).
+
 ### 4.3 · Llistat de tarifes
 
 La matriz de precios: una fila por artículo, una columna por tarifa, editable
@@ -661,6 +665,26 @@ Respuesta `201`, misma forma que una fila de `GET /transportistes`.
 un `codi` repetido responde `409 CONFLICTE`.
 
 **`PATCH /transportistes/:id`** — cuerpo parcial (`nom` y/o `codi`).
+
+### 4.4 bis · Proveïdors
+
+Punt 55 (reformulado con el cliente, 18/11/2026). Lectura: módulos operativos
+(los mismos que `GET /transportistes`), `catalog` y `proveidors`. Escritura:
+módulo `proveidors` (la migración 0030 se lo dio a todos los roles con
+`tarifes-clients`).
+
+**`GET /proveidors`** — paginado, ordenado por nombre:
+`{ "dades": [{ "id": 3, "nom": "Granja Nord" }], "paginacio": { … } }`
+
+**`POST /proveidors`** — `{ "nom": "Granja Nord" }`. Obligatorio, máximo 100
+caracteres, único sin distinguir mayúsculas (repetido → `409 CONFLICTE`).
+Respuesta `201` con el proveedor.
+
+**`PATCH /proveidors/:id`** — `{ "nom": "…" }`, mismas reglas.
+
+**`DELETE /proveidors/:id`** — borrado de verdad (`204`), pero **sólo si
+ningún artículo (`proveidorDefecte`) ni ninguna línea de pedido lo usa**; si
+no, `409 CONFLICTE` diciendo cuántos lo usan. Las FK son `RESTRICT`.
 
 ---
 
@@ -1161,6 +1185,15 @@ las líneas de un pedido. Cuerpo: `{ "ids": [38012, 38010, 38011] }` con
 > - Pedido de WooCommerce: cuenta como edición de Oficina y fija
 >   `linies_editades_a` (ADR-026); el sync deja de tocar sus líneas.
 
+> **Proveïdor de la línia (punt 55, 18/11/2026).** `ComandaLiniaApi.proveidor`
+> (`{ id, nom }` o `null`). Al crear una línea (`POST /comandes`,
+> `POST /comandes/:id/linies`): sin la clave `proveidorId`, el proveedor
+> preferido del artículo (`ProducteApi.proveidorDefecte`); `null`, ninguno;
+> un id, ese (inexistente → `400 VALIDACIO`). `PATCH .../linies/:liniaId`
+> acepta `proveidorId` (`null` lo quita). `POST /comandes/duplicar` copia el
+> de cada línea. El sync de WooCommerce pone el preferido del artículo al
+> crear la línea y después no lo toca.
+
 **`PATCH /comandes/:comandaId/linies/:liniaId`** (capa 30) — editar una
 línea existente.
 
@@ -1295,6 +1328,10 @@ real, no un total sumado. `TotalsPanellObradorApi` no cambió:
 líneas individuales visibles.
 
 **`GET /panells/obrador`**
+
+> **`proveidorId` (punt 55, 18/11/2026):** líneas cuyo proveedor es ese
+> (`?proveidorId=3`) o que no tienen (`?proveidorId=sense`). Otro valor →
+> `400 VALIDACIO`. Aplica también a la vista acumulada y a la exportación.
 
 Filtros: `?dataProduccioDes=&dataProduccioFins=&categoriaId=&tipus=&producte=&cercaProducte=&format=&envasat=&clientId=&agrupacioProduccio=&observacions=&treball=`
 

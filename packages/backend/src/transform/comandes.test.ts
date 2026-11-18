@@ -1045,6 +1045,43 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
       expect(resultado.errors).toBe(0);
     });
   });
+
+  it("punt 55: la línia nova de la web agafa el proveïdor preferit de l'article, i després no es toca", async () => {
+    const proveidor = await poolTest.query<{ id: string }>(
+      `INSERT INTO proveidor (nom) VALUES ('Proveïdor web') RETURNING id`,
+    );
+    const proveidorId = proveidor.rows[0]!.id;
+    await poolTest.query(`UPDATE producte SET proveidor_defecte_id = $1 WHERE id = $2`, [
+      proveidorId,
+      producteLlomId,
+    ]);
+    try {
+      const comanda = { ...comandaSimple, id: 96155 };
+      const creada = await conClient((client) => transformarComanda(client, comanda));
+      const linia = await poolTest.query<{ id: string; proveidor_id: string | null }>(
+        `SELECT id, proveidor_id FROM comanda_linia WHERE comanda_id = $1`,
+        [creada.comandaId],
+      );
+      expect(linia.rows[0]?.proveidor_id).toBe(proveidorId);
+
+      // Oficina el treu; una actualització posterior de la web no el torna a posar.
+      await poolTest.query(`UPDATE comanda_linia SET proveidor_id = NULL WHERE id = $1`, [
+        linia.rows[0]!.id,
+      ]);
+      await conClient((client) =>
+        transformarComanda(client, { ...comanda, date_modified_gmt: '2026-08-21T10:00:00' }),
+      );
+      const despres = await poolTest.query<{ proveidor_id: string | null }>(
+        `SELECT proveidor_id FROM comanda_linia WHERE id = $1`,
+        [linia.rows[0]!.id],
+      );
+      expect(despres.rows[0]?.proveidor_id).toBeNull();
+    } finally {
+      await poolTest.query(`UPDATE producte SET proveidor_defecte_id = NULL WHERE id = $1`, [
+        producteLlomId,
+      ]);
+    }
+  });
 });
 
 describe('construirAdrecaLliurament / construirObsLliurament (funciones puras, sin base de datos)', () => {

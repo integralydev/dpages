@@ -387,8 +387,11 @@ async function processarLinies(
            comanda_id, ordinal, woo_line_item_id, producte_id, alias_producte_id,
            woo_product_id, woo_variation_id, woo_sku,
            unitats_demanades, preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-           data_produccio
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+           data_produccio, proveidor_id
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                   -- Punt 55: el proveïdor preferit de l'article, només en
+                   -- crear la línia (l'UPDATE de dalt no el toca mai).
+                   (SELECT proveidor_defecte_id FROM producte WHERE id = $4))`,
         [comandaId, ...valores, dataProduccioNoves],
       );
     }

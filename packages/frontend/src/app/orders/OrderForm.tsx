@@ -18,6 +18,7 @@ import { IconButton } from '@/components/ui/IconButton';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { TextField } from '@/components/ui/TextField';
 import type { OrderFormValues, OrderLineChanges } from '@/hooks/useOrders';
+import { useProveidors } from '@/hooks/useProveidors';
 import {
   api,
   type ClientApi,
@@ -28,6 +29,7 @@ import {
   type LiniaEdicioApi,
   type OrigenComandaApi,
   type ProducteApi,
+  type ProveidorApi,
   type RespostaPaginada,
   type TarifaResumApi,
   type TransportistaApi,
@@ -36,6 +38,7 @@ import { ESTAT_LABELS } from '@/lib/comandaEstat';
 import { formatDecimal, formatNombre, parseDecimalInput } from '@/lib/decimals';
 import { calculateOrderedWeightKg } from '@/lib/orderCalculations';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
+import { ProveidorLiniaSelect } from './ProveidorLiniaSelect';
 
 const NO_CLIENT = 'Selecciona client...';
 const NO_TARIFF = 'Sense tarifa';
@@ -129,6 +132,8 @@ function createEmptyLine(ordinal: number, dataProduccio: string | null): LineDra
     id: tempLineId--,
     ordinal,
     producte: null,
+    // Punt 55: s'omple amb el preferit en triar l'article (applyProduct).
+    proveidor: null,
     categoria: null,
     format: null,
     envasat: null,
@@ -170,6 +175,8 @@ function toLiniaCreacio(line: LineDraft): LiniaCreacioApi {
     // body de POST/PATCH segueix esperant un JS number.
     unitatsDemanades: Number(line.unitatsDemanades),
     kgDemanats: line.kgEditable ? line.kgDemanats : undefined,
+    // Punt 55: explícit (el preferit ja l'ha posat applyProduct); null = cap.
+    proveidorId: line.proveidor?.id ?? null,
     // Issue #21 — LiniaCreacioApi.dataProduccio torna a admetre null: ja no
     // hi ha cap bloqueig de submit que en garanteixi la presència.
     dataProduccio: line.dataProduccio,
@@ -188,6 +195,7 @@ function toLiniaEdicio(line: LineDraft): LiniaEdicioApi {
   return {
     unitatsDemanades: Number(line.unitatsDemanades),
     kgDemanats: line.kgEditable ? line.kgDemanats : undefined,
+    proveidorId: line.proveidor?.id ?? null,
     dataProduccio: line.dataProduccio,
     obsProduccio: line.obsProduccio || null,
     obsEmpaquetat: line.obsEmpaquetat || null,
@@ -288,6 +296,7 @@ function applyProduct(line: LineDraft, product: ProducteApi | undefined): LineDr
     return {
       ...line,
       producte: null,
+      proveidor: null,
       categoria: null,
       format: null,
       envasat: null,
@@ -298,6 +307,8 @@ function applyProduct(line: LineDraft, product: ProducteApi | undefined): LineDr
   return {
     ...line,
     producte: { id: product.id, codi: product.codi, descripcio: product.descripcio },
+    // Punt 55: en triar (o canviar) l'article, el seu proveïdor preferit.
+    proveidor: product.proveidorDefecte,
     categoria: product.categoria?.nom ?? null,
     format: product.format,
     envasat: product.envasat,
@@ -402,6 +413,7 @@ function MoveLineButtons({
 function LineFormCard({
   line,
   products,
+  proveidors,
   tarifaId,
   tariffCoverage,
   disabled,
@@ -412,6 +424,7 @@ function LineFormCard({
 }: {
   line: LineDraft;
   products: ProducteApi[];
+  proveidors: ProveidorApi[];
   tarifaId: number | null;
   tariffCoverage: Map<string, TariffCoverageStatus>;
   disabled: boolean;
@@ -462,6 +475,12 @@ function LineFormCard({
               el preu més endavant.
             </p>
           )}
+          <ProveidorLiniaSelect
+            value={line.proveidor}
+            proveidors={proveidors}
+            disabled={disabled}
+            onChange={(proveidor) => onUpdate({ proveidor })}
+          />
         </div>
         {moveButtons}
         <IconButton
@@ -639,6 +658,8 @@ export const OrderForm = forwardRef<
   },
   ref,
 ) {
+  // Punt 55: proveïdors per al select de cada línia.
+  const { data: proveidors } = useProveidors();
   const [estat, setEstat] = useState<string>(initialData?.estat ?? 'oberta');
   // Creació: cap valor triat encara (null). Edició: arrenca amb l'origen
   // actual del pedido — pot ser "manual" (valor històric, no elegible per
@@ -1299,6 +1320,7 @@ export const OrderForm = forwardRef<
               key={line.id}
               line={line}
               products={products}
+              proveidors={proveidors}
               tarifaId={tarifaId}
               tariffCoverage={tariffCoverage}
               disabled={isFrozen}
@@ -1382,6 +1404,12 @@ export const OrderForm = forwardRef<
                             Sense preu — cal completar més endavant.
                           </p>
                         )}
+                        <ProveidorLiniaSelect
+                          value={line.proveidor}
+                          proveidors={proveidors}
+                          disabled={isFrozen}
+                          onChange={(proveidor) => updateLine(line.id, { proveidor })}
+                        />
                       </td>
                       <td className="px-1.5 py-2 break-words text-gray-500">
                         {line.categoria ?? '—'}

@@ -110,6 +110,11 @@ están documentadas ahí mismo y en el agente `woocommerce-integration`.
   visible en la pantalla de pedidos (filtro de estado incluido). Única
   excepción: en el Panel Oficina aparece si se filtra explícitamente por
   `estat=cancellada` (nunca con "Tots").
+- Proveedores (punt 55, 18/11/2026): tabla `proveidor` (sólo nombre),
+  `producte.proveidor_defecte_id` (preferido, opcional) y
+  `comanda_linia.proveidor_id` (opcional; al crear la línea, el preferido
+  del artículo, también desde el sync de WooCommerce). Filtro en Obrador
+  (`?proveidorId=`, también `sense`). Sólo se borra si nadie lo usa.
 - Cinco paneles: oficina, obrador, empaquetado, compres, producció/planificació.
   **Sólo empaquetado y compres editan**; los otros tres son de sólo lectura con
   filtros y subtotales. El Panell de Compres (tarea 41 del Excel del cliente,

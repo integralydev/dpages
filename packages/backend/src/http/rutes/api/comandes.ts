@@ -8,6 +8,7 @@ import type {
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { Pool, PoolClient } from 'pg';
 import { pool } from '../../../db/pool.js';
+import { resolverProveidorUuid } from './proveidors.js';
 import {
   condicioDataFinsInclusiva,
   construirPaginacio,
@@ -204,6 +205,8 @@ interface FilaComandaLinia {
   obs_produccio: string | null;
   obs_empaquetat: string | null;
   esborrat: boolean;
+  proveidor_id_seq: string | null;
+  proveidor_nom: string | null;
 }
 
 function aApiLinia(fila: FilaComandaLinia): ComandaLiniaApi {
@@ -217,6 +220,10 @@ function aApiLinia(fila: FilaComandaLinia): ComandaLiniaApi {
             codi: fila.producte_codi,
             descripcio: fila.producte_descripcio,
           }
+        : null,
+    proveidor:
+      fila.proveidor_id_seq !== null && fila.proveidor_nom !== null
+        ? { id: Number(fila.proveidor_id_seq), nom: fila.proveidor_nom }
         : null,
     categoria: fila.categoria_nom,
     format: fila.format,
@@ -242,10 +249,12 @@ const SELECT_COMANDA_LINIA = `
          cl.unitats_demanades, cl.pes_calculat_kg AS kg_demanats,
          cl.pes_editable, cl.unitats_lliurades, cl.kg_lliurats, cl.confirmat_a, cl.preu_unitari,
          (cl.unitats_demanades * cl.preu_unitari)::numeric(14,2) AS total_linia,
-         cl.data_produccio, cl.obs_produccio, cl.obs_empaquetat, cl.esborrat
+         cl.data_produccio, cl.obs_produccio, cl.obs_empaquetat, cl.esborrat,
+         pv.id_seq AS proveidor_id_seq, pv.nom AS proveidor_nom
   FROM comanda_linia cl
   LEFT JOIN producte p ON p.id = cl.producte_id
   LEFT JOIN categoria_producte cat ON cat.id = p.categoria_id
+  LEFT JOIN proveidor pv ON pv.id = cl.proveidor_id
   WHERE cl.comanda_id = $1 AND NOT cl.esborrat
   ORDER BY cl.ordinal ASC
 `;
@@ -645,6 +654,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       linies: {
         producteId: number;
         unitatsDemanades: number;
+        proveidorId?: number | null;
         kgDemanats?: string;
         dataProduccio?: string | null;
         obsProduccio?: string | null;
@@ -771,6 +781,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       dataProduccio: string | null;
       obsProduccio: string | null;
       obsEmpaquetat: string | null;
+      proveidorUuid: string | null;
     }[] = [];
 
     for (let i = 0; i < cos.linies!.length; i++) {
@@ -792,13 +803,24 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         id: string;
         pes_kg: string | null;
         preu_venda: string | null;
-      }>('SELECT id, pes_kg, preu_venda FROM producte WHERE id_seq = $1', [linia.producteId]);
+        proveidor_defecte_id: string | null;
+      }>('SELECT id, pes_kg, preu_venda, proveidor_defecte_id FROM producte WHERE id_seq = $1', [
+        linia.producteId,
+      ]);
       if (!producte.rows[0]) {
         return enviarValidacio(reply, 'Un dels productes indicats no existeix', [
           { camp: `${camp}.producteId`, missatge: 'no existeix' },
         ]);
       }
       const { id: producteUuid, pes_kg: pesFitxaKg, preu_venda: preuVenda } = producte.rows[0];
+
+      // Punt 55: sense proveidorId, el preferit de l'article.
+      const proveidorUuid = await resolverProveidorUuid(pool, linia.proveidorId);
+      if (proveidorUuid === false) {
+        return enviarValidacio(reply, 'El proveïdor indicat no existeix', [
+          { camp: `${camp}.proveidorId`, missatge: 'no existeix' },
+        ]);
+      }
 
       let pesCalculatKg: string;
       let pesEditable: boolean;
@@ -847,6 +869,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         obsProduccio: linia.obsProduccio?.trim() || null,
         // Tasca 7: buida = sense observació.
         obsEmpaquetat: linia.obsEmpaquetat?.trim() || null,
+        proveidorUuid:
+          proveidorUuid === undefined ? producte.rows[0].proveidor_defecte_id : proveidorUuid,
       });
     }
 
@@ -888,8 +912,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         await client.query(
           `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                        preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-                                       data_produccio, obs_empaquetat, obs_produccio)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                                       data_produccio, obs_empaquetat, obs_produccio, proveidor_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
           [
             comandaUuid,
             i,
@@ -905,6 +929,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             // al FINAL de la lista a propósito — ningún parámetro posicional
             // existente ($1-$10) se desplaza.
             l.obsProduccio,
+            l.proveidorUuid,
           ],
         );
         if (l.sensePreu) {
@@ -1016,9 +1041,11 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           preu_venda: string | null;
           obs_produccio: string | null;
           obs_empaquetat: string | null;
+          proveidor_id: string | null;
         }>(
           `SELECT cl.producte_id, p.id_seq AS producte_id_seq, cl.unitats_demanades,
-                  cl.pes_calculat_kg, p.pes_kg, p.preu_venda, cl.obs_produccio, cl.obs_empaquetat
+                  cl.pes_calculat_kg, p.pes_kg, p.preu_venda, cl.obs_produccio, cl.obs_empaquetat,
+                  cl.proveidor_id
            FROM comanda_linia cl
            LEFT JOIN producte p ON p.id = cl.producte_id
            WHERE cl.comanda_id = $1 AND NOT cl.esborrat
@@ -1050,8 +1077,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           await client.query(
             `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                          preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-                                         obs_produccio, obs_empaquetat)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                                         obs_produccio, obs_empaquetat, proveidor_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
             [
               novaUuid,
               ordinal,
@@ -1063,6 +1090,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
               pesEditable,
               l.obs_produccio,
               l.obs_empaquetat,
+              // Punt 55: la còpia manté el proveïdor de cada línia.
+              l.proveidor_id,
             ],
           );
           if (sensePreu) {
@@ -1402,6 +1431,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       const cos = req.body as Partial<{
         producteId: number;
         unitatsDemanades: number;
+        proveidorId: number | null;
         kgDemanats: string;
         dataProduccio: string | null;
         obsProduccio: string | null;
@@ -1427,13 +1457,26 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         id: string;
         pes_kg: string | null;
         preu_venda: string | null;
-      }>('SELECT id, pes_kg, preu_venda FROM producte WHERE id_seq = $1', [cos.producteId]);
+        proveidor_defecte_id: string | null;
+      }>('SELECT id, pes_kg, preu_venda, proveidor_defecte_id FROM producte WHERE id_seq = $1', [
+        cos.producteId,
+      ]);
       if (!producte.rows[0]) {
         return enviarValidacio(reply, 'El producte indicat no existeix', [
           { camp: 'producteId', missatge: 'no existeix' },
         ]);
       }
       const { id: producteUuid, pes_kg: pesFitxaKg, preu_venda: preuVenda } = producte.rows[0];
+
+      // Punt 55: sense proveidorId, el preferit de l'article.
+      const proveidorIndicat = await resolverProveidorUuid(pool, cos.proveidorId);
+      if (proveidorIndicat === false) {
+        return enviarValidacio(reply, 'El proveïdor indicat no existeix', [
+          { camp: 'proveidorId', missatge: 'no existeix' },
+        ]);
+      }
+      const proveidorUuid =
+        proveidorIndicat === undefined ? producte.rows[0].proveidor_defecte_id : proveidorIndicat;
 
       let pesCalculatKg: string;
       let pesEditable: boolean;
@@ -1505,8 +1548,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         await client.query(
           `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                      preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-                                     data_produccio, obs_empaquetat, obs_produccio)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                                     data_produccio, obs_empaquetat, obs_produccio, proveidor_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
           [
             comandaUuid,
             ordinal,
@@ -1526,6 +1569,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             // columna agregada al FINAL de la lista a propósito — ningún
             // parámetro posicional existente ($1-$10) se desplaza.
             cos.obsProduccio?.trim() || null,
+            proveidorUuid,
           ],
         );
 
@@ -1589,11 +1633,20 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
 
       const cos = req.body as Partial<{
         unitatsDemanades: number;
+        proveidorId: number | null;
         kgDemanats: string;
         dataProduccio: string | null;
         obsProduccio: string | null;
         obsEmpaquetat: string | null;
       }>;
+
+      // Punt 55: canviar (o treure, amb null) el proveïdor de la línia.
+      const proveidorUuid = await resolverProveidorUuid(pool, cos.proveidorId);
+      if (proveidorUuid === false) {
+        return enviarValidacio(reply, 'El proveïdor indicat no existeix', [
+          { camp: 'proveidorId', missatge: 'no existeix' },
+        ]);
+      }
 
       // Ver nota equivalente en POST /comandes.
       if (cos.unitatsDemanades !== undefined && !esUnitatsValides(cos.unitatsDemanades)) {
@@ -1670,7 +1723,11 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        await protegirLiniesSiEsDeWoocommerce(client, comandaUuid);
+        // Punt 55: si només canvia el proveïdor, no es protegeixen les
+        // línies (ADR-026): és una columna del sistema que el sync de
+        // WooCommerce no escriu mai, així que no hi ha res a protegir.
+        const nomesProveidor = Object.keys(cos ?? {}).every((camp) => camp === 'proveidorId');
+        if (!nomesProveidor) await protegirLiniesSiEsDeWoocommerce(client, comandaUuid);
 
         const resultat = await client.query<{ id: string }>(
           `UPDATE comanda_linia SET
@@ -1678,7 +1735,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
            pes_calculat_kg = CASE WHEN $5 THEN $6 ELSE pes_calculat_kg END,
            data_produccio = CASE WHEN $7 THEN $8 ELSE data_produccio END,
            obs_produccio = CASE WHEN $9 THEN $10 ELSE obs_produccio END,
-           obs_empaquetat = CASE WHEN $11 THEN $12 ELSE obs_empaquetat END
+           obs_empaquetat = CASE WHEN $11 THEN $12 ELSE obs_empaquetat END,
+           proveidor_id = CASE WHEN $13 THEN $14 ELSE proveidor_id END
          WHERE id_seq = $1 AND comanda_id = $2
          RETURNING id`,
           [
@@ -1695,6 +1753,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             // Tasca 7: buida = sense observació.
             cos.obsEmpaquetat !== undefined,
             cos.obsEmpaquetat?.trim() || null,
+            proveidorUuid !== undefined,
+            proveidorUuid ?? null,
           ],
         );
         if (!resultat.rows[0]) {

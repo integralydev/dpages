@@ -30,6 +30,7 @@ export type {
   FilaMatriuTarifesApi,
   ClientApi,
   TransportistaApi,
+  ProveidorApi,
   OrigenComandaApi,
   ReferenciaApi,
   ComandaResumApi,

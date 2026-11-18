@@ -115,6 +115,27 @@ export async function construirFiltresObrador(
   const condicions: string[] = ['NOT cl.esborrat', `c.estat NOT IN ('cancellada', 'esborrany')`];
   const valors: unknown[] = [];
 
+  // Punt 55 (18/11/2026): per proveïdor de la línia. `sense` = les que
+  // encara no en tenen (per veure què falta assignar).
+  if (query.proveidorId !== undefined && query.proveidorId !== '') {
+    if (query.proveidorId === 'sense') {
+      condicions.push('cl.proveidor_id IS NULL');
+    } else {
+      const proveidorId =
+        typeof query.proveidorId === 'string' ? parsearIdPublic(query.proveidorId) : null;
+      if (proveidorId === null) {
+        enviarValidacio(reply, "proveidorId ha de ser un id o 'sense'", [
+          { camp: 'proveidorId', missatge: "ha de ser un id o 'sense'" },
+        ]);
+        return null;
+      }
+      condicions.push(
+        `cl.proveidor_id = (SELECT id FROM proveidor WHERE id_seq = $${valors.length + 1})`,
+      );
+      valors.push(proveidorId);
+    }
+  }
+
   // dataProduccio filtra por la fecha de la LÍNEA (cl.data_produccio), no
   // la de la cabecera del pedido — desde que Obrador dejó de ser agregado
   // por producto (contrato, sección 4.7), es la línea la que tiene fecha

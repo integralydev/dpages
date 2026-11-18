@@ -44,6 +44,8 @@ export const MODULS_VALIDS = [
   'usuaris',
   'rols',
   'transportistes',
+  // Punt 55 (18/11/2026): manteniment de proveïdors.
+  'proveidors',
 ] as const;
 
 /** Elementos de `modulsPermesos` que no están en `MODULS_VALIDS` — vacío si todos son válidos. */
