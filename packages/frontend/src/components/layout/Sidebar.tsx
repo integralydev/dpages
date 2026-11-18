@@ -61,7 +61,8 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'Tarifes',
+    // Abans «Tarifes»: des del punt 55 també hi ha Proveïdors (Francesc, 18/11/2026).
+    label: 'Manteniments',
     items: [
       { label: 'Llistat de Tarifes', href: '/rates', modul: 'tarifes', icon: Euro },
       {
