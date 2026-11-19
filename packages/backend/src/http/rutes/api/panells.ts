@@ -20,6 +20,7 @@ import {
   parsearPaginacio,
   patroComencaPer,
   resolverCategoriaUuid,
+  sqlImportLinia,
   resolverClientUuid,
   resolverFiltreEntitat,
   resolverFiltreEntitats,
@@ -437,9 +438,9 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       LEFT JOIN tarifa t ON t.id = c.tarifa_id
       LEFT JOIN transportista tr ON tr.id = c.transportista_id
       LEFT JOIN LATERAL (
-        SELECT count(*) AS linies, SUM(pes_calculat_kg) AS total_kg,
-               SUM(unitats_demanades * preu_unitari) AS total_eur
-        FROM comanda_linia WHERE comanda_id = c.id AND NOT esborrat
+        SELECT count(*) AS linies, SUM(l.pes_calculat_kg) AS total_kg,
+               SUM(${sqlImportLinia('l', 'c')}) AS total_eur
+        FROM comanda_linia l WHERE l.comanda_id = c.id AND NOT l.esborrat
       ) agg ON true
       LEFT JOIN LATERAL (
         SELECT count(*) AS total_incidencies,

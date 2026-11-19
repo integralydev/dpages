@@ -305,3 +305,20 @@ export const resolverRolUuid = (pool: Pool, idSeq: number): Promise<string | nul
   resolverUuid(pool, 'rol', idSeq);
 export const resolverUsuariUuid = (pool: Pool, idSeq: number): Promise<string | null> =>
   resolverUuid(pool, 'usuari', idSeq);
+
+/**
+ * Tasca 40 (17/11/2026): import d'una línia en SQL. Si la comanda calcula
+ * per pes (`comanda.calcul_per_pes`, ver migració 0027), pes × preu: els kg
+ * demanats fins que Empaquetat confirma la línia, i des d'aleshores els kg
+ * lliurats (0 kg → 0 €). Si no, unitats × preu, com abans.
+ * `linia` i `comanda` són els àlies de `comanda_linia` i `comanda` a la
+ * consulta. Únic lloc on viu la fórmula: llistat, fitxa, total guardat i
+ * Panell Oficina la fan servir tots.
+ */
+// Àlies fixos (tipus literals): mai identificadors que vinguin de l'entrada.
+export function sqlImportLinia(linia: 'l' | 'cl', comanda: 'c'): string {
+  return `(CASE WHEN ${comanda}.calcul_per_pes
+            THEN CASE WHEN ${linia}.confirmat_a IS NOT NULL
+                      THEN ${linia}.kg_lliurats ELSE ${linia}.pes_calculat_kg END
+            ELSE ${linia}.unitats_demanades END * ${linia}.preu_unitari)`;
+}

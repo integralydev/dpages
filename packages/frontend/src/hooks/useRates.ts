@@ -30,7 +30,9 @@ type UseRatesResult = {
     changes: Record<string, string>,
     deletions: string[],
   ) => Promise<CellSaveResult[]>;
-  createTariff: (codi: string, nom: string) => Promise<void>;
+  createTariff: (codi: string, nom: string, calculPerPes: boolean) => Promise<void>;
+  /** Tasca 40: per pes (`true`) o per unitats (`false`). */
+  setTariffCalculation: (tarifaId: number, calculPerPes: boolean) => Promise<void>;
 };
 
 // Paginació real de files (MIDA_PAGINA_LLISTATS/pàgina) — `tariffColumns` NO forma part
@@ -163,8 +165,17 @@ export function useRates(filters: RatesFilters = {}): UseRatesResult {
   // POST /tarifes no devuelve la matriz — hace falta un refetch completo
   // para que la columna nueva aparezca con sus celdas inicializadas en null.
   const createTariff = useCallback(
-    async (codi: string, nom: string) => {
-      await api.post<TarifaResumApi>('/tarifes', { codi, nom });
+    async (codi: string, nom: string, calculPerPes: boolean) => {
+      await api.post<TarifaResumApi>('/tarifes', { codi, nom, calculPerPes });
+      refetch();
+    },
+    [refetch],
+  );
+
+  // Tasca 40: només afecta les comandes que es creïn a partir d'ara.
+  const setTariffCalculation = useCallback(
+    async (tarifaId: number, calculPerPes: boolean) => {
+      await api.patch<TarifaResumApi>(`/tarifes/${tarifaId}`, { calculPerPes });
       refetch();
     },
     [refetch],
@@ -181,5 +192,6 @@ export function useRates(filters: RatesFilters = {}): UseRatesResult {
     refetch,
     savePrices,
     createTariff,
+    setTariffCalculation,
   };
 }

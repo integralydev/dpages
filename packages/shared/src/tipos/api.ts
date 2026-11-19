@@ -148,6 +148,12 @@ export interface TarifaResumApi {
   id: number;
   codi: string | null;
   nom: string;
+  /**
+   * Tasca 40: `true` = l'import de les línies és pes × preu; `false` =
+   * unitats × preu. Una comanda pren el de la seva tarifa en crear-se o en
+   * canviar-li la tarifa (ver `ComandaDetallApi.calculPerPes`).
+   */
+  calculPerPes: boolean;
 }
 
 export interface MatriuTarifesApi {
@@ -358,6 +364,13 @@ export interface ComandaDetallApi {
   obsLliurament: string | null;
   totalKg: string;
   totalEur: string;
+  /**
+   * Tasca 40: com es calculen els imports d'aquesta comanda — `true`, pes ×
+   * preu (kg demanats fins que Empaquetat confirma la línia, després kg
+   * lliurats); `false`, unitats × preu. Les comandes d'abans de la tasca 40
+   * són totes `false`.
+   */
+  calculPerPes: boolean;
   congelada: boolean;
   congelatA: string | null;
   linies: ComandaLiniaApi[];

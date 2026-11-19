@@ -1,3 +1,4 @@
+import { TIPUS_CLIENT, type TipusClient } from '@dpages/shared';
 import type {
   ComandaDetallApi,
   ComandaDuplicadaApi,
@@ -8,6 +9,8 @@ import type {
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { Pool, PoolClient } from 'pg';
 import { pool } from '../../../db/pool.js';
+import { calcularDatesComandaNova, diaMadrid } from '../../../transform/dates-per-defecte.js';
+import { resolverProveidorUuid } from './proveidors.js';
 import {
   condicioDataFinsInclusiva,
   construirPaginacio,
@@ -24,6 +27,7 @@ import {
   resolverFiltreEntitats,
   resolverTarifaUuid,
   resolverTransportistaUuid,
+  sqlImportLinia,
 } from './comu.js';
 
 // Guard de módulo (B1): a diferencia de la mayoría de las rutas de negocio,
@@ -71,6 +75,7 @@ const CODI_ORIGEN_WOOCOMMERCE = 'woocommerce';
 interface FilaComandaResum {
   id_seq: string;
   num: string;
+  num_woo: string | null;
   origen: string;
   estat: string;
   client_id_seq: string | null;
@@ -98,12 +103,14 @@ interface FilaComandaResum {
   total_eur: string;
   total_incidencies: string;
   tipus_incidencia: string | null;
+  calcul_per_pes: boolean;
 }
 
 function aApiResum(fila: FilaComandaResum): ComandaResumApi {
   return {
     id: Number(fila.id_seq),
     num: fila.num,
+    numWoo: fila.num_woo,
     origen: fila.origen,
     estat: fila.estat,
     client:
@@ -145,7 +152,7 @@ function aApiResum(fila: FilaComandaResum): ComandaResumApi {
 // distinto); si hay más de un tipo mezclado, queda null — "resumen liviano",
 // el detalle completo por tipo está en GET /comandes/:id (incidencies[]).
 const SELECT_COMANDA_RESUM = `
-  SELECT c.id_seq, c.num, oc.codi AS origen, c.estat,
+  SELECT c.id_seq, c.num, c.num_woo, oc.codi AS origen, c.estat, c.calcul_per_pes,
          cl.id_seq AS client_id_seq, cl.nom AS client_nom, cl.poblacio AS client_poblacio,
          t.id_seq AS tarifa_id_seq, t.nom AS tarifa_nom,
          tr.id_seq AS transportista_id_seq, tr.nom AS transportista_nom,
@@ -163,9 +170,9 @@ const SELECT_COMANDA_RESUM = `
   LEFT JOIN tarifa t ON t.id = c.tarifa_id
   LEFT JOIN transportista tr ON tr.id = c.transportista_id
   LEFT JOIN LATERAL (
-    SELECT count(*) AS total_linies, SUM(pes_calculat_kg) AS total_kg,
-           SUM(unitats_demanades * preu_unitari) AS total_eur
-    FROM comanda_linia WHERE comanda_id = c.id AND NOT esborrat
+    SELECT count(*) AS total_linies, SUM(l.pes_calculat_kg) AS total_kg,
+           SUM(${sqlImportLinia('l', 'c')}) AS total_eur
+    FROM comanda_linia l WHERE l.comanda_id = c.id AND NOT l.esborrat
   ) agg ON true
   LEFT JOIN LATERAL (
     SELECT count(*) AS total_incidencies,
@@ -205,6 +212,8 @@ interface FilaComandaLinia {
   obs_empaquetat: string | null;
   produir: boolean;
   esborrat: boolean;
+  proveidor_id_seq: string | null;
+  proveidor_nom: string | null;
 }
 
 /** Tasca 57: `produir` és opcional, però si ve ha de ser un booleà. */
@@ -223,6 +232,10 @@ function aApiLinia(fila: FilaComandaLinia): ComandaLiniaApi {
             codi: fila.producte_codi,
             descripcio: fila.producte_descripcio,
           }
+        : null,
+    proveidor:
+      fila.proveidor_id_seq !== null && fila.proveidor_nom !== null
+        ? { id: Number(fila.proveidor_id_seq), nom: fila.proveidor_nom }
         : null,
     categoria: fila.categoria_nom,
     format: fila.format,
@@ -248,11 +261,14 @@ const SELECT_COMANDA_LINIA = `
          p.descripcio AS producte_descripcio, cat.nom AS categoria_nom, p.format, p.envasat,
          cl.unitats_demanades, cl.pes_calculat_kg AS kg_demanats,
          cl.pes_editable, cl.unitats_lliurades, cl.kg_lliurats, cl.confirmat_a, cl.preu_unitari,
-         (cl.unitats_demanades * cl.preu_unitari)::numeric(14,2) AS total_linia,
-         cl.data_produccio, cl.obs_produccio, cl.obs_empaquetat, cl.produir, cl.esborrat
+         ${sqlImportLinia('cl', 'c')}::numeric(14,2) AS total_linia,
+         cl.data_produccio, cl.obs_produccio, cl.obs_empaquetat, cl.produir, cl.esborrat,
+         pv.id_seq AS proveidor_id_seq, pv.nom AS proveidor_nom
   FROM comanda_linia cl
+  JOIN comanda c ON c.id = cl.comanda_id
   LEFT JOIN producte p ON p.id = cl.producte_id
   LEFT JOIN categoria_producte cat ON cat.id = p.categoria_id
+  LEFT JOIN proveidor pv ON pv.id = cl.proveidor_id
   WHERE cl.comanda_id = $1 AND NOT cl.esborrat
   ORDER BY cl.ordinal ASC
 `;
@@ -293,6 +309,7 @@ async function carregarDetallPerUuid(comandaUuid: string): Promise<ComandaDetall
     ...resum,
     obsProduccio: fila.obs_produccio,
     obsLliurament: fila.obs_lliurament,
+    calculPerPes: fila.calcul_per_pes,
     congelatA: formatearDataApi(fila.congelat_a),
     linies: linies.rows.map(aApiLinia),
     incidencies: incidencies.rows.map(aApiIncidencia),
@@ -345,6 +362,26 @@ async function protegirLiniesSiEsDeWoocommerce(
   );
 }
 
+/** Tasca 53: llargada màxima del «Núm. comanda WooCommerce». */
+const MAX_NUM_WOO = 50;
+
+/**
+ * Tasca 53: normalitza `numWoo` del body. `undefined` = no ve (no es toca);
+ * text buit o `null` = sense número (`null`); si no, el text retallat.
+ * `false` = no vàlid (ja s'ha enviat el 400).
+ */
+function llegirNumWoo(reply: FastifyReply, valor: unknown): string | null | undefined | false {
+  if (valor === undefined) return undefined;
+  if (valor === null) return null;
+  if (typeof valor !== 'string' || valor.trim().length > MAX_NUM_WOO) {
+    enviarValidacio(reply, `numWoo ha de ser un text de com a màxim ${MAX_NUM_WOO} caràcters`, [
+      { camp: 'numWoo', missatge: `com a màxim ${MAX_NUM_WOO} caràcters` },
+    ]);
+    return false;
+  }
+  return valor.trim() === '' ? null : valor.trim();
+}
+
 /**
  * Cascada de resolución de precio de línia (contrato,
  * `ComandaLiniaApi.preuUnitari`): 1) la tarifa indicada, si tiene precio
@@ -383,7 +420,7 @@ async function resolverPreuLinia(
 /**
  * Recalcula `comanda.total` a partir de las líneas activas, con la MISMA
  * fórmula que ya usa `SELECT_COMANDA_RESUM.agg.total_eur`
- * (`SUM(unitats_demanades * preu_unitari) WHERE NOT esborrat`).
+ * (`sqlImportLinia`, tasca 40).
  *
  * IMPORTANTE, para quien lea esto después: ningún `GET` lee esta columna.
  * `ComandaResumApi.totalEur`/`ComandaDetallApi.totalEur` SIEMPRE se
@@ -398,11 +435,11 @@ async function resolverPreuLinia(
  */
 async function recalcularTotalComanda(client: PoolClient, comandaUuid: string): Promise<void> {
   await client.query(
-    `UPDATE comanda SET total = (
-       SELECT COALESCE(SUM(unitats_demanades * preu_unitari), 0)::numeric(14,2)
-       FROM comanda_linia WHERE comanda_id = $1 AND NOT esborrat
+    `UPDATE comanda c SET total = (
+       SELECT COALESCE(SUM(${sqlImportLinia('l', 'c')}), 0)::numeric(14,2)
+       FROM comanda_linia l WHERE l.comanda_id = c.id AND NOT l.esborrat
      )
-     WHERE id = $1`,
+     WHERE c.id = $1`,
     [comandaUuid],
   );
 }
@@ -608,8 +645,22 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
     // tiene sentido de negocio, a diferencia de productes.ts/tarifes.ts,
     // regla 3.1). No toca `?clientId=` (filtro exacto, sin cambios).
     if (typeof query.cerca === 'string' && query.cerca.trim() !== '') {
-      condicions.push(`(c.num ILIKE $${valors.length + 1} OR cl.nom ILIKE $${valors.length + 1})`);
+      // Tasca 53: també pel «Núm. comanda WooCommerce».
+      condicions.push(
+        `(c.num ILIKE $${valors.length + 1} OR c.num_woo ILIKE $${valors.length + 1} OR cl.nom ILIKE $${valors.length + 1})`,
+      );
       valors.push(`%${query.cerca.trim()}%`);
+    }
+    // Punt 35 (18/11/2026): comandes dels clients d'un tipus (fix /
+    // esporadic). Una comanda sense client no és de cap tipus: no surt.
+    if (query.tipusClient !== undefined && query.tipusClient !== '') {
+      if (!TIPUS_CLIENT.includes(query.tipusClient as TipusClient)) {
+        return enviarValidacio(reply, 'tipusClient no és vàlid', [
+          { camp: 'tipusClient', missatge: `ha de ser ${TIPUS_CLIENT.join(' o ')}` },
+        ]);
+      }
+      condicions.push(`cl.tipus = $${valors.length + 1}`);
+      valors.push(query.tipusClient);
     }
     const where = condicions.length > 0 ? `WHERE ${condicions.join(' AND ')}` : '';
 
@@ -649,9 +700,11 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       dataLliurament: string;
       transportistaId: number;
       obsLliurament: string;
+      numWoo: string;
       linies: {
         producteId: number;
         unitatsDemanades: number;
+        proveidorId?: number | null;
         kgDemanats?: string;
         dataProduccio?: string | null;
         obsProduccio?: string | null;
@@ -659,6 +712,9 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         produir?: boolean;
       }[];
     }>;
+
+    const numWoo = llegirNumWoo(reply, cos.numWoo);
+    if (numWoo === false) return;
 
     // Issue #16 — dataComanda/dataLliurament de capçalera passen a ser
     // OBLIGATÒRIES, sense valor per defecte al
@@ -780,6 +836,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       obsProduccio: string | null;
       obsEmpaquetat: string | null;
       produir: boolean;
+      proveidorUuid: string | null;
     }[] = [];
 
     for (let i = 0; i < cos.linies!.length; i++) {
@@ -807,13 +864,24 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         id: string;
         pes_kg: string | null;
         preu_venda: string | null;
-      }>('SELECT id, pes_kg, preu_venda FROM producte WHERE id_seq = $1', [linia.producteId]);
+        proveidor_defecte_id: string | null;
+      }>('SELECT id, pes_kg, preu_venda, proveidor_defecte_id FROM producte WHERE id_seq = $1', [
+        linia.producteId,
+      ]);
       if (!producte.rows[0]) {
         return enviarValidacio(reply, 'Un dels productes indicats no existeix', [
           { camp: `${camp}.producteId`, missatge: 'no existeix' },
         ]);
       }
       const { id: producteUuid, pes_kg: pesFitxaKg, preu_venda: preuVenda } = producte.rows[0];
+
+      // Punt 55: sense proveidorId, el preferit de l'article.
+      const proveidorUuid = await resolverProveidorUuid(pool, linia.proveidorId);
+      if (proveidorUuid === false) {
+        return enviarValidacio(reply, 'El proveïdor indicat no existeix', [
+          { camp: `${camp}.proveidorId`, missatge: 'no existeix' },
+        ]);
+      }
 
       let pesCalculatKg: string;
       let pesEditable: boolean;
@@ -863,6 +931,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         // Tasca 7: buida = sense observació.
         obsEmpaquetat: linia.obsEmpaquetat?.trim() || null,
         produir: linia.produir ?? true,
+        proveidorUuid:
+          proveidorUuid === undefined ? producte.rows[0].proveidor_defecte_id : proveidorUuid,
       });
     }
 
@@ -877,8 +947,9 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
 
       const comanda = await client.query<{ id: string }>(
         `INSERT INTO comanda (origen_id, estat, client_id, tarifa_id, poblacio_desti, total,
-                               data_lliurament, transportista_id, obs_lliurament, data_comanda)
-         VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9)
+                               data_lliurament, transportista_id, obs_lliurament, data_comanda,
+                               num_woo)
+         VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9, $10)
          RETURNING id`,
         [
           origenUuid,
@@ -895,6 +966,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           transportistaUuid,
           cos.obsLliurament ?? null,
           cos.dataComanda!,
+          numWoo ?? null,
         ],
       );
       comandaUuid = comanda.rows[0]!.id;
@@ -904,8 +976,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         await client.query(
           `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                        preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-                                       data_produccio, obs_empaquetat, obs_produccio, produir)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+                                       data_produccio, obs_empaquetat, obs_produccio, produir, proveidor_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
           [
             comandaUuid,
             i,
@@ -922,6 +994,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             // existente ($1-$10) se desplaza.
             l.obsProduccio,
             l.produir,
+            l.proveidorUuid,
           ],
         );
         if (l.sensePreu) {
@@ -934,6 +1007,9 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           );
         }
       }
+      // Tasca 40: el total provisional d'abans (unitats × preu) es
+      // recalcula amb la fórmula de la tarifa ara que hi ha les línies.
+      await recalcularTotalComanda(client, comandaUuid);
 
       await client.query('COMMIT');
     } catch (err) {
@@ -949,8 +1025,10 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
 
   /**
    * Tarea 17 (03/10/2026): duplicar una o varias comandas. Cada copia nace
-   * en `esborrany`, con data_comanda = hoy (Europe/Madrid) y el resto de
-   * fechas en blanco (cabecera y líneas). Se copian cliente, tarifa,
+   * en `esborrany`, con data_comanda = hoy (Europe/Madrid), producción y
+   * expedición por defecto (punt 38, 17/11/2026: el lunes siguiente — hoy si
+   * es lunes — y el martes siguiente; la de producción también en las
+   * líneas) y data_lliurament en blanco. Se copian cliente, tarifa,
    * transportista, dirección y observaciones de cabecera; de las líneas,
    * producto, unidades y observaciones. No se copia nada de empaquetado
    * (unidades/kg enviados, confirmación, bultos) ni la congelación.
@@ -1000,6 +1078,11 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       ]);
     }
 
+    // Un solo "hoy" para todas las copias de la petición.
+    const ara = new Date();
+    const avui = diaMadrid(ara);
+    const datesNoves = calcularDatesComandaNova(ara);
+
     const client = await pool.connect();
     const creades: ComandaDuplicadaApi[] = [];
     try {
@@ -1010,17 +1093,23 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         const nova = await client.query<{ id: string; id_seq: string; num: string }>(
           `INSERT INTO comanda (origen_id, estat, client_id, tarifa_id, transportista_id,
                                 poblacio_desti, adreca_lliurament, obs_lliurament, obs_produccio,
-                                data_comanda)
+                                data_comanda, data_produccio, data_expedicio)
            SELECT CASE WHEN o.codi = $2
                        THEN (SELECT id FROM origen_comanda WHERE codi = 'manual')
                        ELSE c.origen_id END,
                   'esborrany', c.client_id, c.tarifa_id, c.transportista_id,
                   c.poblacio_desti, c.adreca_lliurament, c.obs_lliurament, c.obs_produccio,
-                  (now() AT TIME ZONE 'Europe/Madrid')::date
+                  $3::date, $4::timestamptz, $5::timestamptz
            FROM comanda c JOIN origen_comanda o ON o.id = c.origen_id
            WHERE c.id = $1
            RETURNING id, id_seq, num`,
-          [original.id, CODI_ORIGEN_WOOCOMMERCE],
+          [
+            original.id,
+            CODI_ORIGEN_WOOCOMMERCE,
+            avui,
+            datesNoves.dataProduccio,
+            datesNoves.dataExpedicio,
+          ],
         );
         const novaUuid = nova.rows[0]!.id;
 
@@ -1034,10 +1123,11 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           obs_produccio: string | null;
           obs_empaquetat: string | null;
           produir: boolean;
+          proveidor_id: string | null;
         }>(
           `SELECT cl.producte_id, p.id_seq AS producte_id_seq, cl.unitats_demanades,
                   cl.pes_calculat_kg, p.pes_kg, p.preu_venda, cl.obs_produccio, cl.obs_empaquetat,
-                  cl.produir
+                  cl.produir, cl.proveidor_id
            FROM comanda_linia cl
            LEFT JOIN producte p ON p.id = cl.producte_id
            WHERE cl.comanda_id = $1 AND NOT cl.esborrat
@@ -1069,8 +1159,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           await client.query(
             `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                          preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-                                         obs_produccio, obs_empaquetat, produir)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                                         obs_produccio, obs_empaquetat, produir, data_produccio, proveidor_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
             [
               novaUuid,
               ordinal,
@@ -1084,6 +1174,9 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
               l.obs_empaquetat,
               // Tasca 57: la còpia manté si la línia es produeix o no.
               l.produir,
+              datesNoves.dataProduccio,
+              // Punt 55: la còpia manté el proveïdor de cada línia.
+              l.proveidor_id,
             ],
           );
           if (sensePreu) {
@@ -1138,12 +1231,31 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       bultos: number | null;
       obsProduccio: string | null;
       obsLliurament: string | null;
+      numWoo: string | null;
       poblacioDesti: string | null;
       adrecaLliurament: string | null;
       estat: string;
       detall: string;
       origen: string;
+      aplicarDataProduccioALinies: boolean;
     }>;
+
+    // Tasca 44 (canvi massiu, 17/11/2026): amb aquesta marca, la nova
+    // dataProduccio de capçalera s'aplica també a totes les línies actives
+    // del pedido. Sense ella, la capçalera només és el valor per defecte de
+    // les línies noves (tasca 15) i les existents conserven la seva data —
+    // que és la que fan servir els panells d'Obrador i Producció.
+    const aplicarALinies = cos.aplicarDataProduccioALinies === true;
+    // Ni buida: buidar d'un cop la data de totes les línies les trauria dels
+    // panells, i el canvi massiu no ho ha de poder fer.
+    if (aplicarALinies && !cos.dataProduccio) {
+      return enviarValidacio(reply, 'Cal indicar la dataProduccio per aplicar-la a les línies', [
+        { camp: 'dataProduccio', missatge: 'és obligatòria amb aplicarDataProduccioALinies' },
+      ]);
+    }
+
+    const numWoo = llegirNumWoo(reply, cos.numWoo);
+    if (numWoo === false) return;
 
     // Issue #16 — dataComanda SÍ es editable después de creada (a diferencia
     // de producteId/categoriaId en otros endpoints): regla de negocio
@@ -1269,9 +1381,11 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           dataExpedicio: dataExpedicioResultant,
           dataLliurament: dataLliuramentResultant,
         },
+        // Si la data s'aplica també a les línies, es validen amb la data
+        // nova (la que tindran després del canvi), no amb la que tenen ara.
         liniesExistents.rows.map((l) => ({
           etiqueta: `línia núm. ${l.id_seq}`,
-          dataProduccio: l.data_produccio,
+          dataProduccio: aplicarALinies ? dataProduccioResultant : l.data_produccio,
         })),
       );
       if (violacio) {
@@ -1329,7 +1443,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
            adreca_lliurament = CASE WHEN $22 THEN $23 ELSE adreca_lliurament END,
            estat = CASE WHEN $24 THEN $25 ELSE estat END,
            data_comanda = CASE WHEN $26 THEN $27 ELSE data_comanda END,
-           origen_id = CASE WHEN $28 THEN $29 ELSE origen_id END
+           origen_id = CASE WHEN $28 THEN $29 ELSE origen_id END,
+           num_woo = CASE WHEN $30 THEN $31 ELSE num_woo END
          WHERE id = $1`,
         [
           comandaUuid,
@@ -1361,8 +1476,24 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           cos.dataComanda ?? null,
           origenUuid !== undefined,
           origenUuid ?? null,
+          numWoo !== undefined,
+          numWoo ?? null,
         ],
       );
+
+      if (aplicarALinies) {
+        // Les dates de línia es guarden a mitjanit UTC ("...T00:00:00Z"),
+        // igual que les que crea el formulari (OrderForm, createEmptyLine);
+        // la de capçalera arriba com a data sola ("AAAA-MM-DD").
+        const dataLinies =
+          cos.dataProduccio && /^\d{4}-\d{2}-\d{2}$/.test(cos.dataProduccio)
+            ? `${cos.dataProduccio}T00:00:00Z`
+            : (cos.dataProduccio ?? null);
+        await client.query(
+          `UPDATE comanda_linia SET data_produccio = $2 WHERE comanda_id = $1 AND NOT esborrat`,
+          [comandaUuid, dataLinies],
+        );
+      }
 
       // A diferencia de las incidencias automáticas (sense_preu,
       // article_no_resolt, etc.), ésta la dispara un usuario de oficina a
@@ -1423,6 +1554,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       const cos = req.body as Partial<{
         producteId: number;
         unitatsDemanades: number;
+        proveidorId: number | null;
         kgDemanats: string;
         dataProduccio: string | null;
         obsProduccio: string | null;
@@ -1454,13 +1586,26 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         id: string;
         pes_kg: string | null;
         preu_venda: string | null;
-      }>('SELECT id, pes_kg, preu_venda FROM producte WHERE id_seq = $1', [cos.producteId]);
+        proveidor_defecte_id: string | null;
+      }>('SELECT id, pes_kg, preu_venda, proveidor_defecte_id FROM producte WHERE id_seq = $1', [
+        cos.producteId,
+      ]);
       if (!producte.rows[0]) {
         return enviarValidacio(reply, 'El producte indicat no existeix', [
           { camp: 'producteId', missatge: 'no existeix' },
         ]);
       }
       const { id: producteUuid, pes_kg: pesFitxaKg, preu_venda: preuVenda } = producte.rows[0];
+
+      // Punt 55: sense proveidorId, el preferit de l'article.
+      const proveidorIndicat = await resolverProveidorUuid(pool, cos.proveidorId);
+      if (proveidorIndicat === false) {
+        return enviarValidacio(reply, 'El proveïdor indicat no existeix', [
+          { camp: 'proveidorId', missatge: 'no existeix' },
+        ]);
+      }
+      const proveidorUuid =
+        proveidorIndicat === undefined ? producte.rows[0].proveidor_defecte_id : proveidorIndicat;
 
       let pesCalculatKg: string;
       let pesEditable: boolean;
@@ -1532,8 +1677,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         await client.query(
           `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                      preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-                                     data_produccio, obs_empaquetat, obs_produccio, produir)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+                                     data_produccio, obs_empaquetat, obs_produccio, produir, proveidor_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
           [
             comandaUuid,
             ordinal,
@@ -1555,6 +1700,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             cos.obsProduccio?.trim() || null,
             // Tasca 57: per defecte, sí.
             cos.produir ?? true,
+            proveidorUuid,
           ],
         );
 
@@ -1618,6 +1764,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
 
       const cos = req.body as Partial<{
         unitatsDemanades: number;
+        proveidorId: number | null;
         kgDemanats: string;
         dataProduccio: string | null;
         obsProduccio: string | null;
@@ -1628,6 +1775,14 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       if (!esProduirValid(cos.produir)) {
         return enviarValidacio(reply, 'El camp produir ha de ser sí o no', [
           { camp: 'produir', missatge: 'ha de ser un booleà' },
+        ]);
+      }
+
+      // Punt 55: canviar (o treure, amb null) el proveïdor de la línia.
+      const proveidorUuid = await resolverProveidorUuid(pool, cos.proveidorId);
+      if (proveidorUuid === false) {
+        return enviarValidacio(reply, 'El proveïdor indicat no existeix', [
+          { camp: 'proveidorId', missatge: 'no existeix' },
         ]);
       }
 
@@ -1706,7 +1861,11 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        await protegirLiniesSiEsDeWoocommerce(client, comandaUuid);
+        // Punt 55: si només canvia el proveïdor, no es protegeixen les
+        // línies (ADR-026): és una columna del sistema que el sync de
+        // WooCommerce no escriu mai, així que no hi ha res a protegir.
+        const nomesProveidor = Object.keys(cos ?? {}).every((camp) => camp === 'proveidorId');
+        if (!nomesProveidor) await protegirLiniesSiEsDeWoocommerce(client, comandaUuid);
 
         const resultat = await client.query<{ id: string }>(
           `UPDATE comanda_linia SET
@@ -1715,7 +1874,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
            data_produccio = CASE WHEN $7 THEN $8 ELSE data_produccio END,
            obs_produccio = CASE WHEN $9 THEN $10 ELSE obs_produccio END,
            obs_empaquetat = CASE WHEN $11 THEN $12 ELSE obs_empaquetat END,
-           produir = CASE WHEN $13 THEN $14 ELSE produir END
+           produir = CASE WHEN $13 THEN $14 ELSE produir END,
+           proveidor_id = CASE WHEN $15 THEN $16 ELSE proveidor_id END
          WHERE id_seq = $1 AND comanda_id = $2
          RETURNING id`,
           [
@@ -1735,6 +1895,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             // Tasca 57.
             cos.produir !== undefined,
             cos.produir ?? true,
+            proveidorUuid !== undefined,
+            proveidorUuid ?? null,
           ],
         );
         if (!resultat.rows[0]) {

@@ -11,7 +11,7 @@ import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { useCatalog } from '@/hooks/useCatalog';
 import { useEditableRow } from '@/hooks/useEditableRow';
 import { type CellSaveResult, useRates } from '@/hooks/useRates';
-import type { FilaMatriuTarifesApi, TarifaResumApi } from '@/lib/api';
+import { ApiError, type FilaMatriuTarifesApi, type TarifaResumApi } from '@/lib/api';
 import { parseDecimalInput } from '@/lib/decimals';
 import { TariffFormModal } from './TariffFormModal';
 
@@ -234,7 +234,24 @@ export default function RatesPage() {
     refetch,
     savePrices,
     createTariff,
+    setTariffCalculation,
   } = useRates(ratesFilters);
+  const [calculationError, setCalculationError] = useState<string | null>(null);
+
+  // Tasca 40: canviar si una tarifa calcula per pes o per unitats. Només
+  // afecta les comandes noves (cada comanda guarda el seu càlcul).
+  async function handleCalculationChange(tariff: TarifaResumApi, calculPerPes: boolean) {
+    setCalculationError(null);
+    try {
+      await setTariffCalculation(tariff.id, calculPerPes);
+    } catch (caught) {
+      setCalculationError(
+        caught instanceof ApiError
+          ? caught.message
+          : `No s'ha pogut canviar el càlcul de ${tariff.nom}.`,
+      );
+    }
+  }
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
@@ -345,6 +362,12 @@ export default function RatesPage() {
         </div>
       )}
 
+      {calculationError && (
+        <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+          {calculationError}
+        </p>
+      )}
+
       {!isLoading && !error && (
         <>
           <div className="relative">
@@ -389,6 +412,18 @@ export default function RatesPage() {
                         style={{ width: TARIFF_COLUMN_WIDTH }}
                       >
                         {tariff.nom}
+                        <select
+                          aria-label={`Càlcul de l'import de ${tariff.nom}`}
+                          title="Com es calcula l'import de les comandes noves amb aquesta tarifa"
+                          value={tariff.calculPerPes ? 'pes' : 'unitats'}
+                          onChange={(event) =>
+                            handleCalculationChange(tariff, event.target.value === 'pes')
+                          }
+                          className="mt-1 block w-full rounded border border-gray-200 bg-white px-1 py-0.5 text-right text-xs font-normal text-gray-600 focus:border-brand focus:outline-none"
+                        >
+                          <option value="pes">Per pes</option>
+                          <option value="unitats">Per unitats</option>
+                        </select>
                       </th>
                     ))}
                     <th
@@ -445,8 +480,8 @@ export default function RatesPage() {
       <TariffFormModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        onSave={async (code, name) => {
-          await createTariff(code, name);
+        onSave={async (code, name, calculPerPes) => {
+          await createTariff(code, name, calculPerPes);
           setIsModalOpen(false);
         }}
       />

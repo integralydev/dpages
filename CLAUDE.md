@@ -100,23 +100,46 @@ están documentadas ahí mismo y en el agente `woocommerce-integration`.
   restricción de "mayor que cero" que tenían se sacó a propósito, reabriendo
   y reemplazando una decisión anterior. Tarea 57 (17/11/2026): la pantalla
   deja confirmar una línea pendiente en 0 y pide confirmación antes de
-  guardar un 0.
+  guardar un 0. Tarea 51 (17/11/2026): única
+  excepción a la confirmación línea a línea — «Marcar tot com a lliurat»
+  confirma de una vez todas las pendientes de los filtros activos con lo
+  pedido, tras un diálogo que pide desar antes, una a una, las que se
+  enviaron con menos.
 - Cada línea de pedido tiene «producir» (sí/no, por defecto sí; tarea 57,
   acordado en reunión, 17/11/2026). En «no» (sale de stock, no se fabrica
   pero se envía) la línea no cuenta en Obrador ni en Producción; sí en
   Empaquetat, Compres y Oficina, que tienen un filtro para eso. El sync de
   WooCommerce no lo toca.
+- Importes (tarea 40, confirmado por el cliente el 17/11/2026): según la
+  tarifa, peso × precio o unidades × precio (`tarifa.calcul_per_pes`,
+  editable en Tarifes; por unidades 01, MO, 08 y SARG). Peso = kg pedidos
+  hasta que Empaquetat confirma la línea, después kg enviados. Sólo a partir
+  de la tarea 40: cada pedido guarda su cálculo (`comanda.calcul_per_pes`) y
+  los anteriores siguen por unidades. La fórmula vive en un solo sitio:
+  `sqlImportLinia` (`comu.ts`).
 - Seis estados de pedido: `esborrany`, `oberta`, `en_proces`, `tancada`,
   `amb_incidencia`, `cancellada`. `esborrany` (tarea 33, 03/10/2026): no cuenta
   en los paneles de Obrador, Empaquetat ni Compres; sí en Oficina y Producció. Es el
   estado con el que entran los pedidos de WooCommerce (tarea 38); una
-  incidencia del sync no los saca de `esborrany`. Tarea 39: al crearse, la
-  cabecera y sus líneas reciben fecha de producción = lunes siguiente si entraron de martes
-  16:00 a domingo 24:00 (Europe/Madrid); si no, sin fecha. Petición de Ari (29/09/2026): un pedido `cancellada` no cuenta
+  incidencia del sync no los saca de `esborrany`. Punt 38 (17/11/2026,
+  reemplaza la regla de la tarea 39 y su corte de martes 16:00): los pedidos nuevos,
+  duplicados y de WooCommerce nacen con producción = lunes siguiente a la fecha del
+  pedido (ese mismo lunes si es lunes; Europe/Madrid) y expedición = el martes
+  siguiente; sólo valores iniciales, editables (`calcularDatesPerDefecte` en
+  `packages/shared`). Petición de Ari (29/09/2026): un pedido `cancellada` no cuenta
   en **ninguno** de los cinco paneles (ni en filas ni en totales), pero sigue
   visible en la pantalla de pedidos (filtro de estado incluido). Única
   excepción: en el Panel Oficina aparece si se filtra explícitamente por
   `estat=cancellada` (nunca con "Tots").
+- Tipo de cliente (punt 35, 18/11/2026): `client.tipus` = `fix` o `esporadic`
+  (por defecto `esporadic`); se edita desde el listado de clientes y filtra
+  Comandes (`?tipusClient=`). Valores en `TIPUS_CLIENT` (`packages/shared`)
+  y en el CHECK de la columna.
+- Proveedores (punt 55, 18/11/2026): tabla `proveidor` (sólo nombre),
+  `producte.proveidor_defecte_id` (preferido, opcional) y
+  `comanda_linia.proveidor_id` (opcional; al crear la línea, el preferido
+  del artículo, también desde el sync de WooCommerce). Filtro en Obrador
+  (`?proveidorId=`, también `sense`). Sólo se borra si nadie lo usa.
 - Cinco paneles: oficina, obrador, empaquetado, compres, producció/planificació.
   **Sólo empaquetado y compres editan**; los otros tres son de sólo lectura con
   filtros y subtotales. El Panell de Compres (tarea 41 del Excel del cliente,

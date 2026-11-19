@@ -36,7 +36,9 @@ describe('API negoci — /tarifes (Postgres real, esquema aislado)', () => {
 
     expect(res.statusCode).toBe(200);
     const cuerpo = cuerpoJson<MatriuTarifesApi>(res);
-    expect(cuerpo.tarifes).toEqual([{ id: tarifaId, codi: 'GEN', nom: 'General' }]);
+    expect(cuerpo.tarifes).toEqual([
+      { id: tarifaId, codi: 'GEN', nom: 'General', calculPerPes: true },
+    ]);
     expect(cuerpo.dades[0]?.preus).toEqual({ [String(tarifaId)]: null });
 
     await fastify.close();
@@ -232,9 +234,15 @@ describe('API negoci — /tarifes (Postgres real, esquema aislado)', () => {
       id: tarifaSinCodiId,
       codi: null,
       nom: 'Tarifa Antiga Sense Codi',
+      calculPerPes: true,
     });
     // La tarifa con codi (del beforeAll) sigue apareciendo igual, sin verse afectada.
-    expect(cuerpo.tarifes).toContainEqual({ id: tarifaId, codi: 'GEN', nom: 'General' });
+    expect(cuerpo.tarifes).toContainEqual({
+      id: tarifaId,
+      codi: 'GEN',
+      nom: 'General',
+      calculPerPes: true,
+    });
 
     await fastify.close();
   });
@@ -249,7 +257,8 @@ describe('API negoci — /tarifes (Postgres real, esquema aislado)', () => {
 
     expect(res.statusCode).toBe(201);
     const cuerpo = cuerpoJson<TarifaResumApi>(res);
-    expect(cuerpo).toMatchObject({ codi: 'VIP', nom: 'Clients VIP' });
+    // Tasca 40: si no es diu res, per pes.
+    expect(cuerpo).toMatchObject({ codi: 'VIP', nom: 'Clients VIP', calculPerPes: true });
 
     await fastify.close();
   });
@@ -280,5 +289,171 @@ describe('API negoci — /tarifes (Postgres real, esquema aislado)', () => {
     expect(res.json()).toMatchObject({ error: { codi: 'VALIDACIO' } });
 
     await fastify.close();
+  });
+  describe('tasca 40 — import per pes o per unitats segons la tarifa', () => {
+    it('la comanda pren el càlcul de la tarifa en crear-se i en canviar-li la tarifa; canviar la tarifa no toca les comandes existents', async () => {
+      const fastify = construirServidor();
+      const producte = await entorn.poolTest.query<{ id_seq: string }>(
+        `INSERT INTO producte (codi, descripcio, tipus, pes_kg) VALUES ('T40-P', 'Article tasca 40', 'simple', '1.500') RETURNING id_seq`,
+      );
+      const t40ProducteId = Number(producte.rows[0]!.id_seq);
+
+      async function crearTarifa(codi: string, calculPerPes?: boolean) {
+        const res = await fastify.inject({
+          method: 'POST',
+          url: '/api/v1/tarifes',
+          payload: {
+            codi,
+            nom: `Tarifa ${codi}`,
+            ...(calculPerPes === undefined ? {} : { calculPerPes }),
+          },
+        });
+        expect(res.statusCode).toBe(201);
+        const tarifa = cuerpoJson<TarifaResumApi>(res);
+        await fastify.inject({
+          method: 'PATCH',
+          url: `/api/v1/tarifes/${tarifa.id}/preus/${t40ProducteId}`,
+          payload: { preu: '10.00' },
+        });
+        return tarifa;
+      }
+      async function crearComanda(tarifaIdComanda: number) {
+        const res = await fastify.inject({
+          method: 'POST',
+          url: '/api/v1/comandes',
+          payload: {
+            dataComanda: '2026-08-01',
+            dataLliurament: '2026-08-30T00:00:00Z',
+            origen: 'manual',
+            tarifaId: tarifaIdComanda,
+            linies: [{ producteId: t40ProducteId, unitatsDemanades: 2 }],
+          },
+        });
+        expect(res.statusCode).toBe(201);
+        return cuerpoJson<ComandaDetallApi>(res);
+      }
+      const detall = async (id: number) =>
+        cuerpoJson<ComandaDetallApi>(
+          await fastify.inject({ method: 'GET', url: `/api/v1/comandes/${id}` }),
+        );
+      const totalGuardat = async (id: number) =>
+        (
+          await entorn.poolTest.query<{ total: string }>(
+            'SELECT total FROM comanda WHERE id_seq = $1',
+            [id],
+          )
+        ).rows[0]!.total;
+
+      const perPes = await crearTarifa('T40-PES');
+      const perUnitats = await crearTarifa('T40-UNI', false);
+      expect(perPes.calculPerPes).toBe(true);
+      expect(perUnitats.calculPerPes).toBe(false);
+
+      // Per pes: 2 u × 1,5 kg = 3 kg × 10 € = 30 €.
+      const a = await crearComanda(perPes.id);
+      expect(a.calculPerPes).toBe(true);
+      expect(a.linies[0]!.totalLinia).toBe('30.00');
+      expect(a.totalEur).toBe('30.00');
+      expect(await totalGuardat(a.id)).toBe('30.00');
+
+      // Empaquetat confirma 2,5 kg: des d'aquí compten els kg lliurats.
+      const lliurament = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${a.id}/linies/${a.linies[0]!.id}/lliurament`,
+        payload: { unitatsLliurades: 2, kgLliurats: '2.500' },
+      });
+      expect(lliurament.statusCode).toBe(200);
+      const aConfirmada = await detall(a.id);
+      expect(aConfirmada.linies[0]!.totalLinia).toBe('25.00');
+      expect(aConfirmada.totalEur).toBe('25.00');
+
+      // Per unitats: 2 u × 10 € = 20 €.
+      const b = await crearComanda(perUnitats.id);
+      expect(b.calculPerPes).toBe(false);
+      expect(b.totalEur).toBe('20.00');
+
+      // Canviar el càlcul de la tarifa: la comanda A segueix per pes; una
+      // de nova amb aquesta tarifa ja va per unitats.
+      const canvi = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/tarifes/${perPes.id}`,
+        payload: { calculPerPes: false },
+      });
+      expect(canvi.statusCode).toBe(200);
+      expect(cuerpoJson<TarifaResumApi>(canvi).calculPerPes).toBe(false);
+      expect((await detall(a.id)).totalEur).toBe('25.00');
+      expect((await crearComanda(perPes.id)).totalEur).toBe('20.00');
+
+      // Posar a B una tarifa per pes: B passa a calcular per pes.
+      const perPes2 = await crearTarifa('T40-PES2');
+      const canviTarifa = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${b.id}`,
+        payload: { tarifaId: perPes2.id },
+      });
+      expect(canviTarifa.statusCode).toBe(200);
+      const bDespres = await detall(b.id);
+      expect(bDespres.calculPerPes).toBe(true);
+      expect(bDespres.totalEur).toBe('30.00');
+
+      await fastify.close();
+    });
+
+    it('sense tarifa a la comanda, pren el càlcul de la tarifa del client (la que dona el preu)', async () => {
+      const fastify = construirServidor();
+      const producte = await entorn.poolTest.query<{ id_seq: string }>(
+        `INSERT INTO producte (codi, descripcio, tipus, pes_kg) VALUES ('T40-C', 'Article tasca 40 client', 'simple', '2.000') RETURNING id_seq`,
+      );
+      const producteClientId = Number(producte.rows[0]!.id_seq);
+      const tarifa = await entorn.poolTest.query<{ id: string; id_seq: string }>(
+        `INSERT INTO tarifa (codi, nom) VALUES ('T40-CLI', 'Tarifa client per pes') RETURNING id, id_seq`,
+      );
+      await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/tarifes/${tarifa.rows[0]!.id_seq}/preus/${producteClientId}`,
+        payload: { preu: '4.00' },
+      });
+      const client = await entorn.poolTest.query<{ id_seq: string }>(
+        `INSERT INTO client (nom, poblacio, tarifa_id) VALUES ('Client tasca 40', 'Vic', $1) RETURNING id_seq`,
+        [tarifa.rows[0]!.id],
+      );
+
+      const res = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          clientId: Number(client.rows[0]!.id_seq),
+          linies: [{ producteId: producteClientId, unitatsDemanades: 3 }],
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      const comanda = cuerpoJson<ComandaDetallApi>(res);
+      // 3 u × 2 kg = 6 kg × 4 € = 24 € (per unitats serien 12 €).
+      expect(comanda.calculPerPes).toBe(true);
+      expect(comanda.totalEur).toBe('24.00');
+      await fastify.close();
+    });
+
+    it('PATCH /tarifes/:id valida calculPerPes i dona 404 si la tarifa no existeix', async () => {
+      const fastify = construirServidor();
+      const invalid = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/tarifes/${tarifaId}`,
+        payload: { calculPerPes: 'si' },
+      });
+      expect(invalid.statusCode).toBe(400);
+      expect(invalid.json()).toMatchObject({ error: { codi: 'VALIDACIO' } });
+
+      const noTrobada = await fastify.inject({
+        method: 'PATCH',
+        url: '/api/v1/tarifes/999999',
+        payload: { calculPerPes: false },
+      });
+      expect(noTrobada.statusCode).toBe(404);
+      await fastify.close();
+    });
   });
 });

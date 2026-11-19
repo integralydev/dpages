@@ -708,7 +708,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
   describe('capa 15 — cascada de resolució de preu de línia', () => {
     it('amb tarifa assignada al client i preu definit per aquest producte: fa servir el preu de la tarifa', async () => {
       const tarifa = await entorn.poolTest.query<{ id: string }>(
-        `INSERT INTO tarifa (codi, nom) VALUES ('CAP15-A', 'Tarifa capa 15 A') RETURNING id`,
+        `INSERT INTO tarifa (codi, nom, calcul_per_pes) VALUES ('CAP15-A', 'Tarifa capa 15 A', false) RETURNING id`,
       );
       await entorn.poolTest.query(
         `INSERT INTO tarifa_preu (tarifa_id, producte_id, preu)
@@ -816,7 +816,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
   describe('capa 30 — agregar/editar línies d’una comanda ja creada', () => {
     it('POST .../linies: agrega línia amb preu resolt (mateixa cascada, reusada), actualitza totalLinia i el total de la comanda', async () => {
       const tarifa = await entorn.poolTest.query<{ id: string }>(
-        `INSERT INTO tarifa (codi, nom) VALUES ('CAP30-A', 'Tarifa capa 30 A') RETURNING id`,
+        `INSERT INTO tarifa (codi, nom, calcul_per_pes) VALUES ('CAP30-A', 'Tarifa capa 30 A', false) RETURNING id`,
       );
       await entorn.poolTest.query(
         `INSERT INTO tarifa_preu (tarifa_id, producte_id, preu)
@@ -1761,7 +1761,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
   describe('capa 32 — tarifaId explícit a POST /comandes (anul·la la del client per a l’alta)', () => {
     it('tarifaId explícit diferent de la del client: el preu resol contra la tarifa del body, no la del client', async () => {
       const tarifaClient = await entorn.poolTest.query<{ id: string }>(
-        `INSERT INTO tarifa (codi, nom) VALUES ('CAP32-CLIENT', 'Tarifa del client') RETURNING id`,
+        `INSERT INTO tarifa (codi, nom, calcul_per_pes) VALUES ('CAP32-CLIENT', 'Tarifa del client', false) RETURNING id`,
       );
       await entorn.poolTest.query(
         `INSERT INTO tarifa_preu (tarifa_id, producte_id, preu)
@@ -1769,7 +1769,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
         [tarifaClient.rows[0]!.id, producteFitxaId],
       );
       const tarifaBody = await entorn.poolTest.query<{ id: string; id_seq: string }>(
-        `INSERT INTO tarifa (codi, nom) VALUES ('CAP32-BODY', 'Tarifa indicada al body') RETURNING id, id_seq`,
+        `INSERT INTO tarifa (codi, nom, calcul_per_pes) VALUES ('CAP32-BODY', 'Tarifa indicada al body', false) RETURNING id, id_seq`,
       );
       await entorn.poolTest.query(
         `INSERT INTO tarifa_preu (tarifa_id, producte_id, preu)
@@ -1813,7 +1813,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
 
     it('sense tarifaId al body: comportament actual sense canvis (fa servir la tarifa del client)', async () => {
       const tarifa = await entorn.poolTest.query<{ id: string }>(
-        `INSERT INTO tarifa (codi, nom) VALUES ('CAP32-DEFAULT', 'Tarifa per defecte') RETURNING id`,
+        `INSERT INTO tarifa (codi, nom, calcul_per_pes) VALUES ('CAP32-DEFAULT', 'Tarifa per defecte', false) RETURNING id`,
       );
       await entorn.poolTest.query(
         `INSERT INTO tarifa_preu (tarifa_id, producte_id, preu)
@@ -1881,7 +1881,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
 
     it('POST /comandes/:comandaId/linies (capa 30) no es veu afectat: continua fent servir sempre la tarifa del client', async () => {
       const tarifaClient = await entorn.poolTest.query<{ id: string }>(
-        `INSERT INTO tarifa (codi, nom) VALUES ('CAP32-L30-CLIENT', 'Tarifa client (capa 30)') RETURNING id`,
+        `INSERT INTO tarifa (codi, nom, calcul_per_pes) VALUES ('CAP32-L30-CLIENT', 'Tarifa client (capa 30)', false) RETURNING id`,
       );
       await entorn.poolTest.query(
         `INSERT INTO tarifa_preu (tarifa_id, producte_id, preu)
@@ -1889,7 +1889,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
         [tarifaClient.rows[0]!.id, producteFitxaId],
       );
       const tarifaBody = await entorn.poolTest.query<{ id: string; id_seq: string }>(
-        `INSERT INTO tarifa (codi, nom) VALUES ('CAP32-L30-BODY', 'Tarifa del body (capa 32)') RETURNING id, id_seq`,
+        `INSERT INTO tarifa (codi, nom, calcul_per_pes) VALUES ('CAP32-L30-BODY', 'Tarifa del body (capa 32)', false) RETURNING id, id_seq`,
       );
       await entorn.poolTest.query(
         `INSERT INTO tarifa_preu (tarifa_id, producte_id, preu)
