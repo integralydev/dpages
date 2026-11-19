@@ -91,7 +91,7 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
     expect(resultado.liniesNoResoltes).toBe(0);
 
     const comanda = await poolTest.query(
-      `SELECT estat, estat_web, poblacio_desti, total, data_produccio FROM comanda WHERE id = $1`,
+      `SELECT estat, estat_web, poblacio_desti, total, data_produccio, tarifa_id FROM comanda WHERE id = $1`,
       [resultado.comandaId],
     );
     // Tarea 38: las de WooCommerce nacen en esborrany.
@@ -101,6 +101,9 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
       poblacio_desti: comandaSimple.shipping.city,
       total: comandaSimple.total,
       data_produccio: null, // Tarea 39: dimarts abans de les 16:00.
+      // Tarea 42: este esquema no tiene la tarifa 01 → el pedido entra sin
+      // tarifa (con aviso en el log), no falla.
+      tarifa_id: null,
     });
 
     const linia = await poolTest.query(
@@ -1152,5 +1155,119 @@ describe('construirAdrecaLliurament / construirObsLliurament (funciones puras, s
 
   it('obs_lliurament: nota ausente: NULL', () => {
     expect(construirObsLliurament({ ...base, customer_note: undefined })).toBeNull();
+  });
+});
+
+describe('tarifa web por defecto (tarea 42, 17/11/2026)', () => {
+  const esquema = `test_tarifa_web_${randomUUID().replaceAll('-', '_')}`;
+  let poolTest: Pool;
+  let tarifa01Id: string;
+  let tarifa03Id: string;
+
+  // Variante del fixture con otro pedido y otro cliente: cada test usa su
+  // propio woo_order_id, customer_id, NIF y email, así no dependen del orden
+  // de ejecución (un customer_id repetido chocaría con el índice único de
+  // client.woo_customer_id — ADR-023).
+  function pedido(id: number, nif: string, dataModificacio = '2026-05-12T09:02:00'): WooOrder {
+    return {
+      ...comandaSimple,
+      id,
+      customer_id: id,
+      date_modified_gmt: dataModificacio,
+      billing: { ...comandaSimple.billing, email: `client.${nif}@example.com` },
+      meta_data: [{ id: 701001, key: 'nif', value: nif }],
+    };
+  }
+
+  beforeAll(async () => {
+    const setup = new Client({ connectionString: env.DATABASE_URL });
+    await setup.connect();
+    await setup.query(`CREATE SCHEMA "${esquema}"`);
+    await setup.query(`SET search_path TO "${esquema}"`);
+    await migrarArriba(setup);
+    await setup.query(
+      `INSERT INTO origen_comanda (codi, nom) VALUES ('woocommerce', 'WooCommerce'), ('manual', 'Manual')`,
+    );
+    const tarifes = await setup.query<{ id: string; codi: string }>(
+      `INSERT INTO tarifa (codi, nom) VALUES ('01', 'Web (Paquet)'), ('03', 'Botigues (A pes)')
+       RETURNING id, codi`,
+    );
+    tarifa01Id = tarifes.rows.find((t) => t.codi === '01')!.id;
+    tarifa03Id = tarifes.rows.find((t) => t.codi === '03')!.id;
+    await setup.end();
+    poolTest = new Pool({
+      connectionString: env.DATABASE_URL,
+      options: `-c search_path=${esquema}`,
+    });
+  });
+
+  afterAll(async () => {
+    await poolTest.end();
+    const cleanup = new Client({ connectionString: env.DATABASE_URL });
+    await cleanup.connect();
+    await cleanup.query(`DROP SCHEMA IF EXISTS "${esquema}" CASCADE`);
+    await cleanup.end();
+  });
+
+  async function transformar(wooOrder: WooOrder): Promise<string> {
+    const client = await poolTest.connect();
+    try {
+      await client.query('BEGIN');
+      const resultado = await transformarComanda(client, wooOrder);
+      await client.query('COMMIT');
+      return resultado.comandaId!;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function tarifes(comandaId: string) {
+    const res = await poolTest.query<{ comanda: string | null; client: string | null }>(
+      `SELECT c.tarifa_id AS comanda, cl.tarifa_id AS client
+       FROM comanda c LEFT JOIN client cl ON cl.id = c.client_id WHERE c.id = $1`,
+      [comandaId],
+    );
+    return res.rows[0];
+  }
+
+  it('pedido web de un cliente nuevo: el pedido y el cliente nacen con la tarifa 01', async () => {
+    const comandaId = await transformar(pedido(942001, 'NIF-NOU'));
+    expect(await tarifes(comandaId)).toEqual({ comanda: tarifa01Id, client: tarifa01Id });
+  });
+
+  it('cliente que ya existía con otra tarifa: el pedido lleva la 01 y la tarifa del cliente no cambia', async () => {
+    await poolTest.query(
+      `INSERT INTO client (nif, nom, tarifa_id) VALUES ('NIF-BOTIGA', 'Botiga', $1)`,
+      [tarifa03Id],
+    );
+    const comandaId = await transformar(pedido(942002, 'NIF-BOTIGA'));
+    expect(await tarifes(comandaId)).toEqual({ comanda: tarifa01Id, client: tarifa03Id });
+  });
+
+  it('cliente que ya existía sin tarifa: el pedido lleva la 01 y el cliente sigue sin tarifa', async () => {
+    await poolTest.query(`INSERT INTO client (nif, nom) VALUES ('NIF-SENSE', 'Sense tarifa')`);
+    const comandaId = await transformar(pedido(942003, 'NIF-SENSE'));
+    expect(await tarifes(comandaId)).toEqual({ comanda: tarifa01Id, client: null });
+  });
+
+  it('una nueva versión del pedido no pisa la tarifa cambiada a mano en Oficina', async () => {
+    const comandaId = await transformar(pedido(942004, 'NIF-CANVI'));
+    await poolTest.query(`UPDATE comanda SET tarifa_id = $2 WHERE id = $1`, [
+      comandaId,
+      tarifa03Id,
+    ]);
+
+    const mateixaComanda = await transformar(pedido(942004, 'NIF-CANVI', '2026-05-13T10:00:00'));
+    expect(mateixaComanda).toBe(comandaId);
+    const res = await poolTest.query<{ tarifa_id: string; data_modificacio_woo: Date }>(
+      `SELECT tarifa_id, data_modificacio_woo FROM comanda WHERE id = $1`,
+      [comandaId],
+    );
+    // La cabecera sí se actualizó (versión más nueva), pero la tarifa no.
+    expect(res.rows[0]!.data_modificacio_woo.toISOString()).toBe('2026-05-13T10:00:00.000Z');
+    expect(res.rows[0]!.tarifa_id).toBe(tarifa03Id);
   });
 });
