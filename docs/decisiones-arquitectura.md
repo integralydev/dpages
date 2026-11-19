@@ -1328,3 +1328,9 @@ con la posición de la línea en WooCommerce y usa como criterio de
 emparejamiento; sin la marca, el siguiente sync del pedido desharía el
 orden. Mismo trade-off que arriba: reordenar un pedido web lo desconecta
 de la sincronización de líneas.
+
+**Excepción (punt 55, 18/11/2026):** un `PATCH .../linies/:liniaId` que
+sólo trae `proveidorId` no fija `linies_editades_a`. El proveedor de la
+línea es una columna del sistema que el sync no escribe nunca (sólo la
+rellena al insertar la línea), así que no hay nada que proteger, y asignar
+proveedores en lote no debe cortar la sincronización de los pedidos web.

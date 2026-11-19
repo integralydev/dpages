@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { DecimalInput } from '@/components/ui/DecimalInput';
 import { SelectFilter } from '@/components/ui/SelectFilter';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
+import { useProveidors } from '@/hooks/useProveidors';
 import { TextField } from '@/components/ui/TextField';
 import { useCategories } from '@/hooks/useCategories';
 import type { ProductFormValues } from '@/hooks/useCatalog';
@@ -22,7 +23,15 @@ const FORMAT_OPTIONS = [NO_FORMAT, 'SENCER', 'TALLAT', 'LLESCAT'];
 const PACKAGING_OPTIONS = [NO_PACKAGING, 'NORMAL', 'ESPECIAL', 'NORMAL (web)', 'NORMAL (pes)'];
 const NO_CATEGORY = 'Selecciona...';
 
-type FieldErrors = { descripcio?: string; categoriaId?: string; format?: string; envasat?: string };
+type FieldErrors = {
+  descripcio?: string;
+  categoriaId?: string;
+  format?: string;
+  envasat?: string;
+  proveidorDefecteId?: string;
+};
+
+const NO_PROVEIDOR = 'Sense proveïdor';
 
 export function ProductForm({
   initialData,
@@ -34,6 +43,15 @@ export function ProductForm({
   onCancel: () => void;
 }) {
   const { data: categories } = useCategories();
+  // Punt 55: proveïdor preferit de l'article (opcional).
+  const { data: proveidors } = useProveidors();
+  const [proveidor, setProveidor] = useState(initialData?.proveidorDefecte ?? null);
+  const [proveidorTocat, setProveidorTocat] = useState(false);
+  // El preferit actual sempre és a la llista, encara que no hagi carregat.
+  const opcionsProveidor =
+    proveidor && !proveidors.some((p) => p.id === proveidor.id)
+      ? [proveidor, ...proveidors]
+      : proveidors;
   const [codi, setCodi] = useState(initialData?.codi ?? '');
   const [agrupacioProduccio, setAgrupacioProduccio] = useState(
     initialData?.agrupacioProduccio ?? '',
@@ -73,6 +91,7 @@ export function ProductForm({
         envasat,
         pesKg: Number(pesKg) > 0 ? parseDecimalInput(pesKg, 3) : null,
         preuVenda: Number(preuVenda) > 0 ? parseDecimalInput(preuVenda, 2) : null,
+        ...(proveidorTocat ? { proveidorDefecteId: proveidor?.id ?? null } : {}),
       });
     } catch (caught) {
       if (caught instanceof ApiError) {
@@ -82,7 +101,8 @@ export function ProductForm({
             detall.camp === 'descripcio' ||
             detall.camp === 'categoriaId' ||
             detall.camp === 'format' ||
-            detall.camp === 'envasat'
+            detall.camp === 'envasat' ||
+            detall.camp === 'proveidorDefecteId'
           ) {
             nextFieldErrors[detall.camp] = detall.missatge;
           }
@@ -179,6 +199,22 @@ export function ProductForm({
               <p className="mt-1.5 text-xs text-red-600">{fieldErrors.envasat}</p>
             )}
           </div>
+        </div>
+
+        <div>
+          <SimpleDropdown
+            label="Proveïdor preferit"
+            options={[NO_PROVEIDOR, ...opcionsProveidor.map((p) => p.nom)]}
+            value={proveidor?.nom ?? NO_PROVEIDOR}
+            onChange={(nom) => {
+              const triat = opcionsProveidor.find((p) => p.nom === nom);
+              setProveidor(triat ? { id: triat.id, nom: triat.nom } : null);
+              setProveidorTocat(true);
+            }}
+          />
+          {fieldErrors.proveidorDefecteId && (
+            <p className="mt-1.5 text-xs text-red-600">{fieldErrors.proveidorDefecteId}</p>
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

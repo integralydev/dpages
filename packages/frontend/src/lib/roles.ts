@@ -29,6 +29,7 @@ export const MODUL_ROUTES: Record<string, string[]> = {
   'panell-produccio': ['/production'],
   usuaris: ['/users'],
   transportistes: ['/transportistes'],
+  proveidors: ['/proveidors'],
 };
 
 const FALLBACK_ROUTE = '/profile';
@@ -70,4 +71,5 @@ export const MODUL_LABELS: Record<string, string> = {
   usuaris: 'Usuaris',
   rols: 'Rols',
   transportistes: 'Transportistes',
+  proveidors: 'Proveïdors',
 };

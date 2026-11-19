@@ -39,6 +39,8 @@ export type WorkshopPanelFilters = {
   /** Tasca 29: les línies d'un sol producte (desplegar la vista acumulada). */
   producteId?: number;
   format?: string;
+  /** Punt 55: proveïdor de la línia (id) o `sense` (sense proveïdor). */
+  proveidorId?: number | 'sense';
   envasat?: string;
   dataProduccioDes?: string;
   dataProduccioFins?: string;

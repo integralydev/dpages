@@ -31,6 +31,7 @@ export type {
   ClientApi,
   TipusClient,
   TransportistaApi,
+  ProveidorApi,
   OrigenComandaApi,
   ReferenciaApi,
   ComandaResumApi,

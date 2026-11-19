@@ -80,6 +80,22 @@ export interface ProducteApi {
   agrupacioProduccio: string | null;
   format: 'SENCER' | 'TALLAT' | 'LLESCAT' | null;
   envasat: 'NORMAL' | 'NORMAL (pes)' | 'NORMAL (web)' | 'ESPECIAL' | null;
+  /** Punt 55: proveïdor preferit de l'article (opcional). */
+  proveidorDefecte: ReferenciaApi | null;
+}
+
+/**
+ * Punt 55 (18/11/2026): proveïdor. De moment només el nom (únic). Es pot
+ * esborrar (`DELETE /proveidors/:id`) només si cap article ni cap línia no
+ * el fa servir.
+ */
+export interface ProveidorApi {
+  id: number;
+  nom: string;
+}
+
+export interface ProveidorEntradaApi {
+  nom: string;
 }
 
 // ── 4.2b · Rendiments Porcs ──────────────────────────────────────────────
@@ -293,6 +309,11 @@ export interface ComandaLiniaApi {
   ordinal: number;
   producte: { id: number; codi: string | null; descripcio: string } | null;
   /**
+   * Punt 55: proveïdor de la línia (opcional). En crear-la, si no s'indica,
+   * el preferit de l'article.
+   */
+  proveidor: ReferenciaApi | null;
+  /**
    * Mismos tres campos que ya devuelve `FilaPanellObradorApi`
    * para esta misma línea (`GET /panells/obrador`), resueltos igual
    * (join contra `producte`/`categoria_producte`): consistencia entre
@@ -398,6 +419,11 @@ export interface ComandaDetallApi {
 export interface LiniaCreacioApi {
   producteId: number;
   unitatsDemanades: number;
+  /**
+   * Punt 55: sense la clau, el proveïdor preferit de l'article; `null`,
+   * sense proveïdor; un id, aquest proveïdor.
+   */
+  proveidorId?: number | null;
   /** Sólo tiene sentido si el artículo es "a medida" — se ignora si tiene peso de ficha. */
   kgDemanats?: string;
   /**
@@ -491,6 +517,8 @@ export interface LiniaAfegidaApi {
  */
 export interface LiniaEdicioApi {
   unitatsDemanades?: number;
+  /** Punt 55: `null` el treu. */
+  proveidorId?: number | null;
   /** Sólo aceptado si el artículo es "a medida" (`kgEditable: true`) — rechaza si el artículo tiene ficha de peso. */
   kgDemanats?: string;
   dataProduccio?: string | null;
