@@ -73,6 +73,9 @@ const NAV_GROUPS: NavGroup[] = [
       },
       // Punt 55: proveïdors, al costat de les fitxes de clients.
       { label: 'Proveïdors', href: '/proveidors', modul: 'proveidors', icon: Warehouse },
+      // Transportistes també és un manteniment (Francesc, 19/11/2026); abans
+      // era a Configuració.
+      { label: 'Transportistes', href: '/transportistes', modul: 'transportistes', icon: Truck },
     ],
   },
   {
@@ -106,10 +109,7 @@ const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: 'Configuració',
-    items: [
-      { label: "Administració d'usuaris", href: '/users', modul: 'usuaris', icon: UserCog },
-      { label: 'Transportistes', href: '/transportistes', modul: 'transportistes', icon: Truck },
-    ],
+    items: [{ label: "Administració d'usuaris", href: '/users', modul: 'usuaris', icon: UserCog }],
   },
 ];
 
