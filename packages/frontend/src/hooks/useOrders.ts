@@ -75,6 +75,8 @@ export type OrderFormValues = {
   bultos: number | null;
   obsProduccio: string | null;
   obsLliurament: string | null;
+  /** Tasca 53: «Núm. comanda WooCommerce»; `null` = sense número. */
+  numWoo: string | null;
   poblacioDesti: string | null;
   adrecaLliurament: string | null;
   /**
@@ -271,6 +273,7 @@ export function useOrders(filters: OrderListFilters = {}): UseOrdersResult {
       if (values.tarifaId !== null) cos.tarifaId = values.tarifaId;
       if (values.transportistaId !== null) cos.transportistaId = values.transportistaId;
       if (values.obsLliurament !== null) cos.obsLliurament = values.obsLliurament;
+      if (values.numWoo !== null) cos.numWoo = values.numWoo;
 
       const creada = await api.post<ComandaDetallApi>('/comandes', cos);
 
@@ -318,6 +321,7 @@ export function useOrders(filters: OrderListFilters = {}): UseOrdersResult {
         bultos: values.bultos,
         obsProduccio: values.obsProduccio,
         obsLliurament: values.obsLliurament,
+        numWoo: values.numWoo,
         poblacioDesti: values.poblacioDesti,
         adrecaLliurament: values.adrecaLliurament,
       };

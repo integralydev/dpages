@@ -10,6 +10,7 @@ import { DateRangeInput } from '@/components/ui/DateRangeInput';
 import { FilterBar } from '@/components/ui/FilterBar';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Pagination } from '@/components/ui/Pagination';
+import { SearchInput } from '@/components/ui/SearchInput';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { StatCard } from '@/components/ui/StatCard';
 import { useCarriers } from '@/hooks/useCarriers';
@@ -55,6 +56,7 @@ function OfficeOrderCard({ order, onClick }: { order: FilaPanellOficinaApi; onCl
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-semibold text-gray-900">{order.num}</p>
+          {order.numWoo && <span className="block text-xs text-gray-500">Web {order.numWoo}</span>}
           <p className="text-sm text-gray-500">{order.client ?? '—'}</p>
         </div>
         <Badge variant={estatBadgeVariant(order.estat)}>
@@ -165,8 +167,12 @@ export default function OfficePage() {
     [tariffFilter, tariffColumns],
   );
 
+  // Tasca 53: cerca pel núm. de comanda o pel de la web, mentre s'escriu.
+  const [orderNumberSearch, setOrderNumberSearch] = useState('');
+
   const filters = useMemo(
     () => ({
+      ...(orderNumberSearch.trim() ? { numComanda: orderNumberSearch.trim() } : {}),
       ...(statusCode ? { estat: statusCode } : {}),
       ...(carrierId !== undefined ? { transportistaId: carrierId } : {}),
       ...(selectedClient !== null ? { clientId: selectedClient.id } : {}),
@@ -181,6 +187,7 @@ export default function OfficePage() {
       ...(liniesSenseProduir !== undefined ? { liniesSenseProduir } : {}),
     }),
     [
+      orderNumberSearch,
       statusCode,
       carrierId,
       selectedClient,
@@ -298,6 +305,11 @@ export default function OfficePage() {
 
       <FilterBar>
         <div className="flex w-full flex-wrap gap-4">
+          <SearchInput
+            label="Núm. comanda o web"
+            value={orderNumberSearch}
+            onChange={setOrderNumberSearch}
+          />
           <AsyncCombobox
             label="Client"
             value={selectedClient?.id ?? null}
@@ -444,6 +456,9 @@ export default function OfficePage() {
                   >
                     <td className="px-2 py-3 break-words">
                       <span className="font-semibold text-gray-900">{order.num}</span>
+                      {order.numWoo && (
+                        <span className="block text-xs text-gray-500">Web {order.numWoo}</span>
+                      )}
                     </td>
                     <td className="px-2 py-3 break-words text-gray-900">{order.client ?? '—'}</td>
                     <td className="hidden px-2 py-3 break-words text-gray-900 xl:table-cell">

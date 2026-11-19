@@ -153,6 +153,7 @@ export default function OfficeOrderDetailPage() {
             <h2 className="mb-4 text-base font-bold text-gray-900">Capçalera</h2>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <Field label="Núm. comanda" value={order.num} />
+              <Field label="Núm. comanda WooCommerce" value={order.numWoo ?? '—'} />
               <Field
                 label="Estat"
                 value={

@@ -786,10 +786,19 @@ VALIDACIO`; un id inexistente no coincide con nada (no es error).
 
 **`GET /comandes/:id`** — incluye las líneas:
 
+> **`numWoo`** (tarea 53, 17/11/2026, migración `0028`): «Núm. comanda
+> WooCommerce». En los pedidos de WooCommerce, por defecto el `number` del
+> pedido en la web (lo escribe el sync sólo al crear; después es de Oficina,
+> ADR-025); en los manuales, `null`. Editable en `POST /comandes` y
+> `PATCH /comandes/:id` (texto, máx. 50 caracteres; vacío o `null` = sin
+> número). `?cerca=` de `GET /comandes` también lo busca, y Oficina y
+> Empaquetat lo filtran con `?numComanda=`.
+
 ```json
 {
   "id": 142,
   "num": "000142",
+  "numWoo": "6711",
   "origen": "woocommerce",
   "estat": "oberta",
   "client": { "id": 45, "nom": "Restaurant Example", "poblacio": "Manresa" },
@@ -1236,7 +1245,11 @@ Sólo lectura, con filtros y subtotales.
 
 **`GET /panells/oficina`**
 
-Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataComandaDes=&dataComandaFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&tarifaId=&estat=&clientId=&poblacioDesti=`
+Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataComandaDes=&dataComandaFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&tarifaId=&estat=&clientId=&poblacioDesti=&numComanda=`
+
+> `numComanda` (tarea 53): pedidos cuyo número propio o `numWoo` contiene
+> el texto, sin distinguir mayúsculas (`%` y `_` se buscan tal cual). Cada
+> fila trae `numWoo`.
 
 > Los tres `...Fins` (`dataExpedicioFins`, `dataComandaFins`,
 > `dataLliuramentFins`) incluyen el día completo — ver "Filtros de rango de
@@ -1528,7 +1541,11 @@ que edita las mismas líneas. Todo lo demás es sólo lectura.
 **`GET /panells/empaquetat`** — módulo `panell-empaquetat` **o**
 `panell-compres` (el Panell de Compres lo usa para el detalle de un cliente).
 
-Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&senseClient=&producte=&cercaProducte=&categoriaId=&confirmacio=&origen=&ordre=`
+Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&senseClient=&producte=&cercaProducte=&categoriaId=&confirmacio=&origen=&ordre=&numComanda=`
+
+> `numComanda` (tarea 53): mismo criterio que en `GET /panells/oficina`;
+> también vale para el Panell de Compres, que usa estos filtros. Cada fila
+> trae `numWoo`.
 
 > **`senseClient=si` y `ordre=comanda` (tarea 41, 11/11/2026):** los usa el
 > detalle de un cliente en el Panell de Compres. `senseClient=si` deja sólo

@@ -1256,6 +1256,13 @@ cambios en esta tarea. Pendiente: validar con Francesc si el formato elegido
 para `adreca_lliurament` y el destino de `customer_note` en
 `obs_lliurament` son los esperados.
 
+**Ampliación (tarea 53, 17/11/2026, migración `0028`)**: mismo criterio
+para `comanda.num_woo` («Núm. comanda WooCommerce»): `crearComanda` lo
+rellena con `WooOrder.number` (o el `id` si viniera vacío) sólo al crear;
+`actualitzarCapcaleraSiCorrespon` no lo toca, así que lo que Oficina
+corrija a mano se conserva. En los pedidos manuales queda `NULL` y es
+editable.
+
 ## ADR-026 — Líneas de un pedido sincronizado se protegen tras la primera edición de Oficina
 
 **Estado**: Aceptado.

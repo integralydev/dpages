@@ -86,6 +86,9 @@ function OrderCard({
           />
           <span>
             <span className="block font-semibold text-gray-900">{order.num}</span>
+            {order.numWoo && (
+              <span className="block text-xs text-gray-500">Web {order.numWoo}</span>
+            )}
             <span className="block text-sm text-gray-500">{order.client?.nom ?? '—'}</span>
           </span>
         </label>
@@ -455,7 +458,11 @@ export default function OrdersPage() {
       {duplicateError && <p className="-mt-6 mb-6 text-sm text-red-600">{duplicateError}</p>}
 
       <FilterBar>
-        <SearchInput label="Cerca (núm. comanda o client)" value={search} onChange={setSearch} />
+        <SearchInput
+          label="Cerca (núm. comanda, núm. web o client)"
+          value={search}
+          onChange={setSearch}
+        />
         <MultiCombobox
           label="Clients"
           selected={selectedClients}
@@ -601,6 +608,9 @@ export default function OrdersPage() {
                     </td>
                     <td className="px-2 py-3 break-words">
                       <span className="font-semibold text-gray-900">{order.num}</span>
+                      {order.numWoo && (
+                        <span className="block text-xs text-gray-500">Web {order.numWoo}</span>
+                      )}
                     </td>
                     <td className="px-2 py-3 break-words text-gray-900">
                       {order.client?.nom ?? '—'}

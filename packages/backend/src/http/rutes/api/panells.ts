@@ -123,6 +123,27 @@ export async function construirFiltresObrador(
   ];
   const valors: unknown[] = [];
 
+  // Punt 55 (18/11/2026): per proveïdor de la línia. `sense` = les que
+  // encara no en tenen (per veure què falta assignar).
+  if (query.proveidorId !== undefined && query.proveidorId !== '') {
+    if (query.proveidorId === 'sense') {
+      condicions.push('cl.proveidor_id IS NULL');
+    } else {
+      const proveidorId =
+        typeof query.proveidorId === 'string' ? parsearIdPublic(query.proveidorId) : null;
+      if (proveidorId === null) {
+        enviarValidacio(reply, "proveidorId ha de ser un id o 'sense'", [
+          { camp: 'proveidorId', missatge: "ha de ser un id o 'sense'" },
+        ]);
+        return null;
+      }
+      condicions.push(
+        `cl.proveidor_id = (SELECT id FROM proveidor WHERE id_seq = $${valors.length + 1})`,
+      );
+      valors.push(proveidorId);
+    }
+  }
+
   // dataProduccio filtra por la fecha de la LÍNEA (cl.data_produccio), no
   // la de la cabecera del pedido — desde que Obrador dejó de ser agregado
   // por producto (contrato, sección 4.7), es la línea la que tiene fecha
@@ -321,7 +342,26 @@ async function construirFiltresEmpaquetat(
     ]);
     return null;
   }
+  afegirFiltreNumComanda(query.numComanda, condicions, valors);
   return { condicions, valors };
+}
+
+/**
+ * Tasca 53: `?numComanda=` busca, mentre s'escriu, pel número de la comanda
+ * o pel «Núm. comanda WooCommerce» (conté el text, sense distingir
+ * majúscules). Compartit per Oficina i Empaquetat (i Compres, que fa servir
+ * els filtres d'Empaquetat). Fa servir l'àlies `c` (comanda).
+ */
+function afegirFiltreNumComanda(valor: unknown, condicions: string[], valors: unknown[]): void {
+  if (typeof valor !== 'string' || valor.trim() === '') return;
+  const n = valors.length + 1;
+  condicions.push(`(c.num ILIKE $${n} ESCAPE '\\' OR c.num_woo ILIKE $${n} ESCAPE '\\')`);
+  valors.push(`%${escaparLike(valor.trim())}%`);
+}
+
+/** Escapa els comodins de LIKE perquè `%` o `_` escrits es busquin tal qual. */
+function escaparLike(text: string): string {
+  return text.replace(/[\\%_]/g, (caracter) => `\\${caracter}`);
 }
 
 /** FROM + JOINs que acompanyen `construirFiltresEmpaquetat` (sense el WHERE). */
@@ -431,7 +471,23 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
           { camp: 'liniesSenseProduir', missatge: 'ha de ser si o no' },
         ]);
       }
+      afegirFiltreNumComanda(query.numComanda, condicions, valors);
       const where = condicions.length > 0 ? `WHERE ${condicions.join(' AND ')}` : '';
+
+      // Tasca 54 (Ari, 17/11/2026): `ordre=transportista` ordena per nom del
+      // transportista (A-Z, sense distingir majúscules; les comandes sense
+      // transportista, al final) i, dins de cada un, amb l'ordre de sempre.
+      // Sense `ordre`, l'ordre de sempre. Només dos valors fixos: mai
+      // s'interpola res que vingui de la petició.
+      const ordreHabitual = 'c.data_expedicio ASC NULLS LAST, c.creat_en ASC';
+      let ordre = ordreHabitual;
+      if (query.ordre === 'transportista') {
+        ordre = `LOWER(tr.nom) ASC NULLS LAST, ${ordreHabitual}`;
+      } else if (query.ordre !== undefined && query.ordre !== '') {
+        return enviarValidacio(reply, 'ordre només pot ser transportista', [
+          { camp: 'ordre', missatge: 'ha de ser transportista' },
+        ]);
+      }
 
       const base = `
       FROM comanda c
@@ -467,6 +523,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       const files = await pool.query<{
         id_seq: string;
         num: string;
+        num_woo: string | null;
         client_nom: string | null;
         poblacio_desti: string | null;
         tarifa_nom: string | null;
@@ -486,7 +543,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         total_incidencies: string;
         tipus_incidencia: string | null;
       }>(
-        `SELECT c.id_seq, c.num, cl.nom AS client_nom, c.poblacio_desti, t.nom AS tarifa_nom,
+        `SELECT c.id_seq, c.num, c.num_woo, cl.nom AS client_nom, c.poblacio_desti, t.nom AS tarifa_nom,
               tr.nom AS transportista_nom, c.estat, c.data_comanda, c.data_expedicio,
               c.data_lliurament, c.bultos, COALESCE(agg.linies, 0) AS linies,
               COALESCE(agg.total_kg, 0)::numeric(14,3) AS total_kg,
@@ -502,7 +559,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
               c.obs_lliurament,
               COALESCE(inc.total_incidencies, 0) AS total_incidencies, inc.tipus_incidencia
        ${base}
-       ORDER BY c.data_expedicio ASC NULLS LAST, c.creat_en ASC
+       ORDER BY ${ordre}
        LIMIT $${valors.length + 1} OFFSET $${valors.length + 2}`,
         [...valors, mida, offset],
       );
@@ -510,6 +567,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       const dades: FilaPanellOficinaApi[] = files.rows.map((f) => ({
         comandaId: Number(f.id_seq),
         num: f.num,
+        numWoo: f.num_woo,
         client: f.client_nom,
         poblacioDesti: f.poblacio_desti,
         tarifa: f.tarifa_nom,
@@ -846,6 +904,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         id_seq: string;
         comanda_id_seq: string;
         num: string;
+        num_woo: string | null;
         data_expedicio: Date | null;
         data_lliurament: Date | null;
         transportista_nom: string | null;
@@ -862,7 +921,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         obs_empaquetat: string | null;
         produir: boolean;
       }>(
-        `SELECT cl.id_seq, c.id_seq AS comanda_id_seq, c.num, c.data_expedicio, c.data_lliurament,
+        `SELECT cl.id_seq, c.id_seq AS comanda_id_seq, c.num, c.num_woo, c.data_expedicio, c.data_lliurament,
               tr.nom AS transportista_nom, cli.nom AS client_nom, cat.nom AS categoria_nom,
               p.codi, p.descripcio,
               cl.unitats_demanades, cl.pes_calculat_kg AS kg_demanats, cl.unitats_lliurades,
@@ -884,6 +943,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         liniaId: Number(f.id_seq),
         comandaId: Number(f.comanda_id_seq),
         num: f.num,
+        numWoo: f.num_woo,
         dataExpedicio: formatearDataApi(f.data_expedicio),
         dataLliurament: formatearDataApi(f.data_lliurament),
         transportista: f.transportista_nom,

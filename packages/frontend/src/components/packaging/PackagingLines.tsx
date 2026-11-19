@@ -77,6 +77,12 @@ function textIdentificador(line: FilaPanellEmpaquetatApi, identificador: Identif
   return line.client ?? '—';
 }
 
+/** Tasca 53: el núm. de la web de la comanda, sota l'identificador. */
+function NumWoo({ line }: { line: FilaPanellEmpaquetatApi }) {
+  if (!line.numWoo) return null;
+  return <span className="block text-xs text-gray-500">Web {line.numWoo}</span>;
+}
+
 /**
  * Desar unitats i quilos lliurats d'una línia (fila i targeta). Tasca 57
  * (Ari, 17/11/2026): una línia encara no confirmada s'ha de poder confirmar
@@ -211,6 +217,7 @@ export function PackagingRow({
         className={`px-3 py-3 break-words text-gray-900 ${identificador === 'comanda' ? '' : 'hidden xl:table-cell'}`}
       >
         {textIdentificador(line, identificador)}
+        <NumWoo line={line} />
       </td>
       {/* Tasca 7: observació d'empaquetat de la línia (ve de l'entrada de comandes). */}
       <td className="px-3 py-3 break-words text-gray-900">{line.obsEmpaquetat ?? ''}</td>
@@ -297,6 +304,7 @@ export function PackagingCard({
             <p className="text-sm text-gray-500">
               {identificador === 'comanda' ? `Comanda ${line.num}` : (line.client ?? '—')}
             </p>
+            <NumWoo line={line} />
           </div>
           <WorkedCheckbox
             confirmatA={line.confirmatA}

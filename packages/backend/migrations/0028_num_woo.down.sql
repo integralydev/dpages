@@ -1,0 +1,1 @@
+ALTER TABLE comanda DROP COLUMN IF EXISTS num_woo;
