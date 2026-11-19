@@ -1,6 +1,7 @@
 import type { ProducteApi } from '@dpages/shared';
 import type { FastifyInstance } from 'fastify';
 import { pool } from '../../../db/pool.js';
+import { resolverProveidorUuid } from './proveidors.js';
 import {
   construirPaginacio,
   crearGuardaModul,
@@ -41,6 +42,8 @@ interface FilaProducte {
   agrupacio_produccio: string | null;
   format: Format | null;
   envasat: Envasat | null;
+  proveidor_id_seq: string | null;
+  proveidor_nom: string | null;
 }
 
 function aApi(fila: FilaProducte): ProducteApi {
@@ -60,15 +63,21 @@ function aApi(fila: FilaProducte): ProducteApi {
     agrupacioProduccio: fila.agrupacio_produccio,
     format: fila.format,
     envasat: fila.envasat,
+    proveidorDefecte:
+      fila.proveidor_id_seq !== null && fila.proveidor_nom !== null
+        ? { id: Number(fila.proveidor_id_seq), nom: fila.proveidor_nom }
+        : null,
   };
 }
 
 const SELECT_PRODUCTE = `
   SELECT p.id_seq, p.codi, p.descripcio, p.descripcio_venda, p.tipus, p.pes_kg,
          p.preu_venda, p.actiu, c.id_seq AS categoria_id_seq, c.nom AS categoria_nom,
-         p.agrupacio_produccio, p.format, p.envasat
+         p.agrupacio_produccio, p.format, p.envasat,
+         pv.id_seq AS proveidor_id_seq, pv.nom AS proveidor_nom
   FROM producte p
   LEFT JOIN categoria_producte c ON c.id = p.categoria_id
+  LEFT JOIN proveidor pv ON pv.id = p.proveidor_defecte_id
 `;
 
 export function registrarRutesProductes(fastify: FastifyInstance): void {
@@ -178,6 +187,7 @@ export function registrarRutesProductes(fastify: FastifyInstance): void {
       agrupacioProduccio: string | null;
       format: Format | null;
       envasat: Envasat | null;
+      proveidorDefecteId: number | null;
     }>;
 
     if (!cos.descripcio || cos.descripcio.trim() === '') {
@@ -211,18 +221,29 @@ export function registrarRutesProductes(fastify: FastifyInstance): void {
       }
     }
 
+    // Punt 55: proveïdor preferit (opcional).
+    const proveidorUuid = await resolverProveidorUuid(pool, cos.proveidorDefecteId);
+    if (proveidorUuid === false) {
+      return enviarValidacio(reply, 'El proveïdor indicat no existeix', [
+        { camp: 'proveidorDefecteId', missatge: 'no existeix' },
+      ]);
+    }
+
     try {
       const insertat = await pool.query<FilaProducte>(
         `WITH nou AS (
            INSERT INTO producte (codi, descripcio, descripcio_venda, tipus, pes_kg, preu_venda, actiu,
-                                  categoria_id, agrupacio_produccio, format, envasat)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                                  categoria_id, agrupacio_produccio, format, envasat,
+                                  proveidor_defecte_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
            RETURNING *
          )
          SELECT nou.id_seq, nou.codi, nou.descripcio, nou.descripcio_venda, nou.tipus, nou.pes_kg,
                 nou.preu_venda, nou.actiu, c.id_seq AS categoria_id_seq, c.nom AS categoria_nom,
-                nou.agrupacio_produccio, nou.format, nou.envasat
-         FROM nou LEFT JOIN categoria_producte c ON c.id = nou.categoria_id`,
+                nou.agrupacio_produccio, nou.format, nou.envasat,
+                pv.id_seq AS proveidor_id_seq, pv.nom AS proveidor_nom
+         FROM nou LEFT JOIN categoria_producte c ON c.id = nou.categoria_id
+         LEFT JOIN proveidor pv ON pv.id = nou.proveidor_defecte_id`,
         [
           cos.codi ?? null,
           cos.descripcio.trim(),
@@ -235,6 +256,7 @@ export function registrarRutesProductes(fastify: FastifyInstance): void {
           cos.agrupacioProduccio ?? null,
           cos.format ?? null,
           cos.envasat ?? null,
+          proveidorUuid ?? null,
         ],
       );
 
@@ -271,7 +293,16 @@ export function registrarRutesProductes(fastify: FastifyInstance): void {
         agrupacioProduccio: string | null;
         format: Format | null;
         envasat: Envasat | null;
+        proveidorDefecteId: number | null;
       }>;
+
+      // Punt 55: proveïdor preferit; null el treu.
+      const proveidorUuid = await resolverProveidorUuid(pool, cos.proveidorDefecteId);
+      if (proveidorUuid === false) {
+        return enviarValidacio(reply, 'El proveïdor indicat no existeix', [
+          { camp: 'proveidorDefecteId', missatge: 'no existeix' },
+        ]);
+      }
 
       if (cos.descripcio !== undefined && cos.descripcio.trim() === '') {
         return enviarValidacio(reply, 'La descripció no pot estar buida', [
@@ -319,7 +350,8 @@ export function registrarRutesProductes(fastify: FastifyInstance): void {
          categoria_id = CASE WHEN $11 THEN $12 ELSE categoria_id END,
          agrupacio_produccio = CASE WHEN $13 THEN $14 ELSE agrupacio_produccio END,
          format = CASE WHEN $15 THEN $16 ELSE format END,
-         envasat = CASE WHEN $17 THEN $18 ELSE envasat END
+         envasat = CASE WHEN $17 THEN $18 ELSE envasat END,
+         proveidor_defecte_id = CASE WHEN $19 THEN $20 ELSE proveidor_defecte_id END
        WHERE id_seq = $1
        RETURNING id`,
         [
@@ -341,6 +373,8 @@ export function registrarRutesProductes(fastify: FastifyInstance): void {
           cos.format ?? null,
           cos.envasat !== undefined,
           cos.envasat ?? null,
+          proveidorUuid !== undefined,
+          proveidorUuid ?? null,
         ],
       );
 

@@ -17,6 +17,17 @@ import {
   resolverTarifaUuid,
 } from './comu.js';
 
+type FilaTarifa = { id_seq: string; codi: string | null; nom: string; calcul_per_pes: boolean };
+
+function aApiTarifa(fila: FilaTarifa): TarifaResumApi {
+  return {
+    id: Number(fila.id_seq),
+    codi: fila.codi,
+    nom: fila.nom,
+    calculPerPes: fila.calcul_per_pes,
+  };
+}
+
 export function registrarRutesTarifes(fastify: FastifyInstance): void {
   // Endpoint de referència (contrato §4.3 — consumit també des de
   // office/orders/client-tariffs per resoldre columnes de tarifa, ver
@@ -51,14 +62,10 @@ export function registrarRutesTarifes(fastify: FastifyInstance): void {
       }
       const where = condicions.length > 0 ? `WHERE ${condicions.join(' AND ')}` : '';
 
-      const tarifes = await pool.query<{ id_seq: string; codi: string | null; nom: string }>(
-        'SELECT id_seq, codi, nom FROM tarifa ORDER BY nom ASC',
+      const tarifes = await pool.query<FilaTarifa>(
+        'SELECT id_seq, codi, nom, calcul_per_pes FROM tarifa ORDER BY nom ASC',
       );
-      const tarifesApi: TarifaResumApi[] = tarifes.rows.map((t) => ({
-        id: Number(t.id_seq),
-        codi: t.codi,
-        nom: t.nom,
-      }));
+      const tarifesApi: TarifaResumApi[] = tarifes.rows.map(aApiTarifa);
 
       const total = await pool.query<{ count: string }>(
         `SELECT count(*) FROM producte p ${where}`,
@@ -185,7 +192,7 @@ export function registrarRutesTarifes(fastify: FastifyInstance): void {
   );
 
   fastify.post('/tarifes', { preHandler: crearGuardaModul('tarifes') }, async (req, reply) => {
-    const cos = req.body as Partial<{ codi: string; nom: string }>;
+    const cos = req.body as Partial<{ codi: string; nom: string; calculPerPes: boolean }>;
 
     if (!cos.codi || cos.codi.trim() === '') {
       return enviarValidacio(reply, 'El codi és obligatori', [
@@ -198,15 +205,21 @@ export function registrarRutesTarifes(fastify: FastifyInstance): void {
       ]);
     }
 
+    // Tasca 40: opcional; una tarifa nova calcula per pes si no es diu res.
+    if (cos.calculPerPes !== undefined && typeof cos.calculPerPes !== 'boolean') {
+      return enviarValidacio(reply, 'calculPerPes ha de ser true o false', [
+        { camp: 'calculPerPes', missatge: 'ha de ser true o false' },
+      ]);
+    }
+
     try {
-      const inserit = await pool.query<{ id_seq: string; codi: string | null; nom: string }>(
-        `INSERT INTO tarifa (codi, nom) VALUES ($1, $2) RETURNING id_seq, codi, nom`,
-        [cos.codi.trim(), cos.nom.trim()],
+      const inserit = await pool.query<FilaTarifa>(
+        `INSERT INTO tarifa (codi, nom, calcul_per_pes) VALUES ($1, $2, $3)
+         RETURNING id_seq, codi, nom, calcul_per_pes`,
+        [cos.codi.trim(), cos.nom.trim(), cos.calculPerPes ?? true],
       );
-      const fila = inserit.rows[0]!;
-      const tarifaApi: TarifaResumApi = { id: Number(fila.id_seq), codi: fila.codi, nom: fila.nom };
       reply.code(201);
-      return tarifaApi;
+      return aApiTarifa(inserit.rows[0]!);
     } catch (err) {
       if (esViolacioCodiUnic(err)) {
         return enviarConflicte(reply, `Ja existeix una tarifa amb el codi "${cos.codi}"`);
@@ -214,4 +227,29 @@ export function registrarRutesTarifes(fastify: FastifyInstance): void {
       throw err;
     }
   });
+
+  // Tasca 40: canviar com calcula una tarifa (per pes o per unitats). Només
+  // afecta les comandes que es creïn (o a les quals es posi aquesta tarifa)
+  // a partir d'ara: cada comanda guarda el seu càlcul (migració 0027).
+  fastify.patch(
+    '/tarifes/:tarifaId',
+    { preHandler: crearGuardaModul('tarifes') },
+    async (req, reply) => {
+      const tarifaIdPublic = parsearIdPublic((req.params as { tarifaId: string }).tarifaId);
+      if (tarifaIdPublic === null) return enviarNoTrobat(reply);
+      const cos = (req.body ?? {}) as Partial<{ calculPerPes: boolean }>;
+      if (typeof cos.calculPerPes !== 'boolean') {
+        return enviarValidacio(reply, 'calculPerPes ha de ser true o false', [
+          { camp: 'calculPerPes', missatge: 'ha de ser true o false' },
+        ]);
+      }
+      const actualitzada = await pool.query<FilaTarifa>(
+        `UPDATE tarifa SET calcul_per_pes = $2 WHERE id_seq = $1
+       RETURNING id_seq, codi, nom, calcul_per_pes`,
+        [tarifaIdPublic, cos.calculPerPes],
+      );
+      if (actualitzada.rows.length === 0) return enviarNoTrobat(reply, 'Tarifa no trobada');
+      return aApiTarifa(actualitzada.rows[0]!);
+    },
+  );
 }

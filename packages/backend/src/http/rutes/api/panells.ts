@@ -20,12 +20,14 @@ import {
   parsearPaginacio,
   patroComencaPer,
   resolverCategoriaUuid,
+  sqlImportLinia,
   resolverClientUuid,
   resolverFiltreEntitat,
   resolverFiltreEntitats,
   resolverTarifaUuid,
   resolverTransportistaUuid,
 } from './comu.js';
+import { tancarSiTotLliurat } from './estat-automatic.js';
 
 /**
  * Tasca 45 (Ari, 20/10/2026): `?cercaProducte=` filtra mentre s'escriu,
@@ -111,9 +113,36 @@ export async function construirFiltresObrador(
   query: Record<string, unknown>,
 ): Promise<{ condicions: string[]; valors: unknown[] } | null> {
   // Fora: comandes cancel·lades (ver /panells/oficina) i esborranys
-  // (tasca 33: l'esborrany no compta a Obrador ni Empaquetat).
-  const condicions: string[] = ['NOT cl.esborrat', `c.estat NOT IN ('cancellada', 'esborrany')`];
+  // (tasca 33: l'esborrany no compta a Obrador ni Empaquetat). Tasca 57:
+  // fora també les línies que no es produeixen (surten d'estoc) — ni a
+  // les files ni als totals, ni a «marcar tot com a fet».
+  const condicions: string[] = [
+    'NOT cl.esborrat',
+    `c.estat NOT IN ('cancellada', 'esborrany')`,
+    'cl.produir',
+  ];
   const valors: unknown[] = [];
+
+  // Punt 55 (18/11/2026): per proveïdor de la línia. `sense` = les que
+  // encara no en tenen (per veure què falta assignar).
+  if (query.proveidorId !== undefined && query.proveidorId !== '') {
+    if (query.proveidorId === 'sense') {
+      condicions.push('cl.proveidor_id IS NULL');
+    } else {
+      const proveidorId =
+        typeof query.proveidorId === 'string' ? parsearIdPublic(query.proveidorId) : null;
+      if (proveidorId === null) {
+        enviarValidacio(reply, "proveidorId ha de ser un id o 'sense'", [
+          { camp: 'proveidorId', missatge: "ha de ser un id o 'sense'" },
+        ]);
+        return null;
+      }
+      condicions.push(
+        `cl.proveidor_id = (SELECT id FROM proveidor WHERE id_seq = $${valors.length + 1})`,
+      );
+      valors.push(proveidorId);
+    }
+  }
 
   // dataProduccio filtra por la fecha de la LÍNEA (cl.data_produccio), no
   // la de la cabecera del pedido — desde que Obrador dejó de ser agregado
@@ -304,7 +333,35 @@ async function construirFiltresEmpaquetat(
     ]);
     return null;
   }
+  // Tasca 57: línies que es produeixen / que surten d'estoc.
+  if (query.produir === 'si') condicions.push('cl.produir');
+  else if (query.produir === 'no') condicions.push('NOT cl.produir');
+  else if (query.produir !== undefined && query.produir !== '') {
+    enviarValidacio(reply, 'produir ha de ser si o no', [
+      { camp: 'produir', missatge: 'ha de ser si o no' },
+    ]);
+    return null;
+  }
+  afegirFiltreNumComanda(query.numComanda, condicions, valors);
   return { condicions, valors };
+}
+
+/**
+ * Tasca 53: `?numComanda=` busca, mentre s'escriu, pel número de la comanda
+ * o pel «Núm. comanda WooCommerce» (conté el text, sense distingir
+ * majúscules). Compartit per Oficina i Empaquetat (i Compres, que fa servir
+ * els filtres d'Empaquetat). Fa servir l'àlies `c` (comanda).
+ */
+function afegirFiltreNumComanda(valor: unknown, condicions: string[], valors: unknown[]): void {
+  if (typeof valor !== 'string' || valor.trim() === '') return;
+  const n = valors.length + 1;
+  condicions.push(`(c.num ILIKE $${n} ESCAPE '\\' OR c.num_woo ILIKE $${n} ESCAPE '\\')`);
+  valors.push(`%${escaparLike(valor.trim())}%`);
+}
+
+/** Escapa els comodins de LIKE perquè `%` o `_` escrits es busquin tal qual. */
+function escaparLike(text: string): string {
+  return text.replace(/[\\%_]/g, (caracter) => `\\${caracter}`);
 }
 
 /** FROM + JOINs que acompanyen `construirFiltresEmpaquetat` (sense el WHERE). */
@@ -401,7 +458,36 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         condicions.push(`LOWER(c.poblacio_desti) = LOWER($${valors.length + 1})`);
         valors.push(query.poblacioDesti.trim());
       }
+      // Tasca 57: aquest panell va per comanda, no per línia. `si` = comandes
+      // amb alguna línia que no es produeix (surt d'estoc); `no` = cap.
+      // Els totals de la comanda continuen comptant totes les línies (totes
+      // s'envien).
+      const ambLiniaSenseProduir = `EXISTS (SELECT 1 FROM comanda_linia lsp
+        WHERE lsp.comanda_id = c.id AND NOT lsp.esborrat AND NOT lsp.produir)`;
+      if (query.liniesSenseProduir === 'si') condicions.push(ambLiniaSenseProduir);
+      else if (query.liniesSenseProduir === 'no') condicions.push(`NOT ${ambLiniaSenseProduir}`);
+      else if (query.liniesSenseProduir !== undefined && query.liniesSenseProduir !== '') {
+        return enviarValidacio(reply, 'liniesSenseProduir ha de ser si o no', [
+          { camp: 'liniesSenseProduir', missatge: 'ha de ser si o no' },
+        ]);
+      }
+      afegirFiltreNumComanda(query.numComanda, condicions, valors);
       const where = condicions.length > 0 ? `WHERE ${condicions.join(' AND ')}` : '';
+
+      // Tasca 54 (Ari, 17/11/2026): `ordre=transportista` ordena per nom del
+      // transportista (A-Z, sense distingir majúscules; les comandes sense
+      // transportista, al final) i, dins de cada un, amb l'ordre de sempre.
+      // Sense `ordre`, l'ordre de sempre. Només dos valors fixos: mai
+      // s'interpola res que vingui de la petició.
+      const ordreHabitual = 'c.data_expedicio ASC NULLS LAST, c.creat_en ASC';
+      let ordre = ordreHabitual;
+      if (query.ordre === 'transportista') {
+        ordre = `LOWER(tr.nom) ASC NULLS LAST, ${ordreHabitual}`;
+      } else if (query.ordre !== undefined && query.ordre !== '') {
+        return enviarValidacio(reply, 'ordre només pot ser transportista', [
+          { camp: 'ordre', missatge: 'ha de ser transportista' },
+        ]);
+      }
 
       const base = `
       FROM comanda c
@@ -409,9 +495,9 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       LEFT JOIN tarifa t ON t.id = c.tarifa_id
       LEFT JOIN transportista tr ON tr.id = c.transportista_id
       LEFT JOIN LATERAL (
-        SELECT count(*) AS linies, SUM(pes_calculat_kg) AS total_kg,
-               SUM(unitats_demanades * preu_unitari) AS total_eur
-        FROM comanda_linia WHERE comanda_id = c.id AND NOT esborrat
+        SELECT count(*) AS linies, SUM(l.pes_calculat_kg) AS total_kg,
+               SUM(${sqlImportLinia('l', 'c')}) AS total_eur
+        FROM comanda_linia l WHERE l.comanda_id = c.id AND NOT l.esborrat
       ) agg ON true
       LEFT JOIN LATERAL (
         SELECT count(*) AS total_incidencies,
@@ -437,6 +523,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       const files = await pool.query<{
         id_seq: string;
         num: string;
+        num_woo: string | null;
         client_nom: string | null;
         poblacio_desti: string | null;
         tarifa_nom: string | null;
@@ -456,7 +543,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         total_incidencies: string;
         tipus_incidencia: string | null;
       }>(
-        `SELECT c.id_seq, c.num, cl.nom AS client_nom, c.poblacio_desti, t.nom AS tarifa_nom,
+        `SELECT c.id_seq, c.num, c.num_woo, cl.nom AS client_nom, c.poblacio_desti, t.nom AS tarifa_nom,
               tr.nom AS transportista_nom, c.estat, c.data_comanda, c.data_expedicio,
               c.data_lliurament, c.bultos, COALESCE(agg.linies, 0) AS linies,
               COALESCE(agg.total_kg, 0)::numeric(14,3) AS total_kg,
@@ -472,7 +559,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
               c.obs_lliurament,
               COALESCE(inc.total_incidencies, 0) AS total_incidencies, inc.tipus_incidencia
        ${base}
-       ORDER BY c.data_expedicio ASC NULLS LAST, c.creat_en ASC
+       ORDER BY ${ordre}
        LIMIT $${valors.length + 1} OFFSET $${valors.length + 2}`,
         [...valors, mida, offset],
       );
@@ -480,6 +567,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       const dades: FilaPanellOficinaApi[] = files.rows.map((f) => ({
         comandaId: Number(f.id_seq),
         num: f.num,
+        numWoo: f.num_woo,
         client: f.client_nom,
         poblacioDesti: f.poblacio_desti,
         tarifa: f.tarifa_nom,
@@ -711,6 +799,67 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
     },
   );
 
+  // Tasca 51 (Ari, 17/11/2026): «Marcar tot com a lliurat». Mateix criteri
+  // que «marcar totes com a fetes» d'Obrador (tasca 26): totes les línies
+  // PENDENTS que compleixen els filtres actius del panell (els mateixos
+  // paràmetres que GET /panells/empaquetat, construïts per la mateixa
+  // funció), no només les de la pàgina visible. Cada línia queda confirmada
+  // amb el que es va demanar (unitats i kg demanats), igual que si es desés
+  // una per una amb aquests valors: confirmat_a/confirmat_per i el tancament
+  // automàtic de la comanda. La confirmació explícita la fa el diàleg del
+  // frontend, un sol cop per a totes. Les línies de comandes congelades no
+  // es toquen i es compten a part.
+  fastify.post(
+    '/panells/empaquetat/marcar-lliurades',
+    { preHandler: crearGuardaModul('panell-empaquetat') },
+    async (req, reply) => {
+      const filtres = await construirFiltresEmpaquetat(reply, req.query as Record<string, unknown>);
+      if (filtres === null) return;
+      const { condicions, valors } = filtres;
+      const where = [...condicions, 'cl.confirmat_a IS NULL'].join(' AND ');
+
+      // Recompte de congelades, marcatge i tancament de comandes, tot dins
+      // d'una sola transacció: si alguna cosa falla, no queden línies
+      // confirmades amb la comanda encara oberta.
+      const client = await pool.connect();
+      let marcades: { comanda_id: string }[];
+      let congeladesOmeses: number;
+      try {
+        await client.query('BEGIN');
+        const congelades = await client.query<{ n: string }>(
+          `SELECT count(*) AS n ${BASE_EMPAQUETAT} WHERE ${where} AND c.congelat_a IS NOT NULL`,
+          valors,
+        );
+        congeladesOmeses = Number(congelades.rows[0]?.n ?? 0);
+        const resultat = await client.query<{ comanda_id: string }>(
+          `UPDATE comanda_linia AS lin SET
+             unitats_lliurades = lin.unitats_demanades,
+             kg_lliurats = lin.pes_calculat_kg,
+             confirmat_a = now(),
+             confirmat_per = $${valors.length + 1}
+           WHERE lin.id IN (
+             SELECT cl.id ${BASE_EMPAQUETAT} WHERE ${where} AND c.congelat_a IS NULL
+           )
+           RETURNING lin.comanda_id`,
+          [...valors, req.usuari!.uid],
+        );
+        marcades = resultat.rows;
+        // Mateix tancament automàtic que la confirmació d'una sola línia.
+        for (const comandaUuid of new Set(marcades.map((m) => m.comanda_id))) {
+          await tancarSiTotLliurat(client, comandaUuid);
+        }
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw err;
+      } finally {
+        client.release();
+      }
+
+      return { marcades: marcades.length, congeladesOmeses };
+    },
+  );
+
   // ── 4.8 · Panell Empaquetat (GET es sólo lectura, PATCH en lliurament.ts) ──
   // También lo lee el Panell de Compres (tasca 41) para el detalle de cada
   // cliente: por eso basta con cualquiera de los dos módulos.
@@ -755,6 +904,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         id_seq: string;
         comanda_id_seq: string;
         num: string;
+        num_woo: string | null;
         data_expedicio: Date | null;
         data_lliurament: Date | null;
         transportista_nom: string | null;
@@ -769,12 +919,13 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         confirmat_a: Date | null;
         confirmat_per: string | null;
         obs_empaquetat: string | null;
+        produir: boolean;
       }>(
-        `SELECT cl.id_seq, c.id_seq AS comanda_id_seq, c.num, c.data_expedicio, c.data_lliurament,
+        `SELECT cl.id_seq, c.id_seq AS comanda_id_seq, c.num, c.num_woo, c.data_expedicio, c.data_lliurament,
               tr.nom AS transportista_nom, cli.nom AS client_nom, cat.nom AS categoria_nom,
               p.codi, p.descripcio,
               cl.unitats_demanades, cl.pes_calculat_kg AS kg_demanats, cl.unitats_lliurades,
-              cl.kg_lliurats, cl.confirmat_a, cl.confirmat_per, cl.obs_empaquetat
+              cl.kg_lliurats, cl.confirmat_a, cl.confirmat_per, cl.obs_empaquetat, cl.produir
        ${base}
        -- Mismo criterio que /panells/obrador (ver comentario ahí): pendents
        -- (confirmat_a IS NULL) primer, per defecte, sense tocar la resta de
@@ -792,6 +943,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         liniaId: Number(f.id_seq),
         comandaId: Number(f.comanda_id_seq),
         num: f.num,
+        numWoo: f.num_woo,
         dataExpedicio: formatearDataApi(f.data_expedicio),
         dataLliurament: formatearDataApi(f.data_lliurament),
         transportista: f.transportista_nom,
@@ -809,6 +961,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         // no un nombre — no hay ningún directorio del que sacarlo.
         confirmatPer: f.confirmat_per,
         obsEmpaquetat: f.obs_empaquetat,
+        produir: f.produir,
       }));
 
       return {
@@ -964,6 +1117,8 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         `c.estat IN ('oberta', 'esborrany')`,
         'cat.elaborat_porc = true',
         'NOT cl.esborrat',
+        // Tasca 57: les línies que surten d'estoc no es produeixen.
+        'cl.produir',
         // agrupacioProduccio/agrupacioRendiment son NO nulables en
         // PanellProduccioFilaApi (contrato) — una línia cuyo producte no
         // tiene agrupació de producció, o cuya categoria no tiene agrupació
@@ -1071,6 +1226,8 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
           `cat.nom = $1`,
           'NOT cl.esborrat',
           `c.estat IN ('oberta', 'esborrany')`,
+          // Tasca 57: mateix criteri que les files del panell.
+          'cl.produir',
         ];
         const valorsCanals: unknown[] = [nomCategoria];
         if (typeof query.dataDes === 'string' && query.dataDes !== '') {

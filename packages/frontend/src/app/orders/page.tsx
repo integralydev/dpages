@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Copy, FileText, Printer } from 'lucide-react';
+import { CalendarClock, Copy, FileText, Printer } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DataCard, DataCardActions, DataCardField, DataCardGrid } from '@/components/ui/DataCard';
@@ -19,6 +19,7 @@ import { useFiltrePersistent } from '@/hooks/useFiltrePersistent';
 import { useOrders } from '@/hooks/useOrders';
 import { useOrigensComanda } from '@/hooks/useOrigensComanda';
 import { ESTAT_LABELS, estatBadgeVariant } from '@/lib/comandaEstat';
+import { TIPUS_CLIENT_OPTIONS, tipusClientPerLabel } from '@/lib/tipusClient';
 import {
   api,
   ApiError,
@@ -34,6 +35,7 @@ import { formatData } from '@/lib/dates';
 import { duplicarComandes } from '@/lib/duplicarComandes';
 import { eliminarComanda, potEliminarComanda } from '@/lib/eliminarComanda';
 import { descarregarPdfComandes, descarregarPdfLlistatComandes } from '@/lib/ordersPdf';
+import { CanviMassiuDialog } from './CanviMassiuDialog';
 import { ResultatDuplicatDialog } from './ResultatDuplicatDialog';
 
 const ALL = 'Tots';
@@ -85,6 +87,9 @@ function OrderCard({
           />
           <span>
             <span className="block font-semibold text-gray-900">{order.num}</span>
+            {order.numWoo && (
+              <span className="block text-xs text-gray-500">Web {order.numWoo}</span>
+            )}
             <span className="block text-sm text-gray-500">{order.client?.nom ?? '—'}</span>
           </span>
         </label>
@@ -151,6 +156,12 @@ export default function OrdersPage() {
     'comandes.clients',
     [],
   );
+  // Punt 35 (18/11/2026): comandes dels clients fixos o dels esporàdics.
+  const [tipusClientFilter, setTipusClientFilter] = useFiltrePersistent(
+    'comandes.tipusClient',
+    ALL,
+  );
+  const tipusClient = tipusClientPerLabel(tipusClientFilter);
   const [statusFilter, setStatusFilter] = useFiltrePersistent('comandes.estat', ALL);
   // Filtre d'origen: tots els orígens (també WooCommerce i l'històric
   // "manual"), encara que a mà només es puguin triar els 3 canals manuals.
@@ -212,9 +223,11 @@ export default function OrdersPage() {
         ? { dataLliuramentDes: deliveryDateFilter, dataLliuramentFins: deliveryDateFilter }
         : {}),
       ...(search.trim() ? { cerca: search.trim() } : {}),
+      ...(tipusClient ? { tipusClient } : {}),
     }),
     [
       selectedClients,
+      tipusClient,
       statusCode,
       originCode,
       orderDateFilter,
@@ -241,6 +254,7 @@ export default function OrdersPage() {
     search.trim() && `Cerca: ${search.trim()}`,
     selectedClients.length > 0 &&
       `Client: ${selectedClients.map((client) => client.label).join(', ')}`,
+    tipusClient && `Tipus de client: ${tipusClientFilter}`,
     statusFilter !== ALL && `Estat: ${statusFilter}`,
     originFilter !== ALL && `Origen: ${originFilter}`,
     productionDateFilter && `Data producció: ${formatData(productionDateFilter, false)}`,
@@ -308,6 +322,9 @@ export default function OrdersPage() {
       setIsDuplicating(false);
     }
   }
+
+  // Tasca 44: canvi massiu d'estat i/o data de producció.
+  const [isCanviMassiuOpen, setIsCanviMassiuOpen] = useState(false);
 
   // Tasca 13: detall de les comandes seleccionades en PDF (una per pàgina).
   const [isPrintingOrders, setIsPrintingOrders] = useState(false);
@@ -402,6 +419,18 @@ export default function OrdersPage() {
             </button>
             <button
               type="button"
+              onClick={() => setIsCanviMassiuOpen(true)}
+              disabled={seleccionades.length === 0}
+              title={seleccionades.length === 0 ? 'Selecciona les comandes a canviar' : undefined}
+              className="flex items-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <CalendarClock className="h-4 w-4" />
+              {seleccionades.length > 1
+                ? `Canviar estat / data (${seleccionades.length})`
+                : 'Canviar estat / data'}
+            </button>
+            <button
+              type="button"
               onClick={handlePrintOrders}
               disabled={isPrintingOrders || seleccionades.length === 0}
               title={seleccionades.length === 0 ? 'Selecciona les comandes a imprimir' : undefined}
@@ -438,41 +467,58 @@ export default function OrdersPage() {
       {printError && <p className="-mt-6 mb-6 text-sm text-red-600">{printError}</p>}
       {duplicateError && <p className="-mt-6 mb-6 text-sm text-red-600">{duplicateError}</p>}
 
+      {/* Punt 35: dues files perquè no quedi tan atapeït — a dalt els
+          filtres de text, client, estat i origen; a baix, les tres dates. */}
       <FilterBar>
-        <SearchInput label="Cerca (núm. comanda o client)" value={search} onChange={setSearch} />
-        <MultiCombobox
-          label="Clients"
-          selected={selectedClients}
-          onChange={setSelectedClients}
-          placeholder="Cercar client..."
-          addMorePlaceholder="Afegir un altre client..."
-          loadOptions={loadClientOptions}
-        />
-        <SimpleDropdown
-          label="Estat"
-          options={Object.values(ESTAT_LABELS)}
-          value={statusFilter}
-          onChange={setStatusFilter}
-          allLabel={ALL}
-        />
-        <SimpleDropdown
-          label="Origen"
-          options={origins.map((origin) => origin.nom)}
-          value={originFilter}
-          onChange={setOriginFilter}
-          allLabel={ALL}
-        />
-        <DateInput
-          label="Data producció"
-          value={productionDateFilter}
-          onChange={setProductionDateFilter}
-        />
-        <DateInput label="Data comanda" value={orderDateFilter} onChange={setOrderDateFilter} />
-        <DateInput
-          label="Data lliurament"
-          value={deliveryDateFilter}
-          onChange={setDeliveryDateFilter}
-        />
+        <div className="flex w-full flex-wrap gap-4">
+          <SearchInput
+            label="Cerca (núm. comanda, núm. web o client)"
+            value={search}
+            onChange={setSearch}
+          />
+          <MultiCombobox
+            label="Clients"
+            selected={selectedClients}
+            onChange={setSelectedClients}
+            placeholder="Cercar client..."
+            addMorePlaceholder="Afegir un altre client..."
+            loadOptions={loadClientOptions}
+          />
+          <SimpleDropdown
+            label="Tipus de client"
+            options={TIPUS_CLIENT_OPTIONS.map((opcio) => opcio.label)}
+            value={tipusClientFilter}
+            onChange={setTipusClientFilter}
+            allLabel={ALL}
+          />
+          <SimpleDropdown
+            label="Estat"
+            options={Object.values(ESTAT_LABELS)}
+            value={statusFilter}
+            onChange={setStatusFilter}
+            allLabel={ALL}
+          />
+          <SimpleDropdown
+            label="Origen"
+            options={origins.map((origin) => origin.nom)}
+            value={originFilter}
+            onChange={setOriginFilter}
+            allLabel={ALL}
+          />
+        </div>
+        <div className="flex w-full flex-wrap gap-4">
+          <DateInput
+            label="Data producció"
+            value={productionDateFilter}
+            onChange={setProductionDateFilter}
+          />
+          <DateInput label="Data comanda" value={orderDateFilter} onChange={setOrderDateFilter} />
+          <DateInput
+            label="Data lliurament"
+            value={deliveryDateFilter}
+            onChange={setDeliveryDateFilter}
+          />
+        </div>
       </FilterBar>
 
       {isLoading && <p className="text-sm text-gray-500">Carregant...</p>}
@@ -585,6 +631,9 @@ export default function OrdersPage() {
                     </td>
                     <td className="px-2 py-3 break-words">
                       <span className="font-semibold text-gray-900">{order.num}</span>
+                      {order.numWoo && (
+                        <span className="block text-xs text-gray-500">Web {order.numWoo}</span>
+                      )}
                     </td>
                     <td className="px-2 py-3 break-words text-gray-900">
                       {order.client?.nom ?? '—'}
@@ -675,6 +724,18 @@ export default function OrdersPage() {
         onCancel={() => {
           setDeleteTarget(null);
           setDeleteError(null);
+        }}
+      />
+
+      <CanviMassiuDialog
+        comandes={seleccionades}
+        isOpen={isCanviMassiuOpen}
+        onClose={(hiHaCanvis) => {
+          setIsCanviMassiuOpen(false);
+          if (hiHaCanvis) {
+            setSeleccio(new Set());
+            refetch();
+          }
         }}
       />
 

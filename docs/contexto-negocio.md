@@ -93,11 +93,32 @@ Puesta en producción objetivo: **finales de septiembre de 2026**.
   última línea de un pedido `oberta` o `en_proces`, el pedido pasa solo a
   `tancada`; si después se deshace la confirmación de una línea, vuelve a
   `oberta`.
-- Fecha de producción de los pedidos nuevos de WooCommerce (tarea 39,
-  03/10/2026): los que entran de martes a las 16:00 a domingo a las 24:00
-  (hora de Cataluña) se producen el lunes siguiente; los que entran el
-  lunes o el martes antes de las 16:00 quedan sin fecha. Sólo al crear el
-  pedido, en la cabecera y en todas sus líneas; después la fecha es del sistema.
+- Fechas por defecto de los pedidos nuevos (punt 38 del full de l'Ari,
+  confirmado por el cliente el 17/11/2026; reemplaza la tarea 39): los
+  pedidos nuevos, duplicados y de WooCommerce nacen con fecha de producción
+  = el lunes siguiente a la fecha del pedido (ese mismo lunes si el pedido
+  es de un lunes, hora de Cataluña) y fecha de expedición = el martes
+  siguiente. Son valores iniciales: oficina los cambia a mano cuando no
+  encajan. En los de WooCommerce se ponen sólo al crear el pedido (la de
+  producción, en la cabecera y en todas sus líneas); después son del
+  sistema. Desaparece el corte del martes a las 16:00 de la tarea 39
+  (03/10/2026), con el que los pedidos del lunes y del martes por la
+  mañana quedaban sin fecha.
+- Tipo de cliente (punt 35, reformulado con el cliente el 18/11/2026): cada
+  cliente es «Fix» o «Esporàdic» (todos empiezan como esporádicos; oficina
+  marca los fijos). Se cambia desde el listado de Fitxes de clients sin
+  abrir la ficha, y Comandes tiene un filtro «Tipus de client» para ver los
+  pedidos de los fijos o de los esporádicos. De momento sólo esos dos
+  valores. Sustituye la petición original del punto 35 (pegar una lista de
+  clientes separada por comas).
+- Proveedores (punt 55, reformulado con el cliente el 18/11/2026): tabla de
+  proveedores (de momento sólo el nombre) con su mantenimiento junto a
+  Tarifes y Fitxes de clients. Cada artículo puede tener un «proveïdor
+  preferit» (opcional); cada línea de pedido, un proveedor (opcional) que al
+  elegir el artículo toma el preferido y se puede cambiar. Los pedidos web
+  también lo toman al crearse. El Panell Obrador filtra por proveedor o
+  «Sense proveïdor». Un proveedor se puede borrar sólo si nadie lo usa.
+  Sustituye la petición original del punto 55 (etiquetas libres).
 - El sistema sólo lee de WooCommerce. Nunca escribe de vuelta. La credencial
   de API es de sólo lectura.
 

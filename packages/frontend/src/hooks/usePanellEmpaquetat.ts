@@ -34,6 +34,8 @@ export type PackagingPanelFilters = {
   producte?: string[];
   /** Tasca 45: codi o descripció que comença pel text. */
   cercaProducte?: string;
+  /** Tasca 53: núm. de comanda o núm. de la web (conté el text). */
+  numComanda?: string;
   categoriaId?: number;
   /** Tasca 48: `OrigenComandaApi.codi` (coincidència exacta). */
   origen?: string;
@@ -41,6 +43,8 @@ export type PackagingPanelFilters = {
   confirmacio?: 'pendents' | 'confirmades';
   /** Tasca 23: amb / sense observacions de la línia. */
   observacions?: 'si' | 'no';
+  /** Tasca 57: línies que es produeixen / que surten d'estoc. */
+  produir?: 'si' | 'no';
 };
 
 /**

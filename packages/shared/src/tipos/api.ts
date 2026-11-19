@@ -80,6 +80,22 @@ export interface ProducteApi {
   agrupacioProduccio: string | null;
   format: 'SENCER' | 'TALLAT' | 'LLESCAT' | null;
   envasat: 'NORMAL' | 'NORMAL (pes)' | 'NORMAL (web)' | 'ESPECIAL' | null;
+  /** Punt 55: proveïdor preferit de l'article (opcional). */
+  proveidorDefecte: ReferenciaApi | null;
+}
+
+/**
+ * Punt 55 (18/11/2026): proveïdor. De moment només el nom (únic). Es pot
+ * esborrar (`DELETE /proveidors/:id`) només si cap article ni cap línia no
+ * el fa servir.
+ */
+export interface ProveidorApi {
+  id: number;
+  nom: string;
+}
+
+export interface ProveidorEntradaApi {
+  nom: string;
 }
 
 // ── 4.2b · Rendiments Porcs ──────────────────────────────────────────────
@@ -148,6 +164,12 @@ export interface TarifaResumApi {
   id: number;
   codi: string | null;
   nom: string;
+  /**
+   * Tasca 40: `true` = l'import de les línies és pes × preu; `false` =
+   * unitats × preu. Una comanda pren el de la seva tarifa en crear-se o en
+   * canviar-li la tarifa (ver `ComandaDetallApi.calculPerPes`).
+   */
+  calculPerPes: boolean;
 }
 
 export interface MatriuTarifesApi {
@@ -178,7 +200,16 @@ export interface ClientApi {
   tarifa: ReferenciaApi | null;
   transportistaDefecte: ReferenciaApi | null;
   actiu: boolean;
+  /** Punt 35: tipus de client; per defecte `esporadic`. */
+  tipus: TipusClient;
 }
+
+/**
+ * Punt 35 (18/11/2026): valors de `ClientApi.tipus`. A pantalla: «Fix» i
+ * «Esporàdic». Per afegir-ne un, també el CHECK de la columna `client.tipus`.
+ */
+export const TIPUS_CLIENT = ['fix', 'esporadic'] as const;
+export type TipusClient = (typeof TIPUS_CLIENT)[number];
 
 /**
  * `POST /clients` — alta manual (teléfono/WhatsApp no traen cliente de
@@ -196,6 +227,7 @@ export interface ClientCreacioApi {
   email?: string;
   telefon?: string;
   nif?: string;
+  tipus?: TipusClient;
 }
 
 export interface TransportistaApi {
@@ -232,6 +264,11 @@ export interface OrigenComandaEntradaApi {
 export interface ComandaResumApi {
   id: number;
   num: string;
+  /**
+   * Tasca 53: «Núm. comanda WooCommerce». A les de WooCommerce, per defecte
+   * el número de la web; editable. `null` si no en té.
+   */
+  numWoo: string | null;
   /** `OrigenComandaApi.codi` (hoy "woocommerce" o "manual") — extensible sin tocar código, ver sección 3 del contrato. */
   origen: string;
   estat: string;
@@ -272,6 +309,11 @@ export interface ComandaLiniaApi {
   ordinal: number;
   producte: { id: number; codi: string | null; descripcio: string } | null;
   /**
+   * Punt 55: proveïdor de la línia (opcional). En crear-la, si no s'indica,
+   * el preferit de l'article.
+   */
+  proveidor: ReferenciaApi | null;
+  /**
    * Mismos tres campos que ya devuelve `FilaPanellObradorApi`
    * para esta misma línea (`GET /panells/obrador`), resueltos igual
    * (join contra `producte`/`categoria_producte`): consistencia entre
@@ -310,6 +352,12 @@ export interface ComandaLiniaApi {
   obsProduccio: string | null;
   /** Tasca 7 (01/10/2026): observació d'empaquetat de la línia. */
   obsEmpaquetat: string | null;
+  /**
+   * Tasca 57 (17/11/2026): si la línia s'ha de produir. Per defecte `true`;
+   * amb `false` (surt d'estoc) no apareix als panells d'Obrador ni de
+   * Producció, però sí a Empaquetat, Compres i Oficina.
+   */
+  produir: boolean;
   esborrat: boolean;
 }
 
@@ -335,6 +383,8 @@ export interface ComandaDuplicadaApi {
 export interface ComandaDetallApi {
   id: number;
   num: string;
+  /** Tasca 53 (ver `ComandaResumApi.numWoo`). */
+  numWoo: string | null;
   /** `OrigenComandaApi.codi` (hoy "woocommerce" o "manual") — extensible sin tocar código, ver sección 3 del contrato. */
   origen: string;
   estat: string;
@@ -352,6 +402,13 @@ export interface ComandaDetallApi {
   obsLliurament: string | null;
   totalKg: string;
   totalEur: string;
+  /**
+   * Tasca 40: com es calculen els imports d'aquesta comanda — `true`, pes ×
+   * preu (kg demanats fins que Empaquetat confirma la línia, després kg
+   * lliurats); `false`, unitats × preu. Les comandes d'abans de la tasca 40
+   * són totes `false`.
+   */
+  calculPerPes: boolean;
   congelada: boolean;
   congelatA: string | null;
   linies: ComandaLiniaApi[];
@@ -362,6 +419,11 @@ export interface ComandaDetallApi {
 export interface LiniaCreacioApi {
   producteId: number;
   unitatsDemanades: number;
+  /**
+   * Punt 55: sense la clau, el proveïdor preferit de l'article; `null`,
+   * sense proveïdor; un id, aquest proveïdor.
+   */
+  proveidorId?: number | null;
   /** Sólo tiene sentido si el artículo es "a medida" — se ignora si tiene peso de ficha. */
   kgDemanats?: string;
   /**
@@ -386,6 +448,8 @@ export interface LiniaCreacioApi {
   obsProduccio?: string | null;
   /** Tasca 7 (01/10/2026): observació d'empaquetat de la línia. */
   obsEmpaquetat?: string | null;
+  /** Tasca 57: per defecte `true` si no ve. */
+  produir?: boolean;
 }
 
 export interface ComandaCreacioApi {
@@ -413,6 +477,8 @@ export interface ComandaCreacioApi {
   dataLliurament: string;
   transportistaId?: number;
   obsLliurament?: string;
+  /** Tasca 53: opcional, buit = sense número. */
+  numWoo?: string;
   linies: LiniaCreacioApi[];
 }
 
@@ -438,6 +504,8 @@ export interface LiniaAfegidaApi {
   unitatsDemanades: number;
   kgDemanats?: string;
   dataProduccio?: string | null;
+  /** Tasca 57: per defecte `true` si no ve. */
+  produir?: boolean;
 }
 
 /**
@@ -449,12 +517,16 @@ export interface LiniaAfegidaApi {
  */
 export interface LiniaEdicioApi {
   unitatsDemanades?: number;
+  /** Punt 55: `null` el treu. */
+  proveidorId?: number | null;
   /** Sólo aceptado si el artículo es "a medida" (`kgEditable: true`) — rechaza si el artículo tiene ficha de peso. */
   kgDemanats?: string;
   dataProduccio?: string | null;
   obsProduccio?: string | null;
   /** Tasca 7 (01/10/2026). */
   obsEmpaquetat?: string | null;
+  /** Tasca 57. */
+  produir?: boolean;
 }
 
 // ── 5 · Empaquetado ──────────────────────────────────────────────────────
@@ -532,6 +604,8 @@ export interface TotalsPanellOficinaApi {
 export interface FilaPanellOficinaApi {
   comandaId: number;
   num: string;
+  /** Tasca 53 (ver `ComandaResumApi.numWoo`). */
+  numWoo: string | null;
   client: string | null;
   poblacioDesti: string | null;
   tarifa: string | null;
@@ -655,6 +729,8 @@ export interface FilaPanellEmpaquetatApi {
   liniaId: number;
   comandaId: number;
   num: string;
+  /** Tasca 53 (ver `ComandaResumApi.numWoo`). */
+  numWoo: string | null;
   dataExpedicio: string | null;
   dataLliurament: string | null;
   transportista: string | null;
@@ -673,6 +749,8 @@ export interface FilaPanellEmpaquetatApi {
   confirmatPer: string | null;
   /** Tasca 7 (01/10/2026): observació d'empaquetat de la línia. */
   obsEmpaquetat: string | null;
+  /** Tasca 57: `false` = surt d'estoc, no es produeix (però s'envia). */
+  produir: boolean;
 }
 
 export interface PanellEmpaquetatApi {

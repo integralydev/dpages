@@ -603,7 +603,10 @@ export async function descarregarPdfComandes({
     autoTable(doc, {
       startY: y + 3,
       margin: { top: MARGE, right: MARGE, bottom: 14, left: MARGE },
-      head: [['Producte', 'Unitats', 'Kg', 'Preu', 'Import']],
+      // Tasca 40: a les comandes per pes, el preu és per kg i els kg són
+      // els que fa servir l'import (els lliurats si Empaquetat ja ha
+      // confirmat la línia), perquè Kg × Preu quadri amb l'Import.
+      head: [['Producte', 'Unitats', 'Kg', comanda.calculPerPes ? 'Preu/kg' : 'Preu', 'Import']],
       body: linies.map((linia) => {
         const producte = linia.producte
           ? `${linia.producte.descripcio}${linia.producte.codi ? ` (#${linia.producte.codi})` : ''}`
@@ -615,7 +618,10 @@ export async function descarregarPdfComandes({
         return [
           [producte, ...notes].join('\n'),
           formatUnitats(linia.unitatsDemanades),
-          formatDecimal(linia.kgDemanats, 3),
+          formatDecimal(
+            comanda.calculPerPes && linia.confirmatA !== null ? linia.kgLliurats : linia.kgDemanats,
+            3,
+          ),
           `${formatDecimal(linia.preuUnitari, 2)} €`,
           `${formatDecimal(linia.totalLinia, 2)} €`,
         ].map(textPdf);

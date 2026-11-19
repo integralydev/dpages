@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DataCard, DataCardActions, DataCardField, DataCardGrid } from '@/components/ui/DataCard';
 import { DecimalInput } from '@/components/ui/DecimalInput';
 import { useEditableRow } from '@/hooks/useEditableRow';
@@ -75,20 +77,25 @@ function textIdentificador(line: FilaPanellEmpaquetatApi, identificador: Identif
   return line.client ?? '—';
 }
 
-export function PackagingRow({
-  line,
-  onSave,
-  onRequestUndo,
-  identificador = 'client',
-}: {
-  line: FilaPanellEmpaquetatApi;
-  onSave: OnSaveLliurament;
-  onRequestUndo: (line: FilaPanellEmpaquetatApi) => void;
-  identificador?: Identificador;
-}) {
+/** Tasca 53: el núm. de la web de la comanda, sota l'identificador. */
+function NumWoo({ line }: { line: FilaPanellEmpaquetatApi }) {
+  if (!line.numWoo) return null;
+  return <span className="block text-xs text-gray-500">Web {line.numWoo}</span>;
+}
+
+/**
+ * Desar unitats i quilos lliurats d'una línia (fila i targeta). Tasca 57
+ * (Ari, 17/11/2026): una línia encara no confirmada s'ha de poder confirmar
+ * amb 0 (producte no servit per falta d'estoc). Com que els camps ja
+ * arrenquen a 0, «Desar» no depèn de si s'ha tocat res mentre la línia
+ * estigui pendent; una vegada confirmada, només s'activa si hi ha canvis.
+ * Si es desa amb 0 unitats o 0 quilos, abans es demana confirmació.
+ */
+function useLliuramentLinia(line: FilaPanellEmpaquetatApi, onSave: OnSaveLliurament) {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [confirmantZero, setConfirmantZero] = useState(false);
 
   const initialValues: Draft = {
     unitatsLliurades: initialDeliveredValue(line.unitatsLliurades, line.confirmatA),
@@ -114,6 +121,66 @@ export function PackagingRow({
     }
   });
 
+  const potDesar = !isSaving && (isDirty || line.confirmatA === null);
+  const unitatsZero = Number(draft.unitatsLliurades) === 0;
+  const kgZero = Number(parseDecimalInput(draft.kgLliurats, 3)) === 0;
+
+  function demanarDesar() {
+    if (unitatsZero || kgZero) setConfirmantZero(true);
+    else save();
+  }
+
+  const quinsZero = [unitatsZero && 'unitats', kgZero && 'quilos'].filter(Boolean).join(' i ');
+  const dialegZero = (
+    <ConfirmDialog
+      isOpen={confirmantZero}
+      title="Confirmar amb 0"
+      message={`Vols confirmar la línia de ${line.producte} amb 0 ${quinsZero} servits? Quedarà marcada com a enviada.`}
+      confirmLabel="Confirmar"
+      confirmingLabel="Desant..."
+      cancelLabel="Cancel·lar"
+      onConfirm={() => {
+        setConfirmantZero(false);
+        save();
+      }}
+      onCancel={() => setConfirmantZero(false)}
+    />
+  );
+
+  return {
+    draft,
+    setField,
+    isSaving,
+    potDesar,
+    demanarDesar,
+    fieldErrors,
+    generalError,
+    dialegZero,
+  };
+}
+
+export function PackagingRow({
+  line,
+  onSave,
+  onRequestUndo,
+  identificador = 'client',
+}: {
+  line: FilaPanellEmpaquetatApi;
+  onSave: OnSaveLliurament;
+  onRequestUndo: (line: FilaPanellEmpaquetatApi) => void;
+  identificador?: Identificador;
+}) {
+  const {
+    draft,
+    setField,
+    isSaving,
+    potDesar,
+    demanarDesar,
+    fieldErrors,
+    generalError,
+    dialegZero,
+  } = useLliuramentLinia(line, onSave);
+
   return (
     <tr className="border-b border-gray-100 last:border-0">
       {/* Primera columna (petició d'Ari) i sempre visible: porta la franja
@@ -138,6 +205,11 @@ export function PackagingRow({
       </td>
       <td className="px-3 py-3 break-words">
         <span className="font-semibold text-gray-900">{line.producte}</span>
+        {!line.produir && (
+          <div className="mt-1">
+            <Badge variant="amber">No es produeix</Badge>
+          </div>
+        )}
       </td>
       {/* El número de comanda (Panell de Compres) es veu sempre: és el que
           distingeix les línies d'un mateix client. */}
@@ -145,6 +217,7 @@ export function PackagingRow({
         className={`px-3 py-3 break-words text-gray-900 ${identificador === 'comanda' ? '' : 'hidden xl:table-cell'}`}
       >
         {textIdentificador(line, identificador)}
+        <NumWoo line={line} />
       </td>
       {/* Tasca 7: observació d'empaquetat de la línia (ve de l'entrada de comandes). */}
       <td className="px-3 py-3 break-words text-gray-900">{line.obsEmpaquetat ?? ''}</td>
@@ -175,10 +248,10 @@ export function PackagingRow({
       <td className="px-3 py-3 text-center align-top">
         <button
           type="button"
-          onClick={save}
-          disabled={!isDirty || isSaving}
+          onClick={demanarDesar}
+          disabled={!potDesar}
           className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-            isDirty && !isSaving
+            potDesar
               ? 'bg-ink text-white hover:opacity-90'
               : 'cursor-not-allowed bg-gray-200 text-gray-400'
           }`}
@@ -186,6 +259,7 @@ export function PackagingRow({
           {isSaving ? 'Desant...' : 'Desar'}
         </button>
         {generalError && <p className="mt-1 max-w-[140px] text-xs text-red-600">{generalError}</p>}
+        {dialegZero}
       </td>
     </tr>
   );
@@ -202,30 +276,16 @@ export function PackagingCard({
   onRequestUndo: (line: FilaPanellEmpaquetatApi) => void;
   identificador?: Identificador;
 }) {
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [generalError, setGeneralError] = useState<string | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
-
-  const initialValues: Draft = {
-    unitatsLliurades: initialDeliveredValue(line.unitatsLliurades, line.confirmatA),
-    kgLliurats: initialDeliveredValue(line.kgLliurats, line.confirmatA),
-  };
-
-  const { draft, setField, save, isDirty } = useEditableRow(initialValues, async (values) => {
-    const unitatsLliurades = Number(values.unitatsLliurades);
-    const kgLliurats = parseDecimalInput(values.kgLliurats, 3);
-
-    setIsSaving(true);
-    setFieldErrors({});
-    setGeneralError(null);
-    const result = await onSave(line.comandaId, line.liniaId, unitatsLliurades, kgLliurats);
-    setIsSaving(false);
-
-    if (!result.success) {
-      setFieldErrors(result.fieldErrors);
-      setGeneralError(result.generalError);
-    }
-  });
+  const {
+    draft,
+    setField,
+    isSaving,
+    potDesar,
+    demanarDesar,
+    fieldErrors,
+    generalError,
+    dialegZero,
+  } = useLliuramentLinia(line, onSave);
 
   return (
     <div className="relative overflow-hidden rounded-xl">
@@ -239,9 +299,12 @@ export function PackagingCard({
               {line.categoria ?? '—'}
             </p>
             <p className="font-semibold text-gray-900">{line.producte}</p>
+            {/* Tasca 57: surt d'estoc — no passa per Obrador ni Producció. */}
+            {!line.produir && <Badge variant="amber">No es produeix</Badge>}
             <p className="text-sm text-gray-500">
               {identificador === 'comanda' ? `Comanda ${line.num}` : (line.client ?? '—')}
             </p>
+            <NumWoo line={line} />
           </div>
           <WorkedCheckbox
             confirmatA={line.confirmatA}
@@ -296,10 +359,10 @@ export function PackagingCard({
         <DataCardActions>
           <button
             type="button"
-            onClick={save}
-            disabled={!isDirty || isSaving}
+            onClick={demanarDesar}
+            disabled={!potDesar}
             className={`w-full rounded-full px-3 py-2 text-sm font-semibold ${
-              isDirty && !isSaving
+              potDesar
                 ? 'bg-ink text-white hover:opacity-90'
                 : 'cursor-not-allowed bg-gray-200 text-gray-400'
             }`}
@@ -308,6 +371,7 @@ export function PackagingCard({
           </button>
         </DataCardActions>
         {generalError && <p className="mt-2 text-xs text-red-600">{generalError}</p>}
+        {dialegZero}
       </DataCard>
     </div>
   );

@@ -1676,4 +1676,331 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
 
     await fastify.close();
   });
+
+  describe('tasca 57 — línies que no es produeixen (produir = false)', () => {
+    it('no surten a Obrador; sí a Empaquetat i Oficina, amb els seus filtres', async () => {
+      const fastify = construirServidor();
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [
+            { dataProduccio: '2026-08-01T00:00:00Z', producteId, unitatsDemanades: 1 },
+            {
+              dataProduccio: '2026-08-01T00:00:00Z',
+              producteId,
+              unitatsDemanades: 7,
+              produir: false,
+            },
+          ],
+        },
+      });
+      expect(creada.statusCode).toBe(201);
+      const comanda = cuerpoJson<ComandaDetallApi>(creada);
+      expect(comanda.linies.map((l) => l.produir)).toEqual([true, false]);
+      const [liniaSi, liniaNo] = comanda.linies.map((l) => l.id);
+
+      // Obrador: només la línia que es produeix.
+      const obrador = cuerpoJson<PanellObradorApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/obrador?mida=200' }),
+      );
+      const delPedidoObrador = obrador.dades.filter((f) => f.comandaId === comanda.id);
+      expect(delPedidoObrador.map((f) => f.liniaId)).toEqual([liniaSi]);
+
+      // Empaquetat: les dues, amb el camp; i el filtre produir.
+      const empaquetat = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/empaquetat?mida=200' }),
+      );
+      const delPedido = empaquetat.dades.filter((f) => f.comandaId === comanda.id);
+      expect(delPedido.map((f) => [f.liniaId, f.produir])).toEqual([
+        [liniaSi, true],
+        [liniaNo, false],
+      ]);
+      const nomesNo = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: '/api/v1/panells/empaquetat?produir=no&mida=200',
+        }),
+      );
+      expect(nomesNo.dades.map((f) => f.liniaId)).toEqual([liniaNo]);
+      const nomesSi = cuerpoJson<PanellEmpaquetatApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: '/api/v1/panells/empaquetat?produir=si&mida=200',
+        }),
+      );
+      expect(nomesSi.dades.some((f) => f.liniaId === liniaNo)).toBe(false);
+      expect(nomesSi.dades.some((f) => f.liniaId === liniaSi)).toBe(true);
+      const invalid = await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/empaquetat?produir=potser',
+      });
+      expect(invalid.statusCode).toBe(400);
+
+      // Compres comparteix els filtres d'Empaquetat.
+      const compresNo = cuerpoJson<PanellCompresApi>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/panells/compres?produir=no&mida=200' }),
+      );
+      expect(compresNo.totals.linies).toBe(1);
+
+      // Oficina (per comanda): el filtre liniesSenseProduir, i els totals de
+      // la comanda compten totes dues línies (totes s'envien).
+      const ambSense = cuerpoJson<PanellOficinaApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: '/api/v1/panells/oficina?liniesSenseProduir=si&mida=200',
+        }),
+      );
+      expect(ambSense.dades.map((f) => f.comandaId)).toEqual([comanda.id]);
+      expect(ambSense.dades[0]!.linies).toBe(2);
+      const senseCap = cuerpoJson<PanellOficinaApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: '/api/v1/panells/oficina?liniesSenseProduir=no&mida=200',
+        }),
+      );
+      expect(senseCap.dades.some((f) => f.comandaId === comanda.id)).toBe(false);
+      const oficinaInvalid = await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/oficina?liniesSenseProduir=potser',
+      });
+      expect(oficinaInvalid.statusCode).toBe(400);
+
+      // Neteja: tancada (no cancel·lada: un altre test compta les cancel·lades).
+      await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comanda.id}`,
+        payload: { estat: 'tancada' },
+      });
+      await fastify.close();
+    });
+  });
+
+
+  describe('tasca 51 — POST /panells/empaquetat/marcar-lliurades', () => {
+    it('confirma amb el que es va demanar totes les pendents dels filtres; respecta les ja confirmades, les congelades i la resta', async () => {
+      const fastify = construirServidor();
+      const transportistes = await entorn.poolTest.query<{ nom: string; id_seq: string }>(
+        `INSERT INTO transportista (nom) VALUES ('T51-dins'), ('T51-fora') RETURNING nom, id_seq`,
+      );
+      const id = (nom: string) => Number(transportistes.rows.find((t) => t.nom === nom)!.id_seq);
+
+      async function crear(transportistaId: number, unitats: number[]) {
+        const res = await fastify.inject({
+          method: 'POST',
+          url: '/api/v1/comandes',
+          payload: {
+            dataComanda: '2026-08-01',
+            dataLliurament: '2026-08-30T00:00:00Z',
+            origen: 'manual',
+            transportistaId,
+            linies: unitats.map((unitatsDemanades) => ({ producteId, unitatsDemanades })),
+          },
+        });
+        expect(res.statusCode).toBe(201);
+        return cuerpoJson<ComandaDetallApi>(res);
+      }
+
+      // A: dues línies pendents → es marquen i la comanda es tanca.
+      const a = await crear(id('T51-dins'), [2, 3]);
+      // B: una línia ja confirmada amb menys (merma) i una pendent → la
+      // confirmada no canvia.
+      const b = await crear(id('T51-dins'), [4, 5]);
+      const merma = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${b.id}/linies/${b.linies[0]!.id}/lliurament`,
+        payload: { unitatsLliurades: 1, kgLliurats: '1.000' },
+      });
+      expect(merma.statusCode).toBe(200);
+      // C: congelada → no es toca, es compta.
+      const c = await crear(id('T51-dins'), [6]);
+      await entorn.poolTest.query(`UPDATE comanda SET congelat_a = now() WHERE id_seq = $1`, [
+        c.id,
+      ]);
+      // D: un altre transportista → fora del filtre.
+      const d = await crear(id('T51-fora'), [7]);
+
+      const res = await fastify.inject({
+        method: 'POST',
+        url: `/api/v1/panells/empaquetat/marcar-lliurades?transportistaId=${id('T51-dins')}`,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ marcades: 3, congeladesOmeses: 1 });
+
+      const linies = async (comandaId: number) =>
+        cuerpoJson<ComandaDetallApi>(
+          await fastify.inject({ method: 'GET', url: `/api/v1/comandes/${comandaId}` }),
+        );
+
+      const aDespres = await linies(a.id);
+      expect(aDespres.estat).toBe('tancada');
+      expect(
+        aDespres.linies.map((l) => [l.unitatsLliurades, l.kgLliurats, l.confirmatA !== null]),
+      ).toEqual(a.linies.map((l) => [l.unitatsDemanades, l.kgDemanats, true]));
+
+      const bDespres = await linies(b.id);
+      expect(bDespres.linies[0]).toMatchObject({ unitatsLliurades: '1.00', kgLliurats: '1.000' });
+      expect(bDespres.linies[1]!.unitatsLliurades).toBe(b.linies[1]!.unitatsDemanades);
+      expect(bDespres.estat).toBe('tancada');
+
+      expect((await linies(c.id)).linies[0]!.confirmatA).toBeNull();
+      expect((await linies(d.id)).linies[0]!.confirmatA).toBeNull();
+
+      // Un filtre no vàlid no marca res.
+      const invalid = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/panells/empaquetat/marcar-lliurades?confirmacio=potser',
+      });
+      expect(invalid.statusCode).toBe(400);
+
+      // Neteja: les que queden obertes, tancades (els altres tests compten).
+      for (const comanda of [c, d]) {
+        await entorn.poolTest.query(
+          `UPDATE comanda SET estat = 'tancada', congelat_a = NULL WHERE id_seq = $1`,
+          [comanda.id],
+        );
+      }
+      await fastify.close();
+    });
+  });
+
+
+  describe('tasca 53 — filtre numComanda (núm. de comanda o de la web)', () => {
+    it('Oficina i Empaquetat només tornen la comanda que coincideix, i mostren el núm. de la web', async () => {
+      const fastify = construirServidor();
+      async function crear(numWoo?: string) {
+        const res = await fastify.inject({
+          method: 'POST',
+          url: '/api/v1/comandes',
+          payload: {
+            dataComanda: '2026-08-01',
+            dataLliurament: '2026-08-30T00:00:00Z',
+            origen: 'manual',
+            ...(numWoo ? { numWoo } : {}),
+            linies: [{ producteId, unitatsDemanades: 1 }],
+          },
+        });
+        expect(res.statusCode).toBe(201);
+        return cuerpoJson<ComandaDetallApi>(res);
+      }
+      const ambWeb = await crear('WEB-53X');
+      const senseWeb = await crear();
+
+      const oficina = await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/oficina?numComanda=web-53',
+      });
+      expect(oficina.statusCode).toBe(200);
+      const filesOficina = cuerpoJson<{ dades: { comandaId: number; numWoo: string | null }[] }>(
+        oficina,
+      ).dades;
+      expect(filesOficina).toEqual([
+        expect.objectContaining({ comandaId: ambWeb.id, numWoo: 'WEB-53X' }),
+      ]);
+
+      // També pel número propi de la comanda.
+      const perNum = await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/panells/oficina?numComanda=${senseWeb.num}`,
+      });
+      expect(
+        cuerpoJson<{ dades: { comandaId: number }[] }>(perNum).dades.map((f) => f.comandaId),
+      ).toContain(senseWeb.id);
+
+      const empaquetat = await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/empaquetat?numComanda=WEB-53X',
+      });
+      expect(empaquetat.statusCode).toBe(200);
+      const filesEmpaquetat = cuerpoJson<{
+        dades: {
+          comandaId: number;
+          numWoo: string | null;
+        }[];
+      }>(empaquetat).dades;
+      expect(filesEmpaquetat.length).toBeGreaterThan(0);
+      expect(
+        filesEmpaquetat.every((f) => f.comandaId === ambWeb.id && f.numWoo === 'WEB-53X'),
+      ).toBe(true);
+
+      // `%` escrit es busca tal qual, no com a comodí.
+      const comodi = await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/oficina?numComanda=%25',
+      });
+      expect(cuerpoJson<{ dades: unknown[] }>(comodi).dades).toEqual([]);
+
+      for (const comanda of [ambWeb, senseWeb]) {
+        await entorn.poolTest.query(`UPDATE comanda SET estat = 'tancada' WHERE id_seq = $1`, [
+          comanda.id,
+        ]);
+      }
+      await fastify.close();
+    });
+  });
+
+
+  describe('tasca 54 — GET /panells/oficina?ordre=transportista', () => {
+    it('ordena per transportista A-Z (sense majúscules), sense transportista al final; sense ordre, el de sempre', async () => {
+      const fastify = construirServidor();
+      const transportistes = await entorn.poolTest.query<{ nom: string; id_seq: string }>(
+        `INSERT INTO transportista (nom) VALUES ('T54-zeta'), ('T54-Alfa'), ('T54-beta')
+         RETURNING nom, id_seq`,
+      );
+      const id = (nom: string) => Number(transportistes.rows.find((t) => t.nom === nom)!.id_seq);
+
+      // Creades en aquest ordre (zeta, sense, Alfa, beta), totes amb la
+      // mateixa data de comanda pròpia per aïllar-les de la resta del fitxer.
+      for (const transportistaId of [id('T54-zeta'), undefined, id('T54-Alfa'), id('T54-beta')]) {
+        const res = await fastify.inject({
+          method: 'POST',
+          url: '/api/v1/comandes',
+          payload: {
+            dataComanda: '2026-07-15',
+            dataLliurament: '2026-07-30T00:00:00Z',
+            origen: 'manual',
+            ...(transportistaId !== undefined ? { transportistaId } : {}),
+            linies: [{ producteId, unitatsDemanades: 1 }],
+          },
+        });
+        expect(res.statusCode).toBe(201);
+      }
+
+      const filtre = 'dataComandaDes=2026-07-15&dataComandaFins=2026-07-15&mida=200';
+      const perTransportista = cuerpoJson<PanellOficinaApi>(
+        await fastify.inject({
+          method: 'GET',
+          url: `/api/v1/panells/oficina?${filtre}&ordre=transportista`,
+        }),
+      );
+      expect(perTransportista.dades.map((f) => f.transportista)).toEqual([
+        'T54-Alfa',
+        'T54-beta',
+        'T54-zeta',
+        null,
+      ]);
+
+      // Sense ordre: el de sempre (cap té data d'expedició → per creació).
+      const habitual = cuerpoJson<PanellOficinaApi>(
+        await fastify.inject({ method: 'GET', url: `/api/v1/panells/oficina?${filtre}` }),
+      );
+      expect(habitual.dades.map((f) => f.transportista)).toEqual([
+        'T54-zeta',
+        null,
+        'T54-Alfa',
+        'T54-beta',
+      ]);
+
+      const invalid = await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/panells/oficina?ordre=client',
+      });
+      expect(invalid.statusCode).toBe(400);
+
+      await fastify.close();
+    });
+  });
 });

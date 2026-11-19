@@ -13,6 +13,7 @@ import { Pagination } from '@/components/ui/Pagination';
 import { TagSearchInput } from '@/components/ui/TagSearchInput';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { StatCard } from '@/components/ui/StatCard';
+import { useProveidors } from '@/hooks/useProveidors';
 import { useCatalog } from '@/hooks/useCatalog';
 import { useCategories } from '@/hooks/useCategories';
 import {
@@ -42,6 +43,7 @@ import {
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
 
 const ALL = 'Tots';
+const SENSE_PROVEIDOR = 'Sense proveïdor';
 const ALL_FEM = 'Totes';
 
 // Valors fixos del enum real (ProducteApi.format/envasat, contrato §4.2) —
@@ -418,6 +420,14 @@ export default function WorkshopPage() {
   const [treballFilter, setTreballFilter] = useState(ALL_FEM);
   const [envasatFilter, setEnvasatFilter] = useState(ALL);
   const [formatFilter, setFormatFilter] = useState(ALL);
+  // Punt 55 (18/11/2026): per proveïdor de la línia, o les que no en tenen.
+  const { data: proveidors } = useProveidors();
+  const [proveidorFilter, setProveidorFilter] = useState(ALL);
+  const proveidorId = useMemo((): number | 'sense' | undefined => {
+    if (proveidorFilter === ALL) return undefined;
+    if (proveidorFilter === SENSE_PROVEIDOR) return 'sense';
+    return proveidors.find((proveidor) => proveidor.nom === proveidorFilter)?.id;
+  }, [proveidorFilter, proveidors]);
   const [productionDateFilter, setProductionDateFilter] = useState('');
 
   // Mode LOCAL (filtrant `catalog` ja carregat), mateix criteri que
@@ -457,6 +467,7 @@ export default function WorkshopPage() {
       ...(productSearches.length > 0 ? { cercaProducte: productSearches } : {}),
       ...(envasatFilter !== ALL ? { envasat: envasatFilter } : {}),
       ...(formatFilter !== ALL ? { format: formatFilter } : {}),
+      ...(proveidorId !== undefined ? { proveidorId } : {}),
       ...(productionDateFilter
         ? { dataProduccioDes: productionDateFilter, dataProduccioFins: productionDateFilter }
         : {}),
@@ -471,6 +482,7 @@ export default function WorkshopPage() {
       productSearches,
       envasatFilter,
       formatFilter,
+      proveidorId,
       productionDateFilter,
     ],
   );
@@ -559,6 +571,7 @@ export default function WorkshopPage() {
       observacionsFilter !== ALL_FEM && observacionsFilter,
       envasatFilter !== ALL && `Envasat: ${envasatFilter}`,
       formatFilter !== ALL && `Format: ${formatFilter}`,
+      proveidorFilter !== ALL && `Proveïdor: ${proveidorFilter}`,
       productionDateFilter && `Data producció: ${formatData(productionDateFilter, false)}`,
       ambTreball && treballFilter !== ALL_FEM && `Estat línia: ${treballFilter}`,
     ].filter((etiqueta): etiqueta is string => Boolean(etiqueta));
@@ -672,6 +685,7 @@ export default function WorkshopPage() {
     setSelectedCategories([]);
     setEnvasatFilter(ALL);
     setFormatFilter(ALL);
+    setProveidorFilter(ALL);
     setProductionDateFilter('');
   }
 
@@ -801,6 +815,13 @@ export default function WorkshopPage() {
             value={treballFilter}
             onChange={setTreballFilter}
             allLabel={ALL_FEM}
+          />
+          <SimpleDropdown
+            label="Proveïdor"
+            options={[SENSE_PROVEIDOR, ...proveidors.map((proveidor) => proveidor.nom)]}
+            value={proveidorFilter}
+            onChange={setProveidorFilter}
+            allLabel={ALL}
           />
         </div>
         <div className="flex w-full flex-wrap gap-4">

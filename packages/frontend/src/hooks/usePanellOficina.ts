@@ -23,12 +23,18 @@ export type OfficePanelFilters = {
   clientId?: number;
   tarifaId?: number;
   poblacioDesti?: string;
+  /** Tasca 53: núm. de comanda o núm. de la web (conté el text). */
+  numComanda?: string;
   dataExpedicioDes?: string;
   dataExpedicioFins?: string;
   dataComandaDes?: string;
   dataComandaFins?: string;
   dataLliuramentDes?: string;
   dataLliuramentFins?: string;
+  /** Tasca 57: comandes amb (`si`) o sense (`no`) línies que no es produeixen. */
+  liniesSenseProduir?: 'si' | 'no';
+  /** Tasca 54: per transportista (A-Z); sense valor, l'ordre de sempre. */
+  ordre?: 'transportista';
 };
 
 type UsePanellOficinaResult = {

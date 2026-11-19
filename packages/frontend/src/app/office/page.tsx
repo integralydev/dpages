@@ -10,6 +10,7 @@ import { DateRangeInput } from '@/components/ui/DateRangeInput';
 import { FilterBar } from '@/components/ui/FilterBar';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Pagination } from '@/components/ui/Pagination';
+import { SearchInput } from '@/components/ui/SearchInput';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { StatCard } from '@/components/ui/StatCard';
 import { useCarriers } from '@/hooks/useCarriers';
@@ -29,6 +30,10 @@ import {
 import { formatData } from '@/lib/dates';
 import { formatDecimal } from '@/lib/decimals';
 import { descarregarPdfPanellOficina } from '@/lib/ordersPdf';
+
+// Tasca 57 (17/11/2026): el panell va per comanda; «Amb» = alguna línia que
+// surt d'estoc (no es produeix), «Sense» = cap.
+const SENSE_PRODUIR_OPTIONS = { Amb: 'si', Sense: 'no' } as const;
 
 const ALL = 'Tots';
 const ALL_FEM = 'Totes';
@@ -51,6 +56,7 @@ function OfficeOrderCard({ order, onClick }: { order: FilaPanellOficinaApi; onCl
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-semibold text-gray-900">{order.num}</p>
+          {order.numWoo && <span className="block text-xs text-gray-500">Web {order.numWoo}</span>}
           <p className="text-sm text-gray-500">{order.client ?? '—'}</p>
         </div>
         <Badge variant={estatBadgeVariant(order.estat)}>
@@ -136,6 +142,19 @@ export default function OfficePage() {
     '',
   );
   const [deliveryDateTo, setDeliveryDateTo] = useFiltrePersistent('oficina.dataLliuramentFins', '');
+  // Tasca 57: comandes amb alguna línia que surt d'estoc (no es produeix).
+  const [senseProduirFilter, setSenseProduirFilter] = useFiltrePersistent(
+    'oficina.liniesSenseProduir',
+    ALL_FEM,
+  );
+  const liniesSenseProduir =
+    SENSE_PRODUIR_OPTIONS[senseProduirFilter as keyof typeof SENSE_PRODUIR_OPTIONS] ?? undefined;
+  // Tasca 54 (Ari, 17/11/2026): ordenar per transportista (A-Z) per
+  // preparar les caixes; desmarcat, l'ordre de sempre. Es recorda com els filtres.
+  const [ordrePerTransportista, setOrdrePerTransportista] = useFiltrePersistent(
+    'oficina.ordreTransportista',
+    false,
+  );
 
   const statusCode = useMemo(
     () => Object.entries(ESTAT_LABELS).find(([, label]) => label === statusFilter)?.[0],
@@ -154,8 +173,12 @@ export default function OfficePage() {
     [tariffFilter, tariffColumns],
   );
 
+  // Tasca 53: cerca pel núm. de comanda o pel de la web, mentre s'escriu.
+  const [orderNumberSearch, setOrderNumberSearch] = useState('');
+
   const filters = useMemo(
     () => ({
+      ...(orderNumberSearch.trim() ? { numComanda: orderNumberSearch.trim() } : {}),
       ...(statusCode ? { estat: statusCode } : {}),
       ...(carrierId !== undefined ? { transportistaId: carrierId } : {}),
       ...(selectedClient !== null ? { clientId: selectedClient.id } : {}),
@@ -167,8 +190,11 @@ export default function OfficePage() {
       ...(shippingDateTo ? { dataExpedicioFins: shippingDateTo } : {}),
       ...(deliveryDateFrom ? { dataLliuramentDes: deliveryDateFrom } : {}),
       ...(deliveryDateTo ? { dataLliuramentFins: deliveryDateTo } : {}),
+      ...(liniesSenseProduir !== undefined ? { liniesSenseProduir } : {}),
+      ...(ordrePerTransportista ? { ordre: 'transportista' as const } : {}),
     }),
     [
+      orderNumberSearch,
       statusCode,
       carrierId,
       selectedClient,
@@ -180,6 +206,8 @@ export default function OfficePage() {
       shippingDateTo,
       deliveryDateFrom,
       deliveryDateTo,
+      liniesSenseProduir,
+      ordrePerTransportista,
     ],
   );
 
@@ -204,6 +232,7 @@ export default function OfficePage() {
       rangLabel('Data comanda', orderDateFrom, orderDateTo),
       rangLabel('Data expedició', shippingDateFrom, shippingDateTo),
       rangLabel('Data lliurament', deliveryDateFrom, deliveryDateTo),
+      ordrePerTransportista && 'Ordenat per transportista',
     ].filter((label): label is string => Boolean(label));
     try {
       const comandes = await obtenirTotesLesPagines<FilaPanellOficinaApi>((pagina) =>
@@ -285,6 +314,11 @@ export default function OfficePage() {
 
       <FilterBar>
         <div className="flex w-full flex-wrap gap-4">
+          <SearchInput
+            label="Núm. comanda o web"
+            value={orderNumberSearch}
+            onChange={setOrderNumberSearch}
+          />
           <AsyncCombobox
             label="Client"
             value={selectedClient?.id ?? null}
@@ -323,6 +357,22 @@ export default function OfficePage() {
             onChange={setTariffFilter}
             allLabel={ALL_FEM}
           />
+          <SimpleDropdown
+            label="Línies sense produir"
+            options={Object.keys(SENSE_PRODUIR_OPTIONS)}
+            value={senseProduirFilter}
+            onChange={setSenseProduirFilter}
+            allLabel={ALL_FEM}
+          />
+          <label className="flex items-center gap-2 self-end pb-2 text-sm font-medium text-gray-900">
+            <input
+              type="checkbox"
+              checked={ordrePerTransportista}
+              onChange={(event) => setOrdrePerTransportista(event.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-ink"
+            />
+            Ordenar per transportista
+          </label>
         </div>
         <div className="flex w-full flex-wrap gap-4">
           <SimpleDropdown
@@ -424,6 +474,9 @@ export default function OfficePage() {
                   >
                     <td className="px-2 py-3 break-words">
                       <span className="font-semibold text-gray-900">{order.num}</span>
+                      {order.numWoo && (
+                        <span className="block text-xs text-gray-500">Web {order.numWoo}</span>
+                      )}
                     </td>
                     <td className="px-2 py-3 break-words text-gray-900">{order.client ?? '—'}</td>
                     <td className="hidden px-2 py-3 break-words text-gray-900 xl:table-cell">

@@ -273,11 +273,13 @@ Etiquetas para mostrar (el backend no las envía, van en el frontend):
 > resuelto, cliente sin datos…) se registra pero no saca el pedido de
 > `esborrany`.
 >
-> **Fecha de producción de los pedidos de WooCommerce** (tarea 39): al
-> crearse, la cabecera y sus líneas reciben `dataProduccio` = el lunes siguiente
-> (`AAAA-MM-DDT00:00:00Z`) si se crearon entre el martes a las 16:00 y el
-> domingo a las 24:00, hora de Europe/Madrid; si no, `null`. Las
-> actualizaciones posteriores del sync no la tocan.
+> **Fechas de producción y expedición de los pedidos de WooCommerce**
+> (punt 38, 17/11/2026; reemplaza la tarea 39): al crearse, la cabecera y
+> sus líneas reciben `dataProduccio` = el lunes siguiente al día de creación
+> en Europe/Madrid (ese mismo lunes si se creó un lunes), y la cabecera
+> `dataExpedicio` = el martes siguiente (`AAAA-MM-DDT00:00:00Z`). Ya no hay
+> corte del martes a las 16:00. Las actualizaciones posteriores del sync no
+> las tocan.
 >
 > **`cancellada`** (29/09/2026, petición de Ari): el pedido sigue existiendo
 > y se ve en `GET /comandes` (también con `?estat=cancellada`), pero **no
@@ -468,6 +470,10 @@ Filtros: `?categoriaId=1&tipus=simple&actiu=true&cerca=llom&agrupacioProduccio=L
 
 ---
 
+> **`proveidorDefecte` (punt 55, 18/11/2026):** `{ id, nom }` o `null`, el
+> «proveïdor preferit» del artículo. Se escribe con `proveidorDefecteId` en
+> `POST`/`PATCH /productes` (`null` lo quita; inexistente → `400 VALIDACIO`).
+
 ### 4.3 · Llistat de tarifes
 
 La matriz de precios: una fila por artículo, una columna por tarifa, editable
@@ -512,15 +518,36 @@ que ese artículo no tiene precio en esa tarifa.
 > cargado (las que ya existían antes de que el alta empezara a pedirlo como
 > obligatorio).
 
+> **`tarifes[].calculPerPes`** (tarea 40, 17/11/2026, migración `0027`):
+> cómo calculan el importe los pedidos con esta tarifa. `true` = peso ×
+> precio (los kg pedidos hasta que Empaquetat confirma la línea; desde
+> entonces, los kg enviados — 0 kg → 0 €); `false` = unidades × precio.
+> Por unidades: 01, MO, 08 y SARG; el resto, por peso (respuesta del
+> cliente). Cada pedido **guarda** el cálculo de su tarifa al crearse o al
+> cambiarle la tarifa (`ComandaDetallApi.calculPerPes`, trigger en la base):
+> cambiar la tarifa después no toca los pedidos existentes, y los pedidos
+> anteriores a la tarea 40 siguen por unidades. Sin tarifa, por unidades.
+> Afecta `totalLinia`, `totalEur` (listado, ficha, Panell Oficina) y el PDF.
+
 **`POST /tarifes`**
 
 ```json
-{ "codi": "VIP", "nom": "Clients VIP" }
+{ "codi": "VIP", "nom": "Clients VIP", "calculPerPes": true }
 ```
 
 Respuesta `201`, misma forma que una fila de `tarifes[]` de la matriz de
 arriba. `codi` es obligatorio y único — un `codi` repetido responde
-`409 CONFLICTE`.
+`409 CONFLICTE`. `calculPerPes` es opcional (por defecto `true`).
+
+**`PATCH /tarifes/:tarifaId`** (tarea 40)
+
+```json
+{ "calculPerPes": false }
+```
+
+Respuesta `200` con la tarifa. Sólo cambia el cálculo de los pedidos que se
+creen (o a los que se ponga esta tarifa) a partir de ahora. `400 VALIDACIO`
+si no es booleano, `404` si la tarifa no existe.
 
 **`PATCH /tarifes/:tarifaId/preus/:producteId`**
 
@@ -558,7 +585,7 @@ es idempotente-204, es 404 cuando no hay nada que borrar), o si `tarifaId`/
 
 **`GET /clients`**
 
-Filtros: `?cerca=nom&tarifaId=2&actiu=true`
+Filtros: `?cerca=nom&tarifaId=2&actiu=true&tipus=fix`
 
 ```json
 {
@@ -573,7 +600,8 @@ Filtros: `?cerca=nom&tarifaId=2&actiu=true`
       "poblacio": "Manresa",
       "tarifa": { "id": 2, "nom": "Restaurants" },
       "transportistaDefecte": { "id": 1, "nom": "DHL" },
-      "actiu": true
+      "actiu": true,
+      "tipus": "fix"
     }
   ],
   "paginacio": { "pagina": 1, "mida": 50, "total": 1222, "totalPagines": 25 }
@@ -595,8 +623,16 @@ Filtros: `?cerca=nom&tarifaId=2&actiu=true`
 > acepta como entrada editable, ni al crear ni en `PATCH /clients/:id`
 > después — si llega en el body de cualquiera de los dos, se ignora en
 > silencio.
+>
+> **`tipus` (punt 35, 18/11/2026):** `"fix"` o `"esporadic"` (a pantalla,
+> «Fix» y «Esporàdic»); todos los clientes empiezan como `esporadic` —
+> los que ya existían, los del alta manual y los que crea el sync de
+> WooCommerce. `?tipus=` filtra por ese valor; otro valor → `400 VALIDACIO`.
+> Se cambia desde el listado de clientes sin abrir la ficha
+> (`PATCH /clients/:id` con `{ "tipus": "fix" }`).
 
-**`PATCH /clients/:id`** — para asignar tarifa o transportista. `codi` no es
+**`PATCH /clients/:id`** — para asignar tarifa o transportista, o cambiar el
+`tipus` (`"fix"`/`"esporadic"`; otro valor → `400 VALIDACIO`). `codi` no es
 un campo editable (ver nota de arriba) — mandarlo no produce error, sólo se
 ignora.
 
@@ -608,13 +644,14 @@ WhatsApp, que no traen ningún cliente de WooCommerce que resolver.
   "nom": "Forn del Barri",
   "poblacio": "Vic",
   "tarifaId": 2,
-  "email": "forn@example.com",
-  "telefon": "600222333",
-  "nif": "B87654321"
+  "email": "[redactat]",
+  "telefon": "[redactat]",
+  "nif": "[redactat]",
+  "tipus": "esporadic"
 }
 ```
 
-`nom` y `poblacio` son obligatorios (los campos mínimos del prototipo).
+`tipus` es opcional (por defecto `esporadic`). `nom` y `poblacio` son obligatorios (los campos mínimos del prototipo).
 `tarifaId`, `email`, `telefon` y `nif` son opcionales —
 `email`/`telefon`/`nif` no aparecen en el modal del prototipo, pero hacen
 falta como dato de contacto en los pedidos que no vienen de la web. `codi`
@@ -629,13 +666,14 @@ ya asignado:
   "id": 200,
   "codi": "CLI200",
   "nom": "Forn del Barri",
-  "nif": "B87654321",
-  "email": "forn@example.com",
-  "telefon": "600222333",
+  "nif": "[redactat]",
+  "email": "[redactat]",
+  "telefon": "[redactat]",
   "poblacio": "Vic",
   "tarifa": { "id": 2, "nom": "Restaurants" },
   "transportistaDefecte": null,
-  "actiu": true
+  "actiu": true,
+  "tipus": "esporadic"
 }
 ```
 
@@ -662,13 +700,33 @@ un `codi` repetido responde `409 CONFLICTE`.
 
 **`PATCH /transportistes/:id`** — cuerpo parcial (`nom` y/o `codi`).
 
+### 4.4 bis · Proveïdors
+
+Punt 55 (reformulado con el cliente, 18/11/2026). Lectura: módulos operativos
+(los mismos que `GET /transportistes`), `catalog` y `proveidors`. Escritura:
+módulo `proveidors` (la migración 0030 se lo dio a todos los roles con
+`tarifes-clients`).
+
+**`GET /proveidors`** — paginado, ordenado por nombre:
+`{ "dades": [{ "id": 3, "nom": "Granja Nord" }], "paginacio": { … } }`
+
+**`POST /proveidors`** — `{ "nom": "Granja Nord" }`. Obligatorio, máximo 100
+caracteres, único sin distinguir mayúsculas (repetido → `409 CONFLICTE`).
+Respuesta `201` con el proveedor.
+
+**`PATCH /proveidors/:id`** — `{ "nom": "…" }`, mismas reglas.
+
+**`DELETE /proveidors/:id`** — borrado de verdad (`204`), pero **sólo si
+ningún artículo (`proveidorDefecte`) ni ninguna línea de pedido lo usa**; si
+no, `409 CONFLICTE` diciendo cuántos lo usan. Las FK son `RESTRICT`.
+
 ---
 
 ### 4.5 · Comandes
 
 **`GET /comandes`**
 
-Filtros: `?estat=oberta&clientId=45&origen=web&dataDes=2026-08-01&dataFins=2026-08-31&dataProduccioDes=&dataProduccioFins=&dataLliuramentDes=&dataLliuramentFins=&cerca=142`
+Filtros: `?estat=oberta&clientId=45&origen=web&dataDes=2026-08-01&dataFins=2026-08-31&dataProduccioDes=&dataProduccioFins=&dataLliuramentDes=&dataLliuramentFins=&cerca=142&tipusClient=fix`
 
 > `dataFins`/`dataProduccioFins`/`dataLliuramentFins` incluyen el día
 > completo — ver "Filtros de rango de fecha" en la sección 2 (capa 36).
@@ -685,6 +743,11 @@ Filtros: `?estat=oberta&clientId=45&origen=web&dataDes=2026-08-01&dataFins=2026-
 > `?clientId=45&clientId=12` = pedidos de cualquiera de esos clientes. Un
 > solo `clientId` funciona igual que antes; un id no numérico → `400
 VALIDACIO`; un id inexistente no coincide con nada (no es error).
+>
+> **`tipusClient` (punt 35, 18/11/2026):** `fix` o `esporadic` = pedidos de
+> los clientes de ese tipus (`ClientApi.tipus`). Un pedido sin cliente no
+> sale con este filtro. Otro valor → `400 VALIDACIO`. Se combina con
+> `clientId` y `cerca` (AND).
 
 ```json
 {
@@ -763,10 +826,19 @@ VALIDACIO`; un id inexistente no coincide con nada (no es error).
 
 **`GET /comandes/:id`** — incluye las líneas:
 
+> **`numWoo`** (tarea 53, 17/11/2026, migración `0028`): «Núm. comanda
+> WooCommerce». En los pedidos de WooCommerce, por defecto el `number` del
+> pedido en la web (lo escribe el sync sólo al crear; después es de Oficina,
+> ADR-025); en los manuales, `null`. Editable en `POST /comandes` y
+> `PATCH /comandes/:id` (texto, máx. 50 caracteres; vacío o `null` = sin
+> número). `?cerca=` de `GET /comandes` también lo busca, y Oficina y
+> Empaquetat lo filtran con `?numComanda=`.
+
 ```json
 {
   "id": 142,
   "num": "000142",
+  "numWoo": "6711",
   "origen": "woocommerce",
   "estat": "oberta",
   "client": { "id": 45, "nom": "Restaurant Example", "poblacio": "Manresa" },
@@ -783,6 +855,7 @@ VALIDACIO`; un id inexistente no coincide con nada (no es error).
   "obsLliurament": "Entregar pels matins",
   "totalKg": "24.500",
   "totalEur": "312.40",
+  "calculPerPes": true,
   "congelada": false,
   "congelatA": null,
   "linies": [
@@ -1025,8 +1098,10 @@ repetidos cuentan una vez). Respuesta `201`:
 }
 ```
 
-> - Cada copia nace en `esborrany`, con `dataComanda` = hoy (Europe/Madrid)
->   y el resto de fechas en `null` (cabecera y líneas).
+> - Cada copia nace en `esborrany`, con `dataComanda` = hoy (Europe/Madrid),
+>   `dataProduccio` = el lunes siguiente (hoy si es lunes; también en todas
+>   las líneas), `dataExpedicio` = el martes siguiente (punt 38, 17/11/2026)
+>   y `dataLliurament` en `null`.
 > - Se copian cliente, tarifa, transportista, población, dirección y
 >   observaciones de cabecera; de las líneas, producto, unidades, kg (sólo
 >   en artículos a medida) y observaciones de producción y empaquetado.
@@ -1161,6 +1236,15 @@ las líneas de un pedido. Cuerpo: `{ "ids": [38012, 38010, 38011] }` con
 > - Pedido de WooCommerce: cuenta como edición de Oficina y fija
 >   `linies_editades_a` (ADR-026); el sync deja de tocar sus líneas.
 
+> **Proveïdor de la línia (punt 55, 18/11/2026).** `ComandaLiniaApi.proveidor`
+> (`{ id, nom }` o `null`). Al crear una línea (`POST /comandes`,
+> `POST /comandes/:id/linies`): sin la clave `proveidorId`, el proveedor
+> preferido del artículo (`ProducteApi.proveidorDefecte`); `null`, ninguno;
+> un id, ese (inexistente → `400 VALIDACIO`). `PATCH .../linies/:liniaId`
+> acepta `proveidorId` (`null` lo quita). `POST /comandes/duplicar` copia el
+> de cada línea. El sync de WooCommerce pone el preferido del artículo al
+> crear la línea y después no lo toca.
+
 **`PATCH /comandes/:comandaId/linies/:liniaId`** (capa 30) — editar una
 línea existente.
 
@@ -1210,7 +1294,11 @@ Sólo lectura, con filtros y subtotales.
 
 **`GET /panells/oficina`**
 
-Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataComandaDes=&dataComandaFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&tarifaId=&estat=&clientId=&poblacioDesti=`
+Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataComandaDes=&dataComandaFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&tarifaId=&estat=&clientId=&poblacioDesti=&numComanda=`
+
+> `numComanda` (tarea 53): pedidos cuyo número propio o `numWoo` contiene
+> el texto, sin distinguir mayúsculas (`%` y `_` se buscan tal cual). Cada
+> fila trae `numWoo`.
 
 > Los tres `...Fins` (`dataExpedicioFins`, `dataComandaFins`,
 > `dataLliuramentFins`) incluyen el día completo — ver "Filtros de rango de
@@ -1295,6 +1383,10 @@ real, no un total sumado. `TotalsPanellObradorApi` no cambió:
 líneas individuales visibles.
 
 **`GET /panells/obrador`**
+
+> **`proveidorId` (punt 55, 18/11/2026):** líneas cuyo proveedor es ese
+> (`?proveidorId=3`) o que no tienen (`?proveidorId=sense`). Otro valor →
+> `400 VALIDACIO`. Aplica también a la vista acumulada y a la exportación.
 
 Filtros: `?dataProduccioDes=&dataProduccioFins=&categoriaId=&tipus=&producte=&cercaProducte=&format=&envasat=&clientId=&agrupacioProduccio=&observacions=&treball=`
 
@@ -1502,7 +1594,11 @@ que edita las mismas líneas. Todo lo demás es sólo lectura.
 **`GET /panells/empaquetat`** — módulo `panell-empaquetat` **o**
 `panell-compres` (el Panell de Compres lo usa para el detalle de un cliente).
 
-Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&senseClient=&producte=&cercaProducte=&categoriaId=&confirmacio=&origen=&ordre=`
+Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramentFins=&transportistaId=&clientId=&senseClient=&producte=&cercaProducte=&categoriaId=&confirmacio=&origen=&ordre=&numComanda=`
+
+> `numComanda` (tarea 53): mismo criterio que en `GET /panells/oficina`;
+> también vale para el Panell de Compres, que usa estos filtros. Cada fila
+> trae `numWoo`.
 
 > **`senseClient=si` y `ordre=comanda` (tarea 41, 11/11/2026):** los usa el
 > detalle de un cliente en el Panell de Compres. `senseClient=si` deja sólo
@@ -1541,6 +1637,19 @@ Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramen
 > - `observacions` (tarea 23, 01/10/2026): `si` / `no` — línea con
 >   **observación de empaquetado** (`obsEmpaquetat`, ver abajo).
 >
+> **`POST /panells/empaquetat/marcar-lliurades`** (tarea 51, 17/11/2026) —
+> mismo criterio que `POST /panells/obrador/marcar-fets`: acepta **los
+> mismos filtros** que `GET /panells/empaquetat` como query string y
+> confirma **todas** las líneas pendientes (`confirmatA` nulo) que los
+> cumplen, no sólo una página, con `unitatsLliurades` = unidades pedidas y
+> `kgLliurats` = kg pedidos (`confirmatA` = ahora, `confirmatPer` = el
+> usuario), como si se guardaran una a una. Cierra los pedidos que queden
+> con todo entregado (igual que `PATCH .../lliurament`). Las de pedidos
+> congelados se dejan igual. Sin filtro mínimo a propósito (Francesc,
+> 17/11/2026): sin filtros marca todas las pendientes; el diálogo de
+> confirmación del frontend ya muestra cuántas son. Respuesta: `{ "marcades": 34,
+"congeladesOmeses": 0 }`. Exige el mòdul `panell-empaquetat`.
+>
 > **`obsEmpaquetat`** (tarea 7, 01/10/2026, migración `0022`): observación
 > de empaquetado a nivel de **línea** de pedido (por ejemplo, la unidad
 > familiar a la que va el producto). Cada fila del panel la trae (`null` si
@@ -1548,6 +1657,30 @@ Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramen
 > `POST /comandes`), al añadir una línea (`POST .../linies`) y al editarla
 > (`PATCH .../linies/:liniaId`); `GET /comandes/:id` la devuelve en
 > `linies[]`. Vacía o sólo espacios = `null`.
+>
+> **`produir`** (tarea 57, 17/11/2026, migración `0026`): booleano de
+> **línea**, `true` por defecto. `false` = el producto sale de stock (por
+> ejemplo, congelado): no se fabrica, pero se envía. Se informa igual que
+> `obsEmpaquetat` (`linies[].produir` en `POST /comandes`, `produir` en
+> `POST .../linies` y en `PATCH .../linies/:liniaId`; si no viene, `true`;
+> un valor que no sea booleano es `400 VALIDACIO`), `GET /comandes/:id` y
+> cada fila de este panel lo devuelven, y `POST /comandes/duplicar` lo
+> copia. El sync de WooCommerce no lo toca nunca.
+>
+> - Con `produir = false` la línea **no aparece** en `/panells/obrador`
+>   (tampoco en `acumulat` ni en "marcar tot com a fet") ni en
+>   `/panells/produccio` (ni en `totals.canals`).
+> - En este panel y en `/panells/compres`, filtro `produir`: `si` / `no`
+>   (otro valor, `400 VALIDACIO`).
+> - En `/panells/oficina` (una fila por pedido), filtro
+>   `liniesSenseProduir`: `si` = pedidos con alguna línea en `false`,
+>   `no` = ninguna. Los totales del pedido siguen contando todas sus
+>   líneas.
+>
+> **Confirmar con 0** (tarea 57): `PATCH .../lliurament` ya aceptaba
+> `unitatsLliurades`/`kgLliurats` en `0` (issue #19). Desde la tarea 57 la
+> pantalla permite pulsar "Desar" en una línea pendiente aunque siga en 0,
+> y pide confirmación antes de guardar cualquier valor 0.
 
 > `dataExpedicioFins`/`dataLliuramentFins` incluyen el día completo — ver
 > "Filtros de rango de fecha" en la sección 2 (capa 36).

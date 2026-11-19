@@ -1256,6 +1256,13 @@ cambios en esta tarea. Pendiente: validar con Francesc si el formato elegido
 para `adreca_lliurament` y el destino de `customer_note` en
 `obs_lliurament` son los esperados.
 
+**Ampliación (tarea 53, 17/11/2026, migración `0028`)**: mismo criterio
+para `comanda.num_woo` («Núm. comanda WooCommerce»): `crearComanda` lo
+rellena con `WooOrder.number` (o el `id` si viniera vacío) sólo al crear;
+`actualitzarCapcaleraSiCorrespon` no lo toca, así que lo que Oficina
+corrija a mano se conserva. En los pedidos manuales queda `NULL` y es
+editable.
+
 ## ADR-026 — Líneas de un pedido sincronizado se protegen tras la primera edición de Oficina
 
 **Estado**: Aceptado.
@@ -1321,3 +1328,9 @@ con la posición de la línea en WooCommerce y usa como criterio de
 emparejamiento; sin la marca, el siguiente sync del pedido desharía el
 orden. Mismo trade-off que arriba: reordenar un pedido web lo desconecta
 de la sincronización de líneas.
+
+**Excepción (punt 55, 18/11/2026):** un `PATCH .../linies/:liniaId` que
+sólo trae `proveidorId` no fija `linies_editades_a`. El proveedor de la
+línea es una columna del sistema que el sync no escribe nunca (sólo la
+rellena al insertar la línea), así que no hay nada que proteger, y asignar
+proveedores en lote no debe cortar la sincronización de los pedidos web.

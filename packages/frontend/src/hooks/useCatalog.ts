@@ -23,6 +23,12 @@ export type ProductFormValues = {
   pesKg: string | null;
   preuVenda: string | null;
   actiu: boolean;
+  /**
+   * Punt 55: proveïdor preferit (null = cap). `undefined` = no s'ha tocat i
+   * no s'envia (així una llista de proveïdors encara no carregada no
+   * l'esborra mai).
+   */
+  proveidorDefecteId?: number | null;
 };
 
 export type CatalogFilters = { cerca?: string };
@@ -165,6 +171,9 @@ export function useCatalog(
       pesKg: values.pesKg,
       preuVenda: values.preuVenda,
       actiu: values.actiu,
+      ...(values.proveidorDefecteId !== undefined
+        ? { proveidorDefecteId: values.proveidorDefecteId }
+        : {}),
     };
   }
 

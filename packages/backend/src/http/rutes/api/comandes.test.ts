@@ -4,6 +4,7 @@ import type {
   ComandaResumApi,
   RespostaPaginada,
 } from '@dpages/shared';
+import { calcularDatesPerDefecte } from '@dpages/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { construirServidor as construirServidorType } from '../../servidor.js';
 import {
@@ -708,7 +709,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
   describe('capa 15 — cascada de resolució de preu de línia', () => {
     it('amb tarifa assignada al client i preu definit per aquest producte: fa servir el preu de la tarifa', async () => {
       const tarifa = await entorn.poolTest.query<{ id: string }>(
-        `INSERT INTO tarifa (codi, nom) VALUES ('CAP15-A', 'Tarifa capa 15 A') RETURNING id`,
+        `INSERT INTO tarifa (codi, nom, calcul_per_pes) VALUES ('CAP15-A', 'Tarifa capa 15 A', false) RETURNING id`,
       );
       await entorn.poolTest.query(
         `INSERT INTO tarifa_preu (tarifa_id, producte_id, preu)
@@ -816,7 +817,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
   describe('capa 30 — agregar/editar línies d’una comanda ja creada', () => {
     it('POST .../linies: agrega línia amb preu resolt (mateixa cascada, reusada), actualitza totalLinia i el total de la comanda', async () => {
       const tarifa = await entorn.poolTest.query<{ id: string }>(
-        `INSERT INTO tarifa (codi, nom) VALUES ('CAP30-A', 'Tarifa capa 30 A') RETURNING id`,
+        `INSERT INTO tarifa (codi, nom, calcul_per_pes) VALUES ('CAP30-A', 'Tarifa capa 30 A', false) RETURNING id`,
       );
       await entorn.poolTest.query(
         `INSERT INTO tarifa_preu (tarifa_id, producte_id, preu)
@@ -1761,7 +1762,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
   describe('capa 32 — tarifaId explícit a POST /comandes (anul·la la del client per a l’alta)', () => {
     it('tarifaId explícit diferent de la del client: el preu resol contra la tarifa del body, no la del client', async () => {
       const tarifaClient = await entorn.poolTest.query<{ id: string }>(
-        `INSERT INTO tarifa (codi, nom) VALUES ('CAP32-CLIENT', 'Tarifa del client') RETURNING id`,
+        `INSERT INTO tarifa (codi, nom, calcul_per_pes) VALUES ('CAP32-CLIENT', 'Tarifa del client', false) RETURNING id`,
       );
       await entorn.poolTest.query(
         `INSERT INTO tarifa_preu (tarifa_id, producte_id, preu)
@@ -1769,7 +1770,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
         [tarifaClient.rows[0]!.id, producteFitxaId],
       );
       const tarifaBody = await entorn.poolTest.query<{ id: string; id_seq: string }>(
-        `INSERT INTO tarifa (codi, nom) VALUES ('CAP32-BODY', 'Tarifa indicada al body') RETURNING id, id_seq`,
+        `INSERT INTO tarifa (codi, nom, calcul_per_pes) VALUES ('CAP32-BODY', 'Tarifa indicada al body', false) RETURNING id, id_seq`,
       );
       await entorn.poolTest.query(
         `INSERT INTO tarifa_preu (tarifa_id, producte_id, preu)
@@ -1813,7 +1814,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
 
     it('sense tarifaId al body: comportament actual sense canvis (fa servir la tarifa del client)', async () => {
       const tarifa = await entorn.poolTest.query<{ id: string }>(
-        `INSERT INTO tarifa (codi, nom) VALUES ('CAP32-DEFAULT', 'Tarifa per defecte') RETURNING id`,
+        `INSERT INTO tarifa (codi, nom, calcul_per_pes) VALUES ('CAP32-DEFAULT', 'Tarifa per defecte', false) RETURNING id`,
       );
       await entorn.poolTest.query(
         `INSERT INTO tarifa_preu (tarifa_id, producte_id, preu)
@@ -1881,7 +1882,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
 
     it('POST /comandes/:comandaId/linies (capa 30) no es veu afectat: continua fent servir sempre la tarifa del client', async () => {
       const tarifaClient = await entorn.poolTest.query<{ id: string }>(
-        `INSERT INTO tarifa (codi, nom) VALUES ('CAP32-L30-CLIENT', 'Tarifa client (capa 30)') RETURNING id`,
+        `INSERT INTO tarifa (codi, nom, calcul_per_pes) VALUES ('CAP32-L30-CLIENT', 'Tarifa client (capa 30)', false) RETURNING id`,
       );
       await entorn.poolTest.query(
         `INSERT INTO tarifa_preu (tarifa_id, producte_id, preu)
@@ -1889,7 +1890,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
         [tarifaClient.rows[0]!.id, producteFitxaId],
       );
       const tarifaBody = await entorn.poolTest.query<{ id: string; id_seq: string }>(
-        `INSERT INTO tarifa (codi, nom) VALUES ('CAP32-L30-BODY', 'Tarifa del body (capa 32)') RETURNING id, id_seq`,
+        `INSERT INTO tarifa (codi, nom, calcul_per_pes) VALUES ('CAP32-L30-BODY', 'Tarifa del body (capa 32)', false) RETURNING id, id_seq`,
       );
       await entorn.poolTest.query(
         `INSERT INTO tarifa_preu (tarifa_id, producte_id, preu)
@@ -3002,8 +3003,10 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
 
   describe('tasca 17 — POST /comandes/duplicar', () => {
     const avui = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Madrid' }).format(new Date());
+    // Punt 38: producció el dilluns següent (avui si és dilluns), expedició l'endemà.
+    const datesAvui = calcularDatesPerDefecte(avui)!;
 
-    it("copia capçalera i línies en esborrany, amb data d'avui, sense altres dates ni empaquetat", async () => {
+    it("copia capçalera i línies en esborrany, amb data d'avui, producció i expedició per defecte i sense empaquetat", async () => {
       const fastify = construirServidor();
       const creada = await fastify.inject({
         method: 'POST',
@@ -3066,8 +3069,8 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
         client: { id: clientId },
         obsLliurament: 'Porta del darrere',
         dataComanda: `${avui}T00:00:00Z`,
-        dataProduccio: null,
-        dataExpedicio: null,
+        dataProduccio: `${datesAvui.dataProduccio}T00:00:00Z`,
+        dataExpedicio: `${datesAvui.dataExpedicio}T00:00:00Z`,
         dataLliurament: null,
         bultos: null,
         congelada: false,
@@ -3079,7 +3082,7 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
         kgEditable: false,
         preuUnitari: '9.86',
         obsEmpaquetat: 'Família A',
-        dataProduccio: null,
+        dataProduccio: `${datesAvui.dataProduccio}T00:00:00Z`,
         unitatsLliurades: '0.00',
         kgLliurats: '0.000',
         confirmatA: null,
@@ -3547,6 +3550,328 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
       );
       expect(marca.rows[0]?.linies_editades_a).not.toBeNull();
 
+      await fastify.close();
+    });
+  });
+
+  describe('tasca 57 — camp produir de línia', () => {
+    it('per defecte sí; es pot posar a no en crear, afegir, editar, i la còpia el manté', async () => {
+      const fastify = construirServidor();
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [
+            { producteId: producteFitxaId, unitatsDemanades: 1 },
+            { producteId: producteFitxaId, unitatsDemanades: 2, produir: false },
+          ],
+        },
+      });
+      expect(creada.statusCode).toBe(201);
+      const comanda = cuerpoJson<ComandaDetallApi>(creada);
+      expect(comanda.linies.map((l) => l.produir)).toEqual([true, false]);
+
+      // Afegir una línia: per defecte sí, i amb produir:false, no.
+      const afegida = await fastify.inject({
+        method: 'POST',
+        url: `/api/v1/comandes/${comanda.id}/linies`,
+        payload: { producteId: producteFitxaId, unitatsDemanades: 3, produir: false },
+      });
+      expect(afegida.statusCode).toBe(201);
+      expect(cuerpoJson<ComandaDetallApi>(afegida).linies.map((l) => l.produir)).toEqual([
+        true,
+        false,
+        false,
+      ]);
+
+      // Editar: la primera passa a no, i la segona torna a sí.
+      const [primera, segona] = comanda.linies;
+      for (const [linia, produir] of [
+        [primera!, false],
+        [segona!, true],
+      ] as const) {
+        const res = await fastify.inject({
+          method: 'PATCH',
+          url: `/api/v1/comandes/${comanda.id}/linies/${linia.id}`,
+          payload: { produir },
+        });
+        expect(res.statusCode).toBe(200);
+      }
+      const despres = cuerpoJson<ComandaDetallApi>(
+        await fastify.inject({ method: 'GET', url: `/api/v1/comandes/${comanda.id}` }),
+      );
+      expect(despres.linies.map((l) => l.produir)).toEqual([false, true, false]);
+
+      // Duplicar: la còpia manté el valor de cada línia.
+      const dup = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes/duplicar',
+        payload: { ids: [comanda.id] },
+      });
+      expect(dup.statusCode).toBe(201);
+      const copiaId = cuerpoJson<{ comandes: ComandaDuplicadaApi[] }>(dup).comandes[0]!.id;
+      const copia = cuerpoJson<ComandaDetallApi>(
+        await fastify.inject({ method: 'GET', url: `/api/v1/comandes/${copiaId}` }),
+      );
+      expect(copia.linies.map((l) => l.produir)).toEqual([false, true, false]);
+
+      await fastify.close();
+    });
+
+    it('produir que no és un booleà rebutja amb 400 VALIDACIO', async () => {
+      const fastify = construirServidor();
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [{ producteId: producteFitxaId, unitatsDemanades: 1, produir: 'no' }],
+        },
+      });
+      expect(creada.statusCode).toBe(400);
+      expect(creada.json()).toMatchObject({ error: { codi: 'VALIDACIO' } });
+
+      const valida = cuerpoJson<ComandaDetallApi>(
+        await fastify.inject({
+          method: 'POST',
+          url: '/api/v1/comandes',
+          payload: {
+            dataComanda: '2026-08-01',
+            dataLliurament: '2026-08-30T00:00:00Z',
+            origen: 'manual',
+            linies: [{ producteId: producteFitxaId, unitatsDemanades: 1 }],
+          },
+        }),
+      );
+      const patch = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${valida.id}/linies/${valida.linies[0]!.id}`,
+        payload: { produir: 0 },
+      });
+      expect(patch.statusCode).toBe(400);
+
+      await fastify.close();
+    });
+  });
+
+  describe('tasca 44 — PATCH /comandes/:id amb aplicarDataProduccioALinies (canvi massiu)', () => {
+    async function crearComandaAmbDuesLinies(fastify: ReturnType<typeof construirServidor>) {
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          linies: [
+            {
+              dataProduccio: '2026-08-03T00:00:00Z',
+              producteId: producteFitxaId,
+              unitatsDemanades: 1,
+            },
+            {
+              dataProduccio: '2026-08-04T00:00:00Z',
+              producteId: producteFitxaId,
+              unitatsDemanades: 2,
+            },
+          ],
+        },
+      });
+      expect(creada.statusCode).toBe(201);
+      return cuerpoJson<ComandaDetallApi>(creada);
+    }
+
+    function datesLinies(comanda: ComandaDetallApi): string[] {
+      return comanda.linies.map((l) => new Date(l.dataProduccio!).toISOString());
+    }
+
+    it('amb la marca: canvia la data de la capçalera i de totes les línies, i també l’estat', async () => {
+      const fastify = construirServidor();
+      const comanda = await crearComandaAmbDuesLinies(fastify);
+
+      const res = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comanda.id}`,
+        payload: {
+          estat: 'oberta',
+          dataProduccio: '2026-08-10',
+          aplicarDataProduccioALinies: true,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const actualitzada = cuerpoJson<ComandaDetallApi>(res);
+      expect(actualitzada.estat).toBe('oberta');
+      // La capçalera rep la data sola ("AAAA-MM-DD"), que Postgres desa a la
+      // mitjanit de la zona horària de la sessió: només es comprova que ha
+      // canviat, no l'hora exacta (depèn de la zona de la base de tests).
+      expect(actualitzada.dataProduccio).not.toBe(comanda.dataProduccio);
+      expect(actualitzada.dataProduccio).not.toBeNull();
+      expect(datesLinies(actualitzada)).toEqual([
+        '2026-08-10T00:00:00.000Z',
+        '2026-08-10T00:00:00.000Z',
+      ]);
+
+      await fastify.close();
+    });
+
+    it('sense la marca: les línies conserven la seva data, i moure la capçalera per darrere d’elles rebutja (regla 4)', async () => {
+      const fastify = construirServidor();
+      const comanda = await crearComandaAmbDuesLinies(fastify);
+
+      const res = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comanda.id}`,
+        payload: { dataProduccio: '2026-08-10' },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: { codi: 'VALIDACIO' } });
+
+      await fastify.close();
+    });
+
+    it('la marca sense dataProduccio, o amb dataProduccio null, rebutja amb 400 VALIDACIO', async () => {
+      const fastify = construirServidor();
+      const comanda = await crearComandaAmbDuesLinies(fastify);
+
+      const res = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comanda.id}`,
+        payload: { estat: 'oberta', aplicarDataProduccioALinies: true },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: { codi: 'VALIDACIO' } });
+
+      const ambNull = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comanda.id}`,
+        payload: { dataProduccio: null, aplicarDataProduccioALinies: true },
+      });
+      expect(ambNull.statusCode).toBe(400);
+
+      await fastify.close();
+    });
+
+    it('data posterior a la de lliurament: rebutja i no canvia ni la capçalera ni les línies', async () => {
+      const fastify = construirServidor();
+      const comanda = await crearComandaAmbDuesLinies(fastify);
+
+      const res = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comanda.id}`,
+        payload: { dataProduccio: '2026-09-05', aplicarDataProduccioALinies: true },
+      });
+      expect(res.statusCode).toBe(400);
+
+      const despres = await fastify.inject({
+        method: 'GET',
+        url: `/api/v1/comandes/${comanda.id}`,
+      });
+      expect(datesLinies(cuerpoJson<ComandaDetallApi>(despres))).toEqual(datesLinies(comanda));
+
+      await fastify.close();
+    });
+  });
+
+
+  describe('tasca 53 — núm. comanda WooCommerce', () => {
+    it('POST i PATCH el desen (buit = sense número), la cerca el troba i es rebutja si és massa llarg', async () => {
+      const fastify = construirServidor();
+      const creada = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/comandes',
+        payload: {
+          dataComanda: '2026-08-01',
+          dataLliurament: '2026-08-30T00:00:00Z',
+          origen: 'manual',
+          numWoo: '  T53-777  ',
+          linies: [{ producteId: producteFitxaId, unitatsDemanades: 1 }],
+        },
+      });
+      expect(creada.statusCode).toBe(201);
+      const comanda = cuerpoJson<ComandaDetallApi>(creada);
+      expect(comanda.numWoo).toBe('T53-777');
+
+      const cerca = await fastify.inject({ method: 'GET', url: '/api/v1/comandes?cerca=t53-7' });
+      expect(cuerpoJson<{ dades: { id: number; numWoo: string | null }[] }>(cerca).dades).toEqual([
+        expect.objectContaining({ id: comanda.id, numWoo: 'T53-777' }),
+      ]);
+
+      const editada = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comanda.id}`,
+        payload: { numWoo: 'T53-888' },
+      });
+      expect(editada.statusCode).toBe(200);
+      expect(cuerpoJson<ComandaDetallApi>(editada).numWoo).toBe('T53-888');
+
+      const buidada = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comanda.id}`,
+        payload: { numWoo: '   ' },
+      });
+      expect(cuerpoJson<ComandaDetallApi>(buidada).numWoo).toBeNull();
+
+      const massaLlarg = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/comandes/${comanda.id}`,
+        payload: { numWoo: 'x'.repeat(51) },
+      });
+      expect(massaLlarg.statusCode).toBe(400);
+      expect(massaLlarg.json()).toMatchObject({ error: { codi: 'VALIDACIO' } });
+
+      await fastify.close();
+    });
+  });
+
+
+  describe('punt 35 — GET /comandes?tipusClient=', () => {
+    it('filtra les comandes pel tipus del client', async () => {
+      const fastify = construirServidor();
+      const clients = await entorn.poolTest.query<{ id: string }>(
+        `INSERT INTO client (nom, poblacio, tipus)
+         VALUES ('Fix [redactat]', 'Vic', 'fix'), ('Esporàdic [redactat]', 'Vic', 'esporadic')
+         RETURNING id`,
+      );
+      const comandes = await entorn.poolTest.query<{ id_seq: string }>(
+        `INSERT INTO comanda (origen_id, estat, data_comanda, client_id)
+         SELECT (SELECT id FROM origen_comanda WHERE codi = 'manual'), 'oberta', '2026-11-18', id
+         FROM unnest($1::uuid[]) WITH ORDINALITY AS u(id, ordre)
+         ORDER BY ordre
+         RETURNING id_seq`,
+        [clients.rows.map((fila) => fila.id)],
+      );
+      const [delFix, delEsporadic] = comandes.rows.map((fila) => Number(fila.id_seq));
+
+      const fixos = cuerpoJson<RespostaPaginada<ComandaResumApi>>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/comandes?tipusClient=fix&mida=200' }),
+      );
+      const idsFixos = fixos.dades.map((comanda) => comanda.id);
+      expect(idsFixos).toContain(delFix);
+      expect(idsFixos).not.toContain(delEsporadic);
+
+      const esporadics = cuerpoJson<RespostaPaginada<ComandaResumApi>>(
+        await fastify.inject({
+          method: 'GET',
+          url: '/api/v1/comandes?tipusClient=esporadic&mida=200',
+        }),
+      );
+      const idsEsporadics = esporadics.dades.map((comanda) => comanda.id);
+      expect(idsEsporadics).toContain(delEsporadic);
+      expect(idsEsporadics).not.toContain(delFix);
+
+      const invalid = await fastify.inject({
+        method: 'GET',
+        url: '/api/v1/comandes?tipusClient=habitual',
+      });
+      expect(invalid.statusCode).toBe(400);
       await fastify.close();
     });
   });

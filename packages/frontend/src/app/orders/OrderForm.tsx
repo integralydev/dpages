@@ -1,23 +1,25 @@
 'use client';
 
-import { ChevronDown, ChevronUp, Plus } from 'lucide-react';
+import { calcularDatesPerDefecte } from '@dpages/shared';
+import { ChevronDown, ChevronUp, GripVertical, Plus } from 'lucide-react';
 import {
   forwardRef,
   Fragment,
   useEffect,
   useImperativeHandle,
   useState,
+  type DragEvent,
   type ReactNode,
 } from 'react';
 import { AsyncCombobox, type ComboboxOption } from '@/components/ui/AsyncCombobox';
-import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { DataCard, DataCardField, DataCardGrid } from '@/components/ui/DataCard';
+import { DataCard } from '@/components/ui/DataCard';
 import { DecimalInput } from '@/components/ui/DecimalInput';
 import { IconButton } from '@/components/ui/IconButton';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { TextField } from '@/components/ui/TextField';
 import type { OrderFormValues, OrderLineChanges } from '@/hooks/useOrders';
+import { useProveidors } from '@/hooks/useProveidors';
 import {
   api,
   type ClientApi,
@@ -28,6 +30,7 @@ import {
   type LiniaEdicioApi,
   type OrigenComandaApi,
   type ProducteApi,
+  type ProveidorApi,
   type RespostaPaginada,
   type TarifaResumApi,
   type TransportistaApi,
@@ -36,6 +39,7 @@ import { ESTAT_LABELS } from '@/lib/comandaEstat';
 import { formatDecimal, formatNombre, parseDecimalInput } from '@/lib/decimals';
 import { calculateOrderedWeightKg } from '@/lib/orderCalculations';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
+import { ProveidorLiniaSelect } from './ProveidorLiniaSelect';
 
 const NO_CLIENT = 'Selecciona client...';
 const NO_TARIFF = 'Sense tarifa';
@@ -129,6 +133,8 @@ function createEmptyLine(ordinal: number, dataProduccio: string | null): LineDra
     id: tempLineId--,
     ordinal,
     producte: null,
+    // Punt 55: s'omple amb el preferit en triar l'article (applyProduct).
+    proveidor: null,
     categoria: null,
     format: null,
     envasat: null,
@@ -152,8 +158,42 @@ function createEmptyLine(ordinal: number, dataProduccio: string | null): LineDra
     dataProduccio,
     obsProduccio: '',
     obsEmpaquetat: '',
+    produir: true,
     esborrat: false,
   };
+}
+
+/**
+ * Tasca 57 (17/11/2026): si la línia s'ha de produir. Per defecte sí; es
+ * desmarca quan el producte surt d'estoc (no es fabrica, però s'envia).
+ * Desmarcada, la línia no surt als panells d'Obrador ni de Producció.
+ */
+function ProduirCheckbox({
+  checked,
+  disabled,
+  onChange,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  onChange: (produir: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-gray-700">
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="h-4 w-4 rounded border-gray-300 text-ink disabled:cursor-not-allowed"
+      />
+      Es produeix
+      {!checked && (
+        <span className="text-xs text-gray-500">
+          (surt d&apos;estoc: no apareix a Obrador ni a Producció)
+        </span>
+      )}
+    </label>
+  );
 }
 
 /**
@@ -170,6 +210,8 @@ function toLiniaCreacio(line: LineDraft): LiniaCreacioApi {
     // body de POST/PATCH segueix esperant un JS number.
     unitatsDemanades: Number(line.unitatsDemanades),
     kgDemanats: line.kgEditable ? line.kgDemanats : undefined,
+    // Punt 55: explícit (el preferit ja l'ha posat applyProduct); null = cap.
+    proveidorId: line.proveidor?.id ?? null,
     // Issue #21 — LiniaCreacioApi.dataProduccio torna a admetre null: ja no
     // hi ha cap bloqueig de submit que en garanteixi la presència.
     dataProduccio: line.dataProduccio,
@@ -180,6 +222,8 @@ function toLiniaCreacio(line: LineDraft): LiniaCreacioApi {
     obsProduccio: line.obsProduccio || null,
     // Tasca 7: observació d'empaquetat de la línia.
     obsEmpaquetat: line.obsEmpaquetat || null,
+    // Tasca 57.
+    produir: line.produir,
   };
 }
 
@@ -188,9 +232,11 @@ function toLiniaEdicio(line: LineDraft): LiniaEdicioApi {
   return {
     unitatsDemanades: Number(line.unitatsDemanades),
     kgDemanats: line.kgEditable ? line.kgDemanats : undefined,
+    proveidorId: line.proveidor?.id ?? null,
     dataProduccio: line.dataProduccio,
     obsProduccio: line.obsProduccio || null,
     obsEmpaquetat: line.obsEmpaquetat || null,
+    produir: line.produir,
   };
 }
 
@@ -212,7 +258,10 @@ function dateOnly(value: string | null): string {
 
 /** Únic default real dels 3 camps de data obligatoris (issue #16) — cap dels dos (dataComanda/dataLliurament) té default al backend, ver docblock de ComandaCreacioApi a @dpages/shared. */
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  // Dia d'avui a Catalunya, no en UTC: entre les 00:00 i les 01:00/02:00
+  // l'UTC encara és el dia anterior (i d'aquest dia surten les dates per
+  // defecte del punt 38).
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Madrid' }).format(new Date());
 }
 
 /**
@@ -288,6 +337,7 @@ function applyProduct(line: LineDraft, product: ProducteApi | undefined): LineDr
     return {
       ...line,
       producte: null,
+      proveidor: null,
       categoria: null,
       format: null,
       envasat: null,
@@ -298,6 +348,8 @@ function applyProduct(line: LineDraft, product: ProducteApi | undefined): LineDr
   return {
     ...line,
     producte: { id: product.id, codi: product.codi, descripcio: product.descripcio },
+    // Punt 55: en triar (o canviar) l'article, el seu proveïdor preferit.
+    proveidor: product.proveidorDefecte,
     categoria: product.categoria?.nom ?? null,
     format: product.format,
     envasat: product.envasat,
@@ -360,7 +412,8 @@ function resolvePriceRisk(
 /**
  * Tasca 37 (Ari, 20/10/2026): moure una línia amunt o avall (p. ex. posar
  * un afegit de pollastre amb la resta de pollastre). Botons petits, un
- * sobre l'altre, per no eixamplar la columna d'accions.
+ * sobre l'altre, per no eixamplar la columna d'accions. Només a les
+ * targetes (mòbil), on no es pot arrossegar (18/11/2026).
  */
 function MoveLineButtons({
   disabled,
@@ -402,37 +455,25 @@ function MoveLineButtons({
 function LineFormCard({
   line,
   products,
+  proveidors,
   tarifaId,
   tariffCoverage,
   disabled,
-  headerDates,
   onUpdate,
   onRemove,
   moveButtons,
 }: {
   line: LineDraft;
   products: ProducteApi[];
+  proveidors: ProveidorApi[];
   tarifaId: number | null;
   tariffCoverage: Map<string, TariffCoverageStatus>;
   disabled: boolean;
-  headerDates: {
-    dataComanda: string;
-    dataLliurament: string;
-    dataExpedicio: string;
-    dataProduccio: string;
-  };
   onUpdate: (patch: Partial<LineDraft>) => void;
   onRemove: () => void;
   moveButtons: ReactNode;
 }) {
   const product = products.find((p) => p.id === line.producte?.id);
-  const dateError = validateLineDate(
-    line.dataProduccio,
-    headerDates.dataComanda,
-    headerDates.dataLliurament,
-    headerDates.dataExpedicio,
-    headerDates.dataProduccio,
-  );
   const { risk: priceRisk } = resolvePriceRisk(line, tarifaId, products, tariffCoverage);
   // Línia ja existent (persistida, id>0): PATCH /comandes/:id/linies/:liniaId
   // no accepta producteId — no hi ha manera de comunicar un canvi de
@@ -462,6 +503,12 @@ function LineFormCard({
               el preu més endavant.
             </p>
           )}
+          <ProveidorLiniaSelect
+            value={line.proveidor}
+            proveidors={proveidors}
+            disabled={disabled}
+            onChange={(proveidor) => onUpdate({ proveidor })}
+          />
         </div>
         {moveButtons}
         <IconButton
@@ -473,39 +520,7 @@ function LineFormCard({
         />
       </div>
 
-      <div className="mt-3">
-        <DataCardGrid>
-          <DataCardField label="Categoria">{line.categoria ?? '—'}</DataCardField>
-          <DataCardField label="Format">{line.format ?? '—'}</DataCardField>
-          <DataCardField label="Envasat">{line.envasat ?? '—'}</DataCardField>
-        </DataCardGrid>
-      </div>
-
       <div className="mt-3 grid grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-gray-500">Data producció</span>
-          <input
-            type="date"
-            disabled={disabled}
-            value={line.dataProduccio ? line.dataProduccio.slice(0, 10) : ''}
-            onChange={(event) =>
-              onUpdate({
-                dataProduccio: event.target.value ? `${event.target.value}T00:00:00Z` : null,
-              })
-            }
-            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
-          />
-          {dateError && <span className="text-xs text-red-600">{dateError}</span>}
-          {/* Issue #21 — indicador informatiu, no una incidència: dataProduccio
-              ja no és obligatòria, però una línia ja existent (persistida)
-              sense data assignada val la pena que es noti a primer cop d'ull,
-              en comptes de confondre's amb un input buit qualsevol. Només per
-              a línies ja existents (line.id > 0) — una línia nova encara no
-              tocada no és "un problema", és l'estat inicial normal. */}
-          {line.id > 0 && line.dataProduccio === null && (
-            <Badge variant="neutral">Sense data assignada</Badge>
-          )}
-        </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-xs text-gray-500">Unitats demanades</span>
           <DecimalInput
@@ -524,15 +539,6 @@ function LineFormCard({
             className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-right text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
           />
         </label>
-        {/* Unitats/pes lliurats: sólo lectura acá — únicamente el Panell
-            Empaquetat los edita (PATCH .../linies/:liniaId/lliurament),
-            nunca esta pantalla (regla de negocio confirmada). */}
-        <div className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-gray-500">Unitats lliurades</span>
-          <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-right text-gray-500">
-            {formatDecimal(line.unitatsLliurades, 2)}
-          </span>
-        </div>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-xs text-gray-500">Pes demanat (kg)</span>
           {/* kgEditable es el campo autoritativo del backend (contrato §4.5:
@@ -556,12 +562,6 @@ function LineFormCard({
             />
           )}
         </label>
-        <div className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-gray-500">Pes lliurat (kg)</span>
-          <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-right text-gray-500">
-            {formatDecimal(line.kgLliurats, 3)}
-          </span>
-        </div>
       </div>
 
       <label className="mt-3 flex flex-col gap-1 text-sm">
@@ -584,6 +584,13 @@ function LineFormCard({
           className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
         />
       </label>
+      <div className="mt-3">
+        <ProduirCheckbox
+          checked={line.produir}
+          disabled={disabled}
+          onChange={(produir) => onUpdate({ produir })}
+        />
+      </div>
     </DataCard>
   );
 }
@@ -639,6 +646,8 @@ export const OrderForm = forwardRef<
   },
   ref,
 ) {
+  // Punt 55: proveïdors per al select de cada línia.
+  const { data: proveidors } = useProveidors();
   const [estat, setEstat] = useState<string>(initialData?.estat ?? 'oberta');
   // Creació: cap valor triat encara (null). Edició: arrenca amb l'origen
   // actual del pedido — pot ser "manual" (valor històric, no elegible per
@@ -670,12 +679,20 @@ export const OrderForm = forwardRef<
   // només s'activa en mode creació.
   //
   const [dataComanda, setDataComanda] = useState(initialData?.dataComanda?.slice(0, 10) ?? today());
+  // Punt 38 (17/11/2026): en creació, producció i expedició surten
+  // precarregades segons la Data comanda (dilluns següent — o aquell
+  // mateix dilluns — i el dimarts següent, ver calcularDatesPerDefecte).
+  // Es recalculen si canvia la Data comanda, fins que l'usuari toca a mà
+  // cadascuna d'elles; en edició no hi ha cap valor per defecte.
+  const datesInicials = mode === 'create' ? calcularDatesPerDefecte(dataComanda) : null;
+  const [produccioManual, setProduccioManual] = useState(mode !== 'create');
+  const [expedicioManual, setExpedicioManual] = useState(mode !== 'create');
   // Tasca 15 (01/10/2026): data de producció de CAPÇALERA, camp propi
   // (abans fusionada amb dataComanda). Fa de valor per defecte de les
   // línies (ver addLine i handleHeaderProductionDateChange) i de mínim de
-  // les seves dates. Sense valor per defecte en creació.
+  // les seves dates. En creació, valor per defecte del punt 38.
   const [dataProduccio, setDataProduccio] = useState(
-    initialData?.dataProduccio?.slice(0, 10) ?? '',
+    initialData?.dataProduccio?.slice(0, 10) ?? datesInicials?.dataProduccio ?? '',
   );
   // Issue #16 — passa a OBLIGATÒRIA només en creació (POST /comandes la
   // rebutja buida); en edició segueix sent nullable de veritat a la base
@@ -691,12 +708,15 @@ export const OrderForm = forwardRef<
     initialData?.dataLliurament?.slice(0, 10) ?? '',
   );
   const [dataExpedicio, setDataExpedicio] = useState(
-    initialData?.dataExpedicio?.slice(0, 10) ?? '',
+    initialData?.dataExpedicio?.slice(0, 10) ?? datesInicials?.dataExpedicio ?? '',
   );
   const [bultos, setBultos] = useState(initialData?.bultos ?? 1);
   const [adrecaLliurament, setAdrecaLliurament] = useState(initialData?.adrecaLliurament ?? '');
   const [obsProduccio, setObsProduccio] = useState(initialData?.obsProduccio ?? '');
   const [obsLliurament, setObsLliurament] = useState(initialData?.obsLliurament ?? '');
+  // Tasca 53: «Núm. comanda WooCommerce» (a les de la web, per defecte el
+  // número de la web; editable).
+  const [numWoo, setNumWoo] = useState(initialData?.numWoo ?? '');
   const [lines, setLines] = useState<LineDraft[]>(initialData?.linies ?? []);
   // Qué líneas tiene "tocadas" el usuario en esta sesión de edición — se
   // marca EXPLÍCITAMENTE en el momento de la acción (updateLine/afegir
@@ -744,18 +764,34 @@ export const OrderForm = forwardRef<
   }
 
   // Tasca 15: en canviar la data de producció de capçalera, s'actualitzen
-  // les línies que encara seguien la de capçalera (o no en tenien cap); les
-  // que l'usuari ha canviat a mà es respecten.
-  function handleHeaderProductionDateChange(value: string) {
-    const anterior = dataProduccio;
-    setHeaderTouched(true);
+  // les línies. Tasca 46: des que la fitxa ja no mostra la data de cada
+  // línia, s'actualitzen totes (abans es respectaven les canviades a mà),
+  // igual que el canvi massiu de la tasca 44: si no, una data de línia fora
+  // de rang bloquejaria el desar sense que es pogués corregir des d'aquí.
+  function applyHeaderProductionDate(value: string) {
     setDataProduccio(value);
     for (const line of lines) {
-      const actual = dateOnly(line.dataProduccio);
-      if (actual === '' || actual === anterior) {
+      if (dateOnly(line.dataProduccio) !== value) {
         updateLine(line.id, { dataProduccio: value ? `${value}T00:00:00Z` : null });
       }
     }
+  }
+
+  function handleHeaderProductionDateChange(value: string) {
+    setHeaderTouched(true);
+    setProduccioManual(true);
+    applyHeaderProductionDate(value);
+  }
+
+  // Punt 38: mentre no s'hagin tocat a mà, producció i expedició segueixen
+  // la Data comanda.
+  function handleDataComandaChange(value: string) {
+    setHeaderTouched(true);
+    setDataComanda(value);
+    const dates = calcularDatesPerDefecte(value);
+    if (!dates) return;
+    if (!produccioManual) applyHeaderProductionDate(dates.dataProduccio);
+    if (!expedicioManual) setDataExpedicio(dates.dataExpedicio);
   }
 
   // Tasca 37: la línia nova s'afegeix a dalt de tot, no a baix.
@@ -780,7 +816,86 @@ export const OrderForm = forwardRef<
     setLineOrderTouched(true);
   }
 
-  function renderMoveButtons(line: LineDraft, index: number) {
+  // Tasca 37 (nota de l'Ari): arrossegar la línia amb el ratolí fins on es
+  // vulgui. Tenir alhora fletxes amunt/avall i l'asa confonia (Francesc,
+  // 18/11/2026): a la taula (escriptori) només l'asa; a les targetes
+  // (mòbil), on el drag and drop natiu d'HTML no funciona amb el dit, només
+  // les fletxes.
+  // La línia arrossegada ocupa el lloc de la línia on es deixa anar.
+  const [draggedLineId, setDraggedLineId] = useState<number | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<number | null>(null);
+
+  function moveLineTo(id: number, targetId: number) {
+    if (id === targetId) return;
+    setLines((current) => {
+      const from = current.findIndex((line) => line.id === id);
+      const to = current.findIndex((line) => line.id === targetId);
+      if (from < 0 || to < 0) return current;
+      const next = [...current];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved!);
+      return next;
+    });
+    setLineOrderTouched(true);
+  }
+
+  function endDrag() {
+    setDraggedLineId(null);
+    setDropTargetId(null);
+  }
+
+  /** Handlers per a qualsevol element d'una línia on es pugui deixar anar. */
+  function dropTargetProps(line: LineDraft) {
+    return {
+      onDragOver: (event: DragEvent<HTMLElement>) => {
+        if (draggedLineId === null) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        if (dropTargetId !== line.id) setDropTargetId(line.id);
+      },
+      onDrop: (event: DragEvent<HTMLElement>) => {
+        if (draggedLineId === null) return;
+        event.preventDefault();
+        moveLineTo(draggedLineId, line.id);
+        endDrag();
+      },
+    };
+  }
+
+  /** Classes de la línia mentre s'arrossega: on aniria i la que es mou. */
+  function dragClassName(line: LineDraft) {
+    if (draggedLineId === null) return '';
+    if (line.id === draggedLineId) return 'opacity-50';
+    return line.id === dropTargetId ? 'bg-amber-50' : '';
+  }
+
+  /** Tasca 37: l'asa (⋮⋮) per arrossegar la línia; no n'hi ha si no es pot moure. */
+  function renderMoveButtons(line: LineDraft) {
+    if (isFrozen || lines.length < 2) return null;
+    return (
+      <span
+        draggable
+        title="Arrossega per moure la línia"
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = 'move';
+          // Firefox no arrenca l'arrossegament sense dades.
+          event.dataTransfer.setData('text/plain', String(line.id));
+          const linia = event.currentTarget.closest('[data-linia-arrossegable]');
+          if (linia instanceof HTMLElement) event.dataTransfer.setDragImage(linia, 16, 16);
+          setDraggedLineId(line.id);
+        }}
+        onDragEnd={endDrag}
+        className="flex h-10 w-5 cursor-grab items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 active:cursor-grabbing"
+      >
+        <GripVertical className="h-4 w-4" aria-hidden />
+        <span className="sr-only">Arrossega per moure la línia</span>
+      </span>
+    );
+  }
+
+  /** Tasca 37: fletxes amunt/avall de les targetes (mòbil). */
+  function renderCardMoveButtons(line: LineDraft, index: number) {
+    if (lines.length < 2) return null;
     return (
       <MoveLineButtons
         disabled={isFrozen}
@@ -1030,6 +1145,7 @@ export const OrderForm = forwardRef<
           bultos,
           obsProduccio: obsProduccio || null,
           obsLliurament: obsLliurament || null,
+          numWoo: numWoo.trim() || null,
           poblacioDesti: poblacioDesti || null,
           adrecaLliurament: adrecaLliurament || null,
           estat,
@@ -1176,10 +1292,7 @@ export const OrderForm = forwardRef<
             type="date"
             disabled={isFrozen}
             value={dataComanda}
-            onChange={(event) => {
-              setHeaderTouched(true);
-              setDataComanda(event.target.value);
-            }}
+            onChange={(event) => handleDataComandaChange(event.target.value)}
             error={headerDateErrors.dataComanda}
           />
           {/* Tasca 15: es copia per defecte a les línies (cada línia la pot
@@ -1199,6 +1312,7 @@ export const OrderForm = forwardRef<
             value={dataExpedicio}
             onChange={(event) => {
               setHeaderTouched(true);
+              setExpedicioManual(true);
               setDataExpedicio(event.target.value);
             }}
             error={headerDateErrors.dataExpedicio}
@@ -1211,6 +1325,16 @@ export const OrderForm = forwardRef<
             onChange={(event) => {
               setHeaderTouched(true);
               setDataLliurament(event.target.value);
+            }}
+          />
+          <TextField
+            label="Núm. comanda WooCommerce"
+            disabled={isFrozen}
+            value={numWoo}
+            maxLength={50}
+            onChange={(event) => {
+              setHeaderTouched(true);
+              setNumWoo(event.target.value);
             }}
           />
           <TextField
@@ -1293,73 +1417,74 @@ export const OrderForm = forwardRef<
           </button>
         </div>
 
+        {/* Tasca 46: la data de cada línia ja no es veu a la fitxa. Si alguna
+            queda fora de les dates de la comanda, s'avisa aquí (si no, el
+            botó de desar es bloquejaria sense saber per què). */}
+        {hasLineDateErrors && (
+          <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+            Alguna línia té una data de producció fora de les dates de la comanda. Canvia la Data de
+            producció de la comanda: s&apos;aplica a totes les línies.
+          </p>
+        )}
+
         <div className="flex flex-col gap-3 xl:hidden">
           {lines.map((line, index) => (
-            <LineFormCard
-              key={line.id}
-              line={line}
-              products={products}
-              tarifaId={tarifaId}
-              tariffCoverage={tariffCoverage}
-              disabled={isFrozen}
-              headerDates={{ dataComanda, dataLliurament, dataExpedicio, dataProduccio }}
-              onUpdate={(patch) => updateLine(line.id, patch)}
-              onRemove={() => removeLine(line)}
-              moveButtons={renderMoveButtons(line, index)}
-            />
+            <div key={line.id} className="rounded-xl">
+              <LineFormCard
+                line={line}
+                products={products}
+                proveidors={proveidors}
+                tarifaId={tarifaId}
+                tariffCoverage={tariffCoverage}
+                disabled={isFrozen}
+                onUpdate={(patch) => updateLine(line.id, patch)}
+                onRemove={() => removeLine(line)}
+                moveButtons={renderCardMoveButtons(line, index)}
+              />
+            </div>
           ))}
           <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-right text-sm font-semibold text-gray-900">
             Total pes demanat (kg): {formatNombre(totalOrderedWeightKg, 3)}
           </div>
         </div>
 
-        <div className="hidden overflow-x-auto rounded-lg border border-gray-200 xl:block">
+        {/* Sense overflow-x-auto: amb overflow el contenidor fa de "finestra"
+            del sticky i els títols no es quedarien fixos respecte de la
+            pàgina. La taula és table-fixed w-full, no desborda. */}
+        <div className="hidden rounded-lg border border-gray-200 xl:block">
           <table className="w-full table-fixed text-sm">
-            <thead className="border-b border-gray-200">
+            {/* Títols fixos en fer scroll, just a sota de la barra fixa de la
+                pàgina (--alcada-barra-fixa, ver useAlcadaBarraFixa). La vora
+                inferior va amb ombra: una border-b no es queda enganxada. */}
+            <thead className="sticky top-[var(--alcada-barra-fixa,0px)] z-10 bg-white shadow-[inset_0_-1px_0_theme(colors.gray.200)]">
               <tr>
-                <th className="w-[16%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
+                {/* Tasca 46 (17/11/2026, confirmat pel client): per entrar
+                    comandes més de pressa, les línies només mostren producte,
+                    unitats i pes demanats. Categoria, format, envasat, la data
+                    de producció i el que s'ha lliurat continuen al sistema i
+                    als panells. */}
+                <th className="w-[54%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
                   Producte
                 </th>
-                <th className="w-[10%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
-                  Categoria
-                </th>
-                <th className="w-[8%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
-                  Format
-                </th>
-                <th className="w-[10%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
-                  Envasat
-                </th>
-                <th className="w-[13%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
-                  Data producció
-                </th>
-                <th className="w-[9%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
+                <th className="w-[17%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
                   Unitats demanades
                 </th>
-                <th className="w-[9%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
-                  Unitats lliurades
-                </th>
-                <th className="w-[8%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
+                <th className="w-[17%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
                   Pes demanat (kg)
                 </th>
-                <th className="w-[7%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
-                  Pes lliurat (kg)
-                </th>
-                <th className="w-[10%] px-1.5 py-2" />
+                <th className="w-[12%] px-1.5 py-2" />
               </tr>
             </thead>
             <tbody>
-              {lines.map((line, index) => {
+              {lines.map((line) => {
                 const product = products.find((p) => p.id === line.producte?.id);
-                const lineDateError = validateLineDate(
-                  line.dataProduccio,
-                  dataComanda,
-                  dataLliurament,
-                  dataExpedicio,
-                  dataProduccio,
-                );
                 return (
                   <Fragment key={line.id}>
-                    <tr>
+                    <tr
+                      data-linia-arrossegable
+                      {...dropTargetProps(line)}
+                      className={dragClassName(line)}
+                    >
                       <td className="px-1.5 py-2">
                         <AsyncCombobox
                           value={line.producte?.id ?? null}
@@ -1382,41 +1507,12 @@ export const OrderForm = forwardRef<
                             Sense preu — cal completar més endavant.
                           </p>
                         )}
-                      </td>
-                      <td className="px-1.5 py-2 break-words text-gray-500">
-                        {line.categoria ?? '—'}
-                      </td>
-                      <td className="px-1.5 py-2 break-words text-gray-500">
-                        {line.format ?? '—'}
-                      </td>
-                      <td className="px-1.5 py-2 break-words text-gray-500">
-                        {line.envasat ?? '—'}
-                      </td>
-                      <td className="px-1.5 py-2">
-                        <input
-                          type="date"
+                        <ProveidorLiniaSelect
+                          value={line.proveidor}
+                          proveidors={proveidors}
                           disabled={isFrozen}
-                          value={line.dataProduccio ? line.dataProduccio.slice(0, 10) : ''}
-                          onChange={(event) =>
-                            updateLine(line.id, {
-                              dataProduccio: event.target.value
-                                ? `${event.target.value}T00:00:00Z`
-                                : null,
-                            })
-                          }
-                          className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
+                          onChange={(proveidor) => updateLine(line.id, { proveidor })}
                         />
-                        {lineDateError && (
-                          <p className="mt-1 text-xs text-red-600">{lineDateError}</p>
-                        )}
-                        {/* Issue #21 — mateix criteri que a la vista de card:
-                          indicador informatiu, no una incidència; només per a
-                          línies ja existents (line.id > 0). */}
-                        {line.id > 0 && line.dataProduccio === null && (
-                          <div className="mt-1">
-                            <Badge variant="neutral">Sense data assignada</Badge>
-                          </div>
-                        )}
                       </td>
                       <td className="px-1.5 py-2">
                         <DecimalInput
@@ -1434,10 +1530,6 @@ export const OrderForm = forwardRef<
                           }}
                           className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-right text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
                         />
-                      </td>
-                      {/* Sólo lectura: ver nota de Unitats/Pes lliurades en LineFormCard. */}
-                      <td className="px-1.5 py-2 text-right text-gray-500">
-                        {formatDecimal(line.unitatsLliurades, 2)}
                       </td>
                       <td className="px-1.5 py-2">
                         {!line.kgEditable ? (
@@ -1461,12 +1553,9 @@ export const OrderForm = forwardRef<
                           />
                         )}
                       </td>
-                      <td className="px-1.5 py-2 text-right text-gray-500">
-                        {formatDecimal(line.kgLliurats, 3)}
-                      </td>
                       <td className="px-1.5 py-2">
                         <div className="flex items-center justify-end gap-1">
-                          {renderMoveButtons(line, index)}
+                          {renderMoveButtons(line)}
                           <IconButton
                             variant="delete"
                             label="Eliminar línia"
@@ -1478,8 +1567,11 @@ export const OrderForm = forwardRef<
                     </tr>
                     {/* Observacions a la fila de sota, a tota l'amplada (abans
                       eren dues columnes massa estretes). */}
-                    <tr className="border-b border-gray-100 last:border-0">
-                      <td colSpan={10} className="px-1.5 pb-3">
+                    <tr
+                      {...dropTargetProps(line)}
+                      className={`border-b border-gray-100 last:border-0 ${dragClassName(line)}`}
+                    >
+                      <td colSpan={4} className="px-1.5 pb-3">
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                           <label className="flex flex-col gap-1">
                             <span className="text-xs font-medium text-gray-500">
@@ -1509,6 +1601,13 @@ export const OrderForm = forwardRef<
                               className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
                             />
                           </label>
+                        </div>
+                        <div className="mt-2">
+                          <ProduirCheckbox
+                            checked={line.produir}
+                            disabled={isFrozen}
+                            onChange={(produir) => updateLine(line.id, { produir })}
+                          />
                         </div>
                       </td>
                     </tr>

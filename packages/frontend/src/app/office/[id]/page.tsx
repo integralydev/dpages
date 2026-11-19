@@ -29,7 +29,7 @@ function Field({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function OrderLineCard({ line }: { line: ComandaLiniaApi }) {
+function OrderLineCard({ line, preuLabel }: { line: ComandaLiniaApi; preuLabel: string }) {
   return (
     <DataCard>
       <p className="font-semibold text-gray-900">
@@ -49,11 +49,18 @@ function OrderLineCard({ line }: { line: ComandaLiniaApi }) {
           </DataCardField>
           <DataCardField label="Pes demanat (kg)">{formatKg(line.kgDemanats)}</DataCardField>
           <DataCardField label="Pes lliurat (kg)">{formatKg(line.kgLliurats)}</DataCardField>
-          <DataCardField label="Preu unitari">{formatPrice(line.preuUnitari)}</DataCardField>
+          <DataCardField label={preuLabel}>{formatPrice(line.preuUnitari)}</DataCardField>
           <DataCardField label="Subtotal">
             <span className="font-semibold">{formatPrice(line.totalLinia)}</span>
           </DataCardField>
         </DataCardGrid>
+      </div>
+
+      {/* Tasca 56 (Ari, 17/11/2026): l'observació d'empaquetat de la línia
+          (p. ex. la unitat familiar en cooperatives), que passa als albarans. */}
+      <div className="mt-3 text-sm">
+        <span className="text-xs text-gray-500">Obs. empaquetat</span>
+        <p className="break-words whitespace-pre-line text-gray-900">{line.obsEmpaquetat || '—'}</p>
       </div>
 
       <label className="mt-3 flex items-center gap-2 border-t border-gray-100 pt-3 text-sm text-gray-700">
@@ -113,6 +120,9 @@ export default function OfficeOrderDetailPage() {
     };
   }, [params.id, reloadToken]);
 
+  // Tasca 40: a les comandes per pes, el preu de la línia és per kg.
+  const preuLabel = order?.calculPerPes ? 'Preu/kg' : 'Preu unitari';
+
   return (
     <div>
       <div className="mb-8 flex items-center gap-4">
@@ -150,6 +160,7 @@ export default function OfficeOrderDetailPage() {
             <h2 className="mb-4 text-base font-bold text-gray-900">Capçalera</h2>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <Field label="Núm. comanda" value={order.num} />
+              <Field label="Núm. comanda WooCommerce" value={order.numWoo ?? '—'} />
               <Field
                 label="Estat"
                 value={
@@ -189,7 +200,7 @@ export default function OfficeOrderDetailPage() {
 
             <div className="flex flex-col gap-3 xl:hidden">
               {order.linies.map((line) => (
-                <OrderLineCard key={line.id} line={line} />
+                <OrderLineCard key={line.id} line={line} preuLabel={preuLabel} />
               ))}
             </div>
 
@@ -216,13 +227,17 @@ export default function OfficeOrderDetailPage() {
                       Pes lliurat (kg)
                     </th>
                     <th className="px-3 py-2 text-right font-medium text-gray-500 break-words">
-                      Preu unitari
+                      {preuLabel}
                     </th>
                     <th className="px-3 py-2 text-right font-medium text-gray-500 break-words">
                       Subtotal
                     </th>
                     <th className="px-3 py-2 text-left font-medium text-gray-500 break-words">
                       Obs. producció
+                    </th>
+                    {/* Tasca 56: observació d'empaquetat de la línia, amb el text. */}
+                    <th className="px-3 py-2 text-left font-medium text-gray-500 break-words">
+                      Obs. empaquetat
                     </th>
                   </tr>
                 </thead>
@@ -260,6 +275,9 @@ export default function OfficeOrderDetailPage() {
                           disabled
                           className="h-4 w-4 rounded border-gray-300 text-ink"
                         />
+                      </td>
+                      <td className="px-3 py-2 break-words whitespace-pre-line text-gray-900">
+                        {line.obsEmpaquetat || '—'}
                       </td>
                     </tr>
                   ))}
