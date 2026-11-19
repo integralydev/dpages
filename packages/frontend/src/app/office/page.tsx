@@ -149,6 +149,12 @@ export default function OfficePage() {
   );
   const liniesSenseProduir =
     SENSE_PRODUIR_OPTIONS[senseProduirFilter as keyof typeof SENSE_PRODUIR_OPTIONS] ?? undefined;
+  // Tasca 54 (Ari, 17/11/2026): ordenar per transportista (A-Z) per
+  // preparar les caixes; desmarcat, l'ordre de sempre. Es recorda com els filtres.
+  const [ordrePerTransportista, setOrdrePerTransportista] = useFiltrePersistent(
+    'oficina.ordreTransportista',
+    false,
+  );
 
   const statusCode = useMemo(
     () => Object.entries(ESTAT_LABELS).find(([, label]) => label === statusFilter)?.[0],
@@ -185,6 +191,7 @@ export default function OfficePage() {
       ...(deliveryDateFrom ? { dataLliuramentDes: deliveryDateFrom } : {}),
       ...(deliveryDateTo ? { dataLliuramentFins: deliveryDateTo } : {}),
       ...(liniesSenseProduir !== undefined ? { liniesSenseProduir } : {}),
+      ...(ordrePerTransportista ? { ordre: 'transportista' as const } : {}),
     }),
     [
       orderNumberSearch,
@@ -200,6 +207,7 @@ export default function OfficePage() {
       deliveryDateFrom,
       deliveryDateTo,
       liniesSenseProduir,
+      ordrePerTransportista,
     ],
   );
 
@@ -224,6 +232,7 @@ export default function OfficePage() {
       rangLabel('Data comanda', orderDateFrom, orderDateTo),
       rangLabel('Data expedició', shippingDateFrom, shippingDateTo),
       rangLabel('Data lliurament', deliveryDateFrom, deliveryDateTo),
+      ordrePerTransportista && 'Ordenat per transportista',
     ].filter((label): label is string => Boolean(label));
     try {
       const comandes = await obtenirTotesLesPagines<FilaPanellOficinaApi>((pagina) =>
@@ -355,6 +364,15 @@ export default function OfficePage() {
             onChange={setSenseProduirFilter}
             allLabel={ALL_FEM}
           />
+          <label className="flex items-center gap-2 self-end pb-2 text-sm font-medium text-gray-900">
+            <input
+              type="checkbox"
+              checked={ordrePerTransportista}
+              onChange={(event) => setOrdrePerTransportista(event.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-ink"
+            />
+            Ordenar per transportista
+          </label>
         </div>
         <div className="flex w-full flex-wrap gap-4">
           <SimpleDropdown

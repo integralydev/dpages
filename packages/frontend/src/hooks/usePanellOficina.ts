@@ -33,6 +33,8 @@ export type OfficePanelFilters = {
   dataLliuramentFins?: string;
   /** Tasca 57: comandes amb (`si`) o sense (`no`) línies que no es produeixen. */
   liniesSenseProduir?: 'si' | 'no';
+  /** Tasca 54: per transportista (A-Z); sense valor, l'ordre de sempre. */
+  ordre?: 'transportista';
 };
 
 type UsePanellOficinaResult = {
