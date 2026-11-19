@@ -1,5 +1,6 @@
 'use client';
 
+import { calcularDatesPerDefecte } from '@dpages/shared';
 import { ChevronDown, ChevronUp, GripVertical, Plus } from 'lucide-react';
 import {
   forwardRef,
@@ -18,6 +19,7 @@ import { IconButton } from '@/components/ui/IconButton';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
 import { TextField } from '@/components/ui/TextField';
 import type { OrderFormValues, OrderLineChanges } from '@/hooks/useOrders';
+import { useProveidors } from '@/hooks/useProveidors';
 import {
   api,
   type ClientApi,
@@ -28,6 +30,7 @@ import {
   type LiniaEdicioApi,
   type OrigenComandaApi,
   type ProducteApi,
+  type ProveidorApi,
   type RespostaPaginada,
   type TarifaResumApi,
   type TransportistaApi,
@@ -36,6 +39,7 @@ import { ESTAT_LABELS } from '@/lib/comandaEstat';
 import { formatDecimal, formatNombre, parseDecimalInput } from '@/lib/decimals';
 import { calculateOrderedWeightKg } from '@/lib/orderCalculations';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
+import { ProveidorLiniaSelect } from './ProveidorLiniaSelect';
 
 const NO_CLIENT = 'Selecciona client...';
 const NO_TARIFF = 'Sense tarifa';
@@ -129,6 +133,8 @@ function createEmptyLine(ordinal: number, dataProduccio: string | null): LineDra
     id: tempLineId--,
     ordinal,
     producte: null,
+    // Punt 55: s'omple amb el preferit en triar l'article (applyProduct).
+    proveidor: null,
     categoria: null,
     format: null,
     envasat: null,
@@ -204,6 +210,8 @@ function toLiniaCreacio(line: LineDraft): LiniaCreacioApi {
     // body de POST/PATCH segueix esperant un JS number.
     unitatsDemanades: Number(line.unitatsDemanades),
     kgDemanats: line.kgEditable ? line.kgDemanats : undefined,
+    // Punt 55: explícit (el preferit ja l'ha posat applyProduct); null = cap.
+    proveidorId: line.proveidor?.id ?? null,
     // Issue #21 — LiniaCreacioApi.dataProduccio torna a admetre null: ja no
     // hi ha cap bloqueig de submit que en garanteixi la presència.
     dataProduccio: line.dataProduccio,
@@ -224,6 +232,7 @@ function toLiniaEdicio(line: LineDraft): LiniaEdicioApi {
   return {
     unitatsDemanades: Number(line.unitatsDemanades),
     kgDemanats: line.kgEditable ? line.kgDemanats : undefined,
+    proveidorId: line.proveidor?.id ?? null,
     dataProduccio: line.dataProduccio,
     obsProduccio: line.obsProduccio || null,
     obsEmpaquetat: line.obsEmpaquetat || null,
@@ -249,7 +258,10 @@ function dateOnly(value: string | null): string {
 
 /** Únic default real dels 3 camps de data obligatoris (issue #16) — cap dels dos (dataComanda/dataLliurament) té default al backend, ver docblock de ComandaCreacioApi a @dpages/shared. */
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  // Dia d'avui a Catalunya, no en UTC: entre les 00:00 i les 01:00/02:00
+  // l'UTC encara és el dia anterior (i d'aquest dia surten les dates per
+  // defecte del punt 38).
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Madrid' }).format(new Date());
 }
 
 /**
@@ -325,6 +337,7 @@ function applyProduct(line: LineDraft, product: ProducteApi | undefined): LineDr
     return {
       ...line,
       producte: null,
+      proveidor: null,
       categoria: null,
       format: null,
       envasat: null,
@@ -335,6 +348,8 @@ function applyProduct(line: LineDraft, product: ProducteApi | undefined): LineDr
   return {
     ...line,
     producte: { id: product.id, codi: product.codi, descripcio: product.descripcio },
+    // Punt 55: en triar (o canviar) l'article, el seu proveïdor preferit.
+    proveidor: product.proveidorDefecte,
     categoria: product.categoria?.nom ?? null,
     format: product.format,
     envasat: product.envasat,
@@ -440,6 +455,7 @@ function MoveLineButtons({
 function LineFormCard({
   line,
   products,
+  proveidors,
   tarifaId,
   tariffCoverage,
   disabled,
@@ -449,6 +465,7 @@ function LineFormCard({
 }: {
   line: LineDraft;
   products: ProducteApi[];
+  proveidors: ProveidorApi[];
   tarifaId: number | null;
   tariffCoverage: Map<string, TariffCoverageStatus>;
   disabled: boolean;
@@ -486,6 +503,12 @@ function LineFormCard({
               el preu més endavant.
             </p>
           )}
+          <ProveidorLiniaSelect
+            value={line.proveidor}
+            proveidors={proveidors}
+            disabled={disabled}
+            onChange={(proveidor) => onUpdate({ proveidor })}
+          />
         </div>
         {moveButtons}
         <IconButton
@@ -623,6 +646,8 @@ export const OrderForm = forwardRef<
   },
   ref,
 ) {
+  // Punt 55: proveïdors per al select de cada línia.
+  const { data: proveidors } = useProveidors();
   const [estat, setEstat] = useState<string>(initialData?.estat ?? 'oberta');
   // Creació: cap valor triat encara (null). Edició: arrenca amb l'origen
   // actual del pedido — pot ser "manual" (valor històric, no elegible per
@@ -654,12 +679,20 @@ export const OrderForm = forwardRef<
   // només s'activa en mode creació.
   //
   const [dataComanda, setDataComanda] = useState(initialData?.dataComanda?.slice(0, 10) ?? today());
+  // Punt 38 (17/11/2026): en creació, producció i expedició surten
+  // precarregades segons la Data comanda (dilluns següent — o aquell
+  // mateix dilluns — i el dimarts següent, ver calcularDatesPerDefecte).
+  // Es recalculen si canvia la Data comanda, fins que l'usuari toca a mà
+  // cadascuna d'elles; en edició no hi ha cap valor per defecte.
+  const datesInicials = mode === 'create' ? calcularDatesPerDefecte(dataComanda) : null;
+  const [produccioManual, setProduccioManual] = useState(mode !== 'create');
+  const [expedicioManual, setExpedicioManual] = useState(mode !== 'create');
   // Tasca 15 (01/10/2026): data de producció de CAPÇALERA, camp propi
   // (abans fusionada amb dataComanda). Fa de valor per defecte de les
   // línies (ver addLine i handleHeaderProductionDateChange) i de mínim de
-  // les seves dates. Sense valor per defecte en creació.
+  // les seves dates. En creació, valor per defecte del punt 38.
   const [dataProduccio, setDataProduccio] = useState(
-    initialData?.dataProduccio?.slice(0, 10) ?? '',
+    initialData?.dataProduccio?.slice(0, 10) ?? datesInicials?.dataProduccio ?? '',
   );
   // Issue #16 — passa a OBLIGATÒRIA només en creació (POST /comandes la
   // rebutja buida); en edició segueix sent nullable de veritat a la base
@@ -675,12 +708,15 @@ export const OrderForm = forwardRef<
     initialData?.dataLliurament?.slice(0, 10) ?? '',
   );
   const [dataExpedicio, setDataExpedicio] = useState(
-    initialData?.dataExpedicio?.slice(0, 10) ?? '',
+    initialData?.dataExpedicio?.slice(0, 10) ?? datesInicials?.dataExpedicio ?? '',
   );
   const [bultos, setBultos] = useState(initialData?.bultos ?? 1);
   const [adrecaLliurament, setAdrecaLliurament] = useState(initialData?.adrecaLliurament ?? '');
   const [obsProduccio, setObsProduccio] = useState(initialData?.obsProduccio ?? '');
   const [obsLliurament, setObsLliurament] = useState(initialData?.obsLliurament ?? '');
+  // Tasca 53: «Núm. comanda WooCommerce» (a les de la web, per defecte el
+  // número de la web; editable).
+  const [numWoo, setNumWoo] = useState(initialData?.numWoo ?? '');
   const [lines, setLines] = useState<LineDraft[]>(initialData?.linies ?? []);
   // Qué líneas tiene "tocadas" el usuario en esta sesión de edición — se
   // marca EXPLÍCITAMENTE en el momento de la acción (updateLine/afegir
@@ -732,14 +768,30 @@ export const OrderForm = forwardRef<
   // línia, s'actualitzen totes (abans es respectaven les canviades a mà),
   // igual que el canvi massiu de la tasca 44: si no, una data de línia fora
   // de rang bloquejaria el desar sense que es pogués corregir des d'aquí.
-  function handleHeaderProductionDateChange(value: string) {
-    setHeaderTouched(true);
+  function applyHeaderProductionDate(value: string) {
     setDataProduccio(value);
     for (const line of lines) {
       if (dateOnly(line.dataProduccio) !== value) {
         updateLine(line.id, { dataProduccio: value ? `${value}T00:00:00Z` : null });
       }
     }
+  }
+
+  function handleHeaderProductionDateChange(value: string) {
+    setHeaderTouched(true);
+    setProduccioManual(true);
+    applyHeaderProductionDate(value);
+  }
+
+  // Punt 38: mentre no s'hagin tocat a mà, producció i expedició segueixen
+  // la Data comanda.
+  function handleDataComandaChange(value: string) {
+    setHeaderTouched(true);
+    setDataComanda(value);
+    const dates = calcularDatesPerDefecte(value);
+    if (!dates) return;
+    if (!produccioManual) applyHeaderProductionDate(dates.dataProduccio);
+    if (!expedicioManual) setDataExpedicio(dates.dataExpedicio);
   }
 
   // Tasca 37: la línia nova s'afegeix a dalt de tot, no a baix.
@@ -1093,6 +1145,7 @@ export const OrderForm = forwardRef<
           bultos,
           obsProduccio: obsProduccio || null,
           obsLliurament: obsLliurament || null,
+          numWoo: numWoo.trim() || null,
           poblacioDesti: poblacioDesti || null,
           adrecaLliurament: adrecaLliurament || null,
           estat,
@@ -1239,10 +1292,7 @@ export const OrderForm = forwardRef<
             type="date"
             disabled={isFrozen}
             value={dataComanda}
-            onChange={(event) => {
-              setHeaderTouched(true);
-              setDataComanda(event.target.value);
-            }}
+            onChange={(event) => handleDataComandaChange(event.target.value)}
             error={headerDateErrors.dataComanda}
           />
           {/* Tasca 15: es copia per defecte a les línies (cada línia la pot
@@ -1262,6 +1312,7 @@ export const OrderForm = forwardRef<
             value={dataExpedicio}
             onChange={(event) => {
               setHeaderTouched(true);
+              setExpedicioManual(true);
               setDataExpedicio(event.target.value);
             }}
             error={headerDateErrors.dataExpedicio}
@@ -1274,6 +1325,16 @@ export const OrderForm = forwardRef<
             onChange={(event) => {
               setHeaderTouched(true);
               setDataLliurament(event.target.value);
+            }}
+          />
+          <TextField
+            label="Núm. comanda WooCommerce"
+            disabled={isFrozen}
+            value={numWoo}
+            maxLength={50}
+            onChange={(event) => {
+              setHeaderTouched(true);
+              setNumWoo(event.target.value);
             }}
           />
           <TextField
@@ -1372,6 +1433,7 @@ export const OrderForm = forwardRef<
               <LineFormCard
                 line={line}
                 products={products}
+                proveidors={proveidors}
                 tarifaId={tarifaId}
                 tariffCoverage={tariffCoverage}
                 disabled={isFrozen}
@@ -1445,6 +1507,12 @@ export const OrderForm = forwardRef<
                             Sense preu — cal completar més endavant.
                           </p>
                         )}
+                        <ProveidorLiniaSelect
+                          value={line.proveidor}
+                          proveidors={proveidors}
+                          disabled={isFrozen}
+                          onChange={(proveidor) => updateLine(line.id, { proveidor })}
+                        />
                       </td>
                       <td className="px-1.5 py-2">
                         <DecimalInput

@@ -91,7 +91,8 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
     expect(resultado.liniesNoResoltes).toBe(0);
 
     const comanda = await poolTest.query(
-      `SELECT estat, estat_web, poblacio_desti, total, data_produccio, tarifa_id FROM comanda WHERE id = $1`,
+      `SELECT estat, estat_web, poblacio_desti, total, data_produccio, data_expedicio, tarifa_id
+       FROM comanda WHERE id = $1`,
       [resultado.comandaId],
     );
     // Tarea 38: las de WooCommerce nacen en esborrany.
@@ -100,7 +101,11 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
       estat_web: comandaSimple.status,
       poblacio_desti: comandaSimple.shipping.city,
       total: comandaSimple.total,
-      data_produccio: null, // Tarea 39: dimarts abans de les 16:00.
+      // Punt 38: creada en dimarts 12/05 a les 10:15 (hora local) → producció
+      // el dilluns 18/05 i expedició el dimarts 19/05 (abans, amb el tall de
+      // les 16:00 de la tasca 39, quedava sense data).
+      data_produccio: new Date('2026-05-18T00:00:00Z'),
+      data_expedicio: new Date('2026-05-19T00:00:00Z'),
       // Tarea 42: este esquema no tiene la tarifa 01 → el pedido entra sin
       // tarifa (con aviso en el log), no falla.
       tarifa_id: null,
@@ -118,8 +123,8 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
       pes_fitxa_kg: '1.250',
       pes_calculat_kg: '1.250',
       pes_editable: false,
-      // Tarea 39: creada en dimarts 12/05 a les 10:15 (hora local) → sense data.
-      data_produccio: null,
+      // Punt 38: la línia hereta la producció de la capçalera.
+      data_produccio: new Date('2026-05-18T00:00:00Z'),
       // Tasca 57: les línies de la web es produeixen per defecte.
       produir: true,
     });
@@ -145,7 +150,7 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
     );
     expect(incidencies.rows.map((r) => r.tipus)).toContain('article_no_resolt');
 
-    // Tarea 39: creada en dimecres 03/06 → dilluns 08/06, en todas las líneas.
+    // Punt 38: creada en dimecres 03/06 → dilluns 08/06, en todas las líneas.
     const linies = await poolTest.query<{ data_produccio: Date | null }>(
       `SELECT data_produccio FROM comanda_linia WHERE comanda_id = $1`,
       [resultado.comandaId],
@@ -827,10 +832,13 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
     });
 
     it('línea agregada a una comanda existente con cabecera SIN data_produccio queda en NULL', async () => {
-      // comandaSimple con id propio: cabecera sin data_produccio (mismo
-      // criterio que el primer test del archivo — se crea sin fecha).
+      // Punt 38: toda comanda de WooCommerce nace ya con fecha; oficina
+      // puede borrarla a mano después, que es el caso que se reproduce acá.
       const original = { ...comandaSimple, id: 96003, shipping_lines: ENVIO_DOMICILIO };
       const creado = await conClient((client) => transformarComanda(client, original));
+      await poolTest.query(`UPDATE comanda SET data_produccio = NULL WHERE id = $1`, [
+        creado.comandaId,
+      ]);
       const cabecera = await poolTest.query<{ data_produccio: Date | null }>(
         `SELECT data_produccio FROM comanda WHERE id = $1`,
         [creado.comandaId],
@@ -859,6 +867,45 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
         [creado.comandaId],
       );
       expect(liniaNueva.rows[0]?.data_produccio).toBeNull();
+    });
+  });
+
+  describe('núm. comanda WooCommerce (tasca 53, ampliación de ADR-025)', () => {
+    it('lo rellena con `number` al crear y una actualización posterior no pisa lo que Oficina haya cambiado', async () => {
+      const original = { ...comandaSimple, id: 96010, number: 'W-96010' };
+      const creado = await conClient((client) => transformarComanda(client, original));
+      const numWoo = async () =>
+        (
+          await poolTest.query<{ num_woo: string | null }>(
+            'SELECT num_woo FROM comanda WHERE id = $1',
+            [creado.comandaId],
+          )
+        ).rows[0]!.num_woo;
+      expect(await numWoo()).toBe('W-96010');
+
+      await poolTest.query(`UPDATE comanda SET num_woo = 'CORREGIT' WHERE id = $1`, [
+        creado.comandaId,
+      ]);
+      const actualizado = {
+        ...original,
+        date_modified_gmt: '2026-08-20T10:00:00',
+        number: 'ALTRE',
+      };
+      const resultado = await conClient((client) => transformarComanda(client, actualizado));
+      expect(resultado.actualitzada).toBe(true);
+      expect(await numWoo()).toBe('CORREGIT');
+    });
+
+    it('sin `number` (payload antiguo), usa el id de la web', async () => {
+      const { number: _sinNumber, ...sinNumber } = { ...comandaSimple, id: 96011, number: '' };
+      const creado = await conClient((client) =>
+        transformarComanda(client, sinNumber as typeof comandaSimple),
+      );
+      const fila = await poolTest.query<{ num_woo: string | null }>(
+        'SELECT num_woo FROM comanda WHERE id = $1',
+        [creado.comandaId],
+      );
+      expect(fila.rows[0]!.num_woo).toBe('96011');
     });
   });
 
@@ -1049,6 +1096,43 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
       expect(resultado.comandesLiniesProtegides).toBeGreaterThanOrEqual(1);
       expect(resultado.errors).toBe(0);
     });
+  });
+
+  it("punt 55: la línia nova de la web agafa el proveïdor preferit de l'article, i després no es toca", async () => {
+    const proveidor = await poolTest.query<{ id: string }>(
+      `INSERT INTO proveidor (nom) VALUES ('Proveïdor web') RETURNING id`,
+    );
+    const proveidorId = proveidor.rows[0]!.id;
+    await poolTest.query(`UPDATE producte SET proveidor_defecte_id = $1 WHERE id = $2`, [
+      proveidorId,
+      producteLlomId,
+    ]);
+    try {
+      const comanda = { ...comandaSimple, id: 96155 };
+      const creada = await conClient((client) => transformarComanda(client, comanda));
+      const linia = await poolTest.query<{ id: string; proveidor_id: string | null }>(
+        `SELECT id, proveidor_id FROM comanda_linia WHERE comanda_id = $1`,
+        [creada.comandaId],
+      );
+      expect(linia.rows[0]?.proveidor_id).toBe(proveidorId);
+
+      // Oficina el treu; una actualització posterior de la web no el torna a posar.
+      await poolTest.query(`UPDATE comanda_linia SET proveidor_id = NULL WHERE id = $1`, [
+        linia.rows[0]!.id,
+      ]);
+      await conClient((client) =>
+        transformarComanda(client, { ...comanda, date_modified_gmt: '2026-08-21T10:00:00' }),
+      );
+      const despres = await poolTest.query<{ proveidor_id: string | null }>(
+        `SELECT proveidor_id FROM comanda_linia WHERE id = $1`,
+        [linia.rows[0]!.id],
+      );
+      expect(despres.rows[0]?.proveidor_id).toBeNull();
+    } finally {
+      await poolTest.query(`UPDATE producte SET proveidor_defecte_id = NULL WHERE id = $1`, [
+        producteLlomId,
+      ]);
+    }
   });
 });
 
