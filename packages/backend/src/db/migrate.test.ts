@@ -11,7 +11,7 @@ describe('leerMigraciones', () => {
   it('encuentra las migraciones reales del proyecto, ordenadas', () => {
     const migraciones = leerMigraciones();
     expect(migraciones.map((m) => m.id)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
     ]);
     expect(migraciones[0]?.archivo).toBe('0001_infraestructura_sincronizacion.up.sql');
     expect(migraciones[19]?.archivo).toBe('0020_administrador_transportistes.up.sql');
@@ -20,6 +20,7 @@ describe('leerMigraciones', () => {
     expect(migraciones[22]?.archivo).toBe('0023_estat_esborrany.up.sql');
     expect(migraciones[23]?.archivo).toBe('0024_linies_editades_proteccio.up.sql');
     expect(migraciones[24]?.archivo).toBe('0025_modul_panell_compres.up.sql');
+    expect(migraciones[25]?.archivo).toBe('0026_linia_produir.up.sql');
   });
 });
 
@@ -43,7 +44,7 @@ describe('runner de migraciones (Postgres real, esquema aislado)', () => {
     await client.end();
   });
 
-  it('aplica las 25 migraciones reales del proyecto', async () => {
+  it('aplica las 26 migraciones reales del proyecto', async () => {
     const { aplicadas } = await migrarArriba(client);
     expect(aplicadas).toEqual([
       '0001_infraestructura_sincronizacion.up.sql',
@@ -71,6 +72,7 @@ describe('runner de migraciones (Postgres real, esquema aislado)', () => {
       '0023_estat_esborrany.up.sql',
       '0024_linies_editades_proteccio.up.sql',
       '0025_modul_panell_compres.up.sql',
+      '0026_linia_produir.up.sql',
     ]);
 
     const tablas = await client.query<{ table_name: string }>(
@@ -107,9 +109,9 @@ describe('runner de migraciones (Postgres real, esquema aislado)', () => {
     expect(aplicadas).toEqual([]);
   });
 
-  it('status muestra las 25 migraciones aplicadas y el hash en verde', async () => {
+  it('status muestra las 26 migraciones aplicadas y el hash en verde', async () => {
     const estado = await obtenerEstado(client);
-    expect(estado).toHaveLength(25);
+    expect(estado).toHaveLength(26);
     expect(estado.every((e) => e.aplicada)).toBe(true);
     expect(estado.every((e) => e.hashCoincide)).toBe(true);
     expect(estado.every((e) => e.aplicadaEn !== null)).toBe(true);

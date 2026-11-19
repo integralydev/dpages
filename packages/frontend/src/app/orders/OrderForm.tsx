@@ -152,8 +152,42 @@ function createEmptyLine(ordinal: number, dataProduccio: string | null): LineDra
     dataProduccio,
     obsProduccio: '',
     obsEmpaquetat: '',
+    produir: true,
     esborrat: false,
   };
+}
+
+/**
+ * Tasca 57 (17/11/2026): si la línia s'ha de produir. Per defecte sí; es
+ * desmarca quan el producte surt d'estoc (no es fabrica, però s'envia).
+ * Desmarcada, la línia no surt als panells d'Obrador ni de Producció.
+ */
+function ProduirCheckbox({
+  checked,
+  disabled,
+  onChange,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  onChange: (produir: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-gray-700">
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="h-4 w-4 rounded border-gray-300 text-ink disabled:cursor-not-allowed"
+      />
+      Es produeix
+      {!checked && (
+        <span className="text-xs text-gray-500">
+          (surt d&apos;estoc: no apareix a Obrador ni a Producció)
+        </span>
+      )}
+    </label>
+  );
 }
 
 /**
@@ -180,6 +214,8 @@ function toLiniaCreacio(line: LineDraft): LiniaCreacioApi {
     obsProduccio: line.obsProduccio || null,
     // Tasca 7: observació d'empaquetat de la línia.
     obsEmpaquetat: line.obsEmpaquetat || null,
+    // Tasca 57.
+    produir: line.produir,
   };
 }
 
@@ -191,6 +227,7 @@ function toLiniaEdicio(line: LineDraft): LiniaEdicioApi {
     dataProduccio: line.dataProduccio,
     obsProduccio: line.obsProduccio || null,
     obsEmpaquetat: line.obsEmpaquetat || null,
+    produir: line.produir,
   };
 }
 
@@ -584,6 +621,13 @@ function LineFormCard({
           className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
         />
       </label>
+      <div className="mt-3">
+        <ProduirCheckbox
+          checked={line.produir}
+          disabled={disabled}
+          onChange={(produir) => onUpdate({ produir })}
+        />
+      </div>
     </DataCard>
   );
 }
@@ -1509,6 +1553,13 @@ export const OrderForm = forwardRef<
                               className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
                             />
                           </label>
+                        </div>
+                        <div className="mt-2">
+                          <ProduirCheckbox
+                            checked={line.produir}
+                            disabled={isFrozen}
+                            onChange={(produir) => updateLine(line.id, { produir })}
+                          />
                         </div>
                       </td>
                     </tr>

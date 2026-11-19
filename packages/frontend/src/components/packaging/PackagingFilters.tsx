@@ -35,6 +35,9 @@ const CONFIRMACIO_OPTIONS = {
 // Tasca 23 (01/10/2026): amb / sense observacions de la línia.
 const OBSERVACIONS_OPTIONS = { 'Amb observacions': 'si', 'Sense observacions': 'no' } as const;
 
+// Tasca 57 (17/11/2026): línies que es produeixen / que surten d'estoc.
+const PRODUIR_OPTIONS = { 'Es produeixen': 'si', "Surten d'estoc": 'no' } as const;
+
 function clientLabel(client: ClientApi) {
   return `${client.codi ?? client.id} · ${client.nom ?? ''}`;
 }
@@ -98,6 +101,8 @@ export function usePackagingFilters() {
   const [observacionsFilter, setObservacionsFilter] = useState(ALL_FEM);
   const observacions =
     OBSERVACIONS_OPTIONS[observacionsFilter as keyof typeof OBSERVACIONS_OPTIONS] ?? undefined;
+  const [produirFilter, setProduirFilter] = useState(ALL_FEM);
+  const produir = PRODUIR_OPTIONS[produirFilter as keyof typeof PRODUIR_OPTIONS] ?? undefined;
 
   const categoriaId = useMemo(
     () =>
@@ -149,6 +154,7 @@ export function usePackagingFilters() {
       ...(originCode ? { origen: originCode } : {}),
       ...(confirmacio !== undefined ? { confirmacio } : {}),
       ...(observacions !== undefined ? { observacions } : {}),
+      ...(produir !== undefined ? { produir } : {}),
     }),
     [
       shippingDateFrom,
@@ -162,6 +168,7 @@ export function usePackagingFilters() {
       originCode,
       confirmacio,
       observacions,
+      produir,
     ],
   );
 
@@ -177,6 +184,7 @@ export function usePackagingFilters() {
     setOriginFilter(ALL);
     setConfirmacioFilter(ALL_FEM);
     setObservacionsFilter(ALL_FEM);
+    setProduirFilter(ALL_FEM);
   }
 
   return {
@@ -206,6 +214,8 @@ export function usePackagingFilters() {
       setConfirmacioFilter,
       observacionsFilter,
       setObservacionsFilter,
+      produirFilter,
+      setProduirFilter,
       loadCarrierOptions,
       loadProductOptions,
       clearFilters,
@@ -235,6 +245,13 @@ export function PackagingFilterBar({ state }: { state: PackagingFiltersState }) 
           options={Object.keys(OBSERVACIONS_OPTIONS)}
           value={state.observacionsFilter}
           onChange={state.setObservacionsFilter}
+          allLabel={ALL_FEM}
+        />
+        <SimpleDropdown
+          label="Produir"
+          options={Object.keys(PRODUIR_OPTIONS)}
+          value={state.produirFilter}
+          onChange={state.setProduirFilter}
           allLabel={ALL_FEM}
         />
         <SimpleDropdown

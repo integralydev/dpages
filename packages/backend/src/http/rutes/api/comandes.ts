@@ -203,7 +203,13 @@ interface FilaComandaLinia {
   data_produccio: Date | null;
   obs_produccio: string | null;
   obs_empaquetat: string | null;
+  produir: boolean;
   esborrat: boolean;
+}
+
+/** Tasca 57: `produir` és opcional, però si ve ha de ser un booleà. */
+function esProduirValid(valor: unknown): boolean {
+  return valor === undefined || typeof valor === 'boolean';
 }
 
 function aApiLinia(fila: FilaComandaLinia): ComandaLiniaApi {
@@ -232,6 +238,7 @@ function aApiLinia(fila: FilaComandaLinia): ComandaLiniaApi {
     dataProduccio: formatearDataApi(fila.data_produccio),
     obsProduccio: fila.obs_produccio,
     obsEmpaquetat: fila.obs_empaquetat,
+    produir: fila.produir,
     esborrat: fila.esborrat,
   };
 }
@@ -242,7 +249,7 @@ const SELECT_COMANDA_LINIA = `
          cl.unitats_demanades, cl.pes_calculat_kg AS kg_demanats,
          cl.pes_editable, cl.unitats_lliurades, cl.kg_lliurats, cl.confirmat_a, cl.preu_unitari,
          (cl.unitats_demanades * cl.preu_unitari)::numeric(14,2) AS total_linia,
-         cl.data_produccio, cl.obs_produccio, cl.obs_empaquetat, cl.esborrat
+         cl.data_produccio, cl.obs_produccio, cl.obs_empaquetat, cl.produir, cl.esborrat
   FROM comanda_linia cl
   LEFT JOIN producte p ON p.id = cl.producte_id
   LEFT JOIN categoria_producte cat ON cat.id = p.categoria_id
@@ -649,6 +656,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         dataProduccio?: string | null;
         obsProduccio?: string | null;
         obsEmpaquetat?: string | null;
+        produir?: boolean;
       }[];
     }>;
 
@@ -771,11 +779,18 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
       dataProduccio: string | null;
       obsProduccio: string | null;
       obsEmpaquetat: string | null;
+      produir: boolean;
     }[] = [];
 
     for (let i = 0; i < cos.linies!.length; i++) {
       const linia = cos.linies![i]!;
       const camp = `linies[${i}]`;
+
+      if (!esProduirValid(linia.produir)) {
+        return enviarValidacio(reply, 'El camp produir ha de ser sí o no', [
+          { camp: `${camp}.produir`, missatge: 'ha de ser un booleà' },
+        ]);
+      }
 
       // unitats_demanades pasó de INTEGER a NUMERIC(10,2): admite
       // decimales (entregas/pedidos parciales de pieza), hasta 2 decimales.
@@ -847,6 +862,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         obsProduccio: linia.obsProduccio?.trim() || null,
         // Tasca 7: buida = sense observació.
         obsEmpaquetat: linia.obsEmpaquetat?.trim() || null,
+        produir: linia.produir ?? true,
       });
     }
 
@@ -888,8 +904,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         await client.query(
           `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                        preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-                                       data_produccio, obs_empaquetat, obs_produccio)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                                       data_produccio, obs_empaquetat, obs_produccio, produir)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
           [
             comandaUuid,
             i,
@@ -905,6 +921,7 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             // al FINAL de la lista a propósito — ningún parámetro posicional
             // existente ($1-$10) se desplaza.
             l.obsProduccio,
+            l.produir,
           ],
         );
         if (l.sensePreu) {
@@ -1016,9 +1033,11 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           preu_venda: string | null;
           obs_produccio: string | null;
           obs_empaquetat: string | null;
+          produir: boolean;
         }>(
           `SELECT cl.producte_id, p.id_seq AS producte_id_seq, cl.unitats_demanades,
-                  cl.pes_calculat_kg, p.pes_kg, p.preu_venda, cl.obs_produccio, cl.obs_empaquetat
+                  cl.pes_calculat_kg, p.pes_kg, p.preu_venda, cl.obs_produccio, cl.obs_empaquetat,
+                  cl.produir
            FROM comanda_linia cl
            LEFT JOIN producte p ON p.id = cl.producte_id
            WHERE cl.comanda_id = $1 AND NOT cl.esborrat
@@ -1050,8 +1069,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
           await client.query(
             `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                          preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-                                         obs_produccio, obs_empaquetat)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                                         obs_produccio, obs_empaquetat, produir)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
             [
               novaUuid,
               ordinal,
@@ -1063,6 +1082,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
               pesEditable,
               l.obs_produccio,
               l.obs_empaquetat,
+              // Tasca 57: la còpia manté si la línia es produeix o no.
+              l.produir,
             ],
           );
           if (sensePreu) {
@@ -1406,11 +1427,17 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         dataProduccio: string | null;
         obsProduccio: string | null;
         obsEmpaquetat: string | null;
+        produir: boolean;
       }>;
 
       if (cos.producteId === undefined) {
         return enviarValidacio(reply, 'producteId és obligatori', [
           { camp: 'producteId', missatge: 'és obligatori' },
+        ]);
+      }
+      if (!esProduirValid(cos.produir)) {
+        return enviarValidacio(reply, 'El camp produir ha de ser sí o no', [
+          { camp: 'produir', missatge: 'ha de ser un booleà' },
         ]);
       }
       // Ver nota equivalente en POST /comandes.
@@ -1505,8 +1532,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         await client.query(
           `INSERT INTO comanda_linia (comanda_id, ordinal, producte_id, unitats_demanades,
                                      preu_unitari, pes_fitxa_kg, pes_calculat_kg, pes_editable,
-                                     data_produccio, obs_empaquetat, obs_produccio)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                                     data_produccio, obs_empaquetat, obs_produccio, produir)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
           [
             comandaUuid,
             ordinal,
@@ -1526,6 +1553,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             // columna agregada al FINAL de la lista a propósito — ningún
             // parámetro posicional existente ($1-$10) se desplaza.
             cos.obsProduccio?.trim() || null,
+            // Tasca 57: per defecte, sí.
+            cos.produir ?? true,
           ],
         );
 
@@ -1593,7 +1622,14 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
         dataProduccio: string | null;
         obsProduccio: string | null;
         obsEmpaquetat: string | null;
+        produir: boolean;
       }>;
+
+      if (!esProduirValid(cos.produir)) {
+        return enviarValidacio(reply, 'El camp produir ha de ser sí o no', [
+          { camp: 'produir', missatge: 'ha de ser un booleà' },
+        ]);
+      }
 
       // Ver nota equivalente en POST /comandes.
       if (cos.unitatsDemanades !== undefined && !esUnitatsValides(cos.unitatsDemanades)) {
@@ -1678,7 +1714,8 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
            pes_calculat_kg = CASE WHEN $5 THEN $6 ELSE pes_calculat_kg END,
            data_produccio = CASE WHEN $7 THEN $8 ELSE data_produccio END,
            obs_produccio = CASE WHEN $9 THEN $10 ELSE obs_produccio END,
-           obs_empaquetat = CASE WHEN $11 THEN $12 ELSE obs_empaquetat END
+           obs_empaquetat = CASE WHEN $11 THEN $12 ELSE obs_empaquetat END,
+           produir = CASE WHEN $13 THEN $14 ELSE produir END
          WHERE id_seq = $1 AND comanda_id = $2
          RETURNING id`,
           [
@@ -1695,6 +1732,9 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
             // Tasca 7: buida = sense observació.
             cos.obsEmpaquetat !== undefined,
             cos.obsEmpaquetat?.trim() || null,
+            // Tasca 57.
+            cos.produir !== undefined,
+            cos.produir ?? true,
           ],
         );
         if (!resultat.rows[0]) {

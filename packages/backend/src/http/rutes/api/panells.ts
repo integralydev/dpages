@@ -111,8 +111,14 @@ export async function construirFiltresObrador(
   query: Record<string, unknown>,
 ): Promise<{ condicions: string[]; valors: unknown[] } | null> {
   // Fora: comandes cancel·lades (ver /panells/oficina) i esborranys
-  // (tasca 33: l'esborrany no compta a Obrador ni Empaquetat).
-  const condicions: string[] = ['NOT cl.esborrat', `c.estat NOT IN ('cancellada', 'esborrany')`];
+  // (tasca 33: l'esborrany no compta a Obrador ni Empaquetat). Tasca 57:
+  // fora també les línies que no es produeixen (surten d'estoc) — ni a
+  // les files ni als totals, ni a «marcar tot com a fet».
+  const condicions: string[] = [
+    'NOT cl.esborrat',
+    `c.estat NOT IN ('cancellada', 'esborrany')`,
+    'cl.produir',
+  ];
   const valors: unknown[] = [];
 
   // dataProduccio filtra por la fecha de la LÍNEA (cl.data_produccio), no
@@ -304,6 +310,15 @@ async function construirFiltresEmpaquetat(
     ]);
     return null;
   }
+  // Tasca 57: línies que es produeixen / que surten d'estoc.
+  if (query.produir === 'si') condicions.push('cl.produir');
+  else if (query.produir === 'no') condicions.push('NOT cl.produir');
+  else if (query.produir !== undefined && query.produir !== '') {
+    enviarValidacio(reply, 'produir ha de ser si o no', [
+      { camp: 'produir', missatge: 'ha de ser si o no' },
+    ]);
+    return null;
+  }
   return { condicions, valors };
 }
 
@@ -400,6 +415,19 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
       if (typeof query.poblacioDesti === 'string' && query.poblacioDesti.trim() !== '') {
         condicions.push(`LOWER(c.poblacio_desti) = LOWER($${valors.length + 1})`);
         valors.push(query.poblacioDesti.trim());
+      }
+      // Tasca 57: aquest panell va per comanda, no per línia. `si` = comandes
+      // amb alguna línia que no es produeix (surt d'estoc); `no` = cap.
+      // Els totals de la comanda continuen comptant totes les línies (totes
+      // s'envien).
+      const ambLiniaSenseProduir = `EXISTS (SELECT 1 FROM comanda_linia lsp
+        WHERE lsp.comanda_id = c.id AND NOT lsp.esborrat AND NOT lsp.produir)`;
+      if (query.liniesSenseProduir === 'si') condicions.push(ambLiniaSenseProduir);
+      else if (query.liniesSenseProduir === 'no') condicions.push(`NOT ${ambLiniaSenseProduir}`);
+      else if (query.liniesSenseProduir !== undefined && query.liniesSenseProduir !== '') {
+        return enviarValidacio(reply, 'liniesSenseProduir ha de ser si o no', [
+          { camp: 'liniesSenseProduir', missatge: 'ha de ser si o no' },
+        ]);
       }
       const where = condicions.length > 0 ? `WHERE ${condicions.join(' AND ')}` : '';
 
@@ -769,12 +797,13 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         confirmat_a: Date | null;
         confirmat_per: string | null;
         obs_empaquetat: string | null;
+        produir: boolean;
       }>(
         `SELECT cl.id_seq, c.id_seq AS comanda_id_seq, c.num, c.data_expedicio, c.data_lliurament,
               tr.nom AS transportista_nom, cli.nom AS client_nom, cat.nom AS categoria_nom,
               p.codi, p.descripcio,
               cl.unitats_demanades, cl.pes_calculat_kg AS kg_demanats, cl.unitats_lliurades,
-              cl.kg_lliurats, cl.confirmat_a, cl.confirmat_per, cl.obs_empaquetat
+              cl.kg_lliurats, cl.confirmat_a, cl.confirmat_per, cl.obs_empaquetat, cl.produir
        ${base}
        -- Mismo criterio que /panells/obrador (ver comentario ahí): pendents
        -- (confirmat_a IS NULL) primer, per defecte, sense tocar la resta de
@@ -809,6 +838,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         // no un nombre — no hay ningún directorio del que sacarlo.
         confirmatPer: f.confirmat_per,
         obsEmpaquetat: f.obs_empaquetat,
+        produir: f.produir,
       }));
 
       return {
@@ -964,6 +994,8 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         `c.estat IN ('oberta', 'esborrany')`,
         'cat.elaborat_porc = true',
         'NOT cl.esborrat',
+        // Tasca 57: les línies que surten d'estoc no es produeixen.
+        'cl.produir',
         // agrupacioProduccio/agrupacioRendiment son NO nulables en
         // PanellProduccioFilaApi (contrato) — una línia cuyo producte no
         // tiene agrupació de producció, o cuya categoria no tiene agrupació
@@ -1071,6 +1103,8 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
           `cat.nom = $1`,
           'NOT cl.esborrat',
           `c.estat IN ('oberta', 'esborrany')`,
+          // Tasca 57: mateix criteri que les files del panell.
+          'cl.produir',
         ];
         const valorsCanals: unknown[] = [nomCategoria];
         if (typeof query.dataDes === 'string' && query.dataDes !== '') {
