@@ -104,6 +104,21 @@ Puesta en producción objetivo: **finales de septiembre de 2026**.
   sistema. Desaparece el corte del martes a las 16:00 de la tarea 39
   (03/10/2026), con el que los pedidos del lunes y del martes por la
   mañana quedaban sin fecha.
+- Tipo de cliente (punt 35, reformulado con el cliente el 18/11/2026): cada
+  cliente es «Fix» o «Esporàdic» (todos empiezan como esporádicos; oficina
+  marca los fijos). Se cambia desde el listado de Fitxes de clients sin
+  abrir la ficha, y Comandes tiene un filtro «Tipus de client» para ver los
+  pedidos de los fijos o de los esporádicos. De momento sólo esos dos
+  valores. Sustituye la petición original del punto 35 (pegar una lista de
+  clientes separada por comas).
+- Proveedores (punt 55, reformulado con el cliente el 18/11/2026): tabla de
+  proveedores (de momento sólo el nombre) con su mantenimiento junto a
+  Tarifes y Fitxes de clients. Cada artículo puede tener un «proveïdor
+  preferit» (opcional); cada línea de pedido, un proveedor (opcional) que al
+  elegir el artículo toma el preferido y se puede cambiar. Los pedidos web
+  también lo toman al crearse. El Panell Obrador filtra por proveedor o
+  «Sense proveïdor». Un proveedor se puede borrar sólo si nadie lo usa.
+  Sustituye la petición original del punto 55 (etiquetas libres).
 - El sistema sólo lee de WooCommerce. Nunca escribe de vuelta. La credencial
   de API es de sólo lectura.
 

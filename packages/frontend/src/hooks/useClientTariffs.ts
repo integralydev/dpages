@@ -9,6 +9,7 @@ import {
   type ClientApi,
   type Paginacio,
   type RespostaPaginada,
+  type TipusClient,
 } from '@/lib/api';
 import { usePageClamp } from './usePageClamp';
 
@@ -19,6 +20,8 @@ export type ClientFormValues = {
   nif: string | null;
   email: string | null;
   telefon: string | null;
+  /** Punt 35. */
+  tipus: TipusClient;
 };
 
 export type ClientTariffsFilters = { cerca?: string };
@@ -52,6 +55,8 @@ type UseClientTariffsResult = {
   refetch: () => void;
   createClient: (values: ClientFormValues) => Promise<void>;
   editClient: (id: number, values: ClientFormValues) => Promise<void>;
+  /** Punt 35: canvia només el tipus des del llistat, sense recarregar-lo. */
+  setClientTipus: (id: number, tipus: TipusClient) => Promise<void>;
 };
 
 const MIDA_PER_DEFECTE = 200;
@@ -154,6 +159,7 @@ export function useClientTariffs(
         nif: values.nif,
         email: values.email,
         telefon: values.telefon,
+        tipus: values.tipus,
       };
       if (values.tarifaId !== null) cos.tarifaId = values.tarifaId;
       await api.post<ClientApi>('/clients', cos);
@@ -174,11 +180,17 @@ export function useClientTariffs(
         email: values.email,
         telefon: values.telefon,
         tarifaId: values.tarifaId,
+        tipus: values.tipus,
       });
       refetch();
     },
     [refetch],
   );
+
+  const setClientTipus = useCallback(async (id: number, tipus: TipusClient) => {
+    const actualitzat = await api.patch<ClientApi>(`/clients/${id}`, { tipus });
+    setData((current) => current.map((client) => (client.id === id ? actualitzat : client)));
+  }, []);
 
   return {
     data,
@@ -190,5 +202,6 @@ export function useClientTariffs(
     refetch,
     createClient,
     editClient,
+    setClientTipus,
   };
 }

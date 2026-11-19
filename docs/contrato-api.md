@@ -581,7 +581,7 @@ es idempotente-204, es 404 cuando no hay nada que borrar), o si `tarifaId`/
 
 **`GET /clients`**
 
-Filtros: `?cerca=nom&tarifaId=2&actiu=true`
+Filtros: `?cerca=nom&tarifaId=2&actiu=true&tipus=fix`
 
 ```json
 {
@@ -596,7 +596,8 @@ Filtros: `?cerca=nom&tarifaId=2&actiu=true`
       "poblacio": "Manresa",
       "tarifa": { "id": 2, "nom": "Restaurants" },
       "transportistaDefecte": { "id": 1, "nom": "DHL" },
-      "actiu": true
+      "actiu": true,
+      "tipus": "fix"
     }
   ],
   "paginacio": { "pagina": 1, "mida": 50, "total": 1222, "totalPagines": 25 }
@@ -618,8 +619,16 @@ Filtros: `?cerca=nom&tarifaId=2&actiu=true`
 > acepta como entrada editable, ni al crear ni en `PATCH /clients/:id`
 > después — si llega en el body de cualquiera de los dos, se ignora en
 > silencio.
+>
+> **`tipus` (punt 35, 18/11/2026):** `"fix"` o `"esporadic"` (a pantalla,
+> «Fix» y «Esporàdic»); todos los clientes empiezan como `esporadic` —
+> los que ya existían, los del alta manual y los que crea el sync de
+> WooCommerce. `?tipus=` filtra por ese valor; otro valor → `400 VALIDACIO`.
+> Se cambia desde el listado de clientes sin abrir la ficha
+> (`PATCH /clients/:id` con `{ "tipus": "fix" }`).
 
-**`PATCH /clients/:id`** — para asignar tarifa o transportista. `codi` no es
+**`PATCH /clients/:id`** — para asignar tarifa o transportista, o cambiar el
+`tipus` (`"fix"`/`"esporadic"`; otro valor → `400 VALIDACIO`). `codi` no es
 un campo editable (ver nota de arriba) — mandarlo no produce error, sólo se
 ignora.
 
@@ -631,13 +640,14 @@ WhatsApp, que no traen ningún cliente de WooCommerce que resolver.
   "nom": "Forn del Barri",
   "poblacio": "Vic",
   "tarifaId": 2,
-  "email": "forn@example.com",
-  "telefon": "600222333",
-  "nif": "B87654321"
+  "email": "[redactat]",
+  "telefon": "[redactat]",
+  "nif": "[redactat]",
+  "tipus": "esporadic"
 }
 ```
 
-`nom` y `poblacio` son obligatorios (los campos mínimos del prototipo).
+`tipus` es opcional (por defecto `esporadic`). `nom` y `poblacio` son obligatorios (los campos mínimos del prototipo).
 `tarifaId`, `email`, `telefon` y `nif` son opcionales —
 `email`/`telefon`/`nif` no aparecen en el modal del prototipo, pero hacen
 falta como dato de contacto en los pedidos que no vienen de la web. `codi`
@@ -652,13 +662,14 @@ ya asignado:
   "id": 200,
   "codi": "CLI200",
   "nom": "Forn del Barri",
-  "nif": "B87654321",
-  "email": "forn@example.com",
-  "telefon": "600222333",
+  "nif": "[redactat]",
+  "email": "[redactat]",
+  "telefon": "[redactat]",
   "poblacio": "Vic",
   "tarifa": { "id": 2, "nom": "Restaurants" },
   "transportistaDefecte": null,
-  "actiu": true
+  "actiu": true,
+  "tipus": "esporadic"
 }
 ```
 
@@ -691,7 +702,7 @@ un `codi` repetido responde `409 CONFLICTE`.
 
 **`GET /comandes`**
 
-Filtros: `?estat=oberta&clientId=45&origen=web&dataDes=2026-08-01&dataFins=2026-08-31&dataProduccioDes=&dataProduccioFins=&dataLliuramentDes=&dataLliuramentFins=&cerca=142`
+Filtros: `?estat=oberta&clientId=45&origen=web&dataDes=2026-08-01&dataFins=2026-08-31&dataProduccioDes=&dataProduccioFins=&dataLliuramentDes=&dataLliuramentFins=&cerca=142&tipusClient=fix`
 
 > `dataFins`/`dataProduccioFins`/`dataLliuramentFins` incluyen el día
 > completo — ver "Filtros de rango de fecha" en la sección 2 (capa 36).
@@ -708,6 +719,11 @@ Filtros: `?estat=oberta&clientId=45&origen=web&dataDes=2026-08-01&dataFins=2026-
 > `?clientId=45&clientId=12` = pedidos de cualquiera de esos clientes. Un
 > solo `clientId` funciona igual que antes; un id no numérico → `400
 VALIDACIO`; un id inexistente no coincide con nada (no es error).
+>
+> **`tipusClient` (punt 35, 18/11/2026):** `fix` o `esporadic` = pedidos de
+> los clientes de ese tipus (`ClientApi.tipus`). Un pedido sin cliente no
+> sale con este filtro. Otro valor → `400 VALIDACIO`. Se combina con
+> `clientId` y `cerca` (AND).
 
 ```json
 {

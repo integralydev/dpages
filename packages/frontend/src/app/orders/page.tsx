@@ -19,6 +19,7 @@ import { useFiltrePersistent } from '@/hooks/useFiltrePersistent';
 import { useOrders } from '@/hooks/useOrders';
 import { useOrigensComanda } from '@/hooks/useOrigensComanda';
 import { ESTAT_LABELS, estatBadgeVariant } from '@/lib/comandaEstat';
+import { TIPUS_CLIENT_OPTIONS, tipusClientPerLabel } from '@/lib/tipusClient';
 import {
   api,
   ApiError,
@@ -155,6 +156,12 @@ export default function OrdersPage() {
     'comandes.clients',
     [],
   );
+  // Punt 35 (18/11/2026): comandes dels clients fixos o dels esporàdics.
+  const [tipusClientFilter, setTipusClientFilter] = useFiltrePersistent(
+    'comandes.tipusClient',
+    ALL,
+  );
+  const tipusClient = tipusClientPerLabel(tipusClientFilter);
   const [statusFilter, setStatusFilter] = useFiltrePersistent('comandes.estat', ALL);
   // Filtre d'origen: tots els orígens (també WooCommerce i l'històric
   // "manual"), encara que a mà només es puguin triar els 3 canals manuals.
@@ -216,9 +223,11 @@ export default function OrdersPage() {
         ? { dataLliuramentDes: deliveryDateFilter, dataLliuramentFins: deliveryDateFilter }
         : {}),
       ...(search.trim() ? { cerca: search.trim() } : {}),
+      ...(tipusClient ? { tipusClient } : {}),
     }),
     [
       selectedClients,
+      tipusClient,
       statusCode,
       originCode,
       orderDateFilter,
@@ -245,6 +254,7 @@ export default function OrdersPage() {
     search.trim() && `Cerca: ${search.trim()}`,
     selectedClients.length > 0 &&
       `Client: ${selectedClients.map((client) => client.label).join(', ')}`,
+    tipusClient && `Tipus de client: ${tipusClientFilter}`,
     statusFilter !== ALL && `Estat: ${statusFilter}`,
     originFilter !== ALL && `Origen: ${originFilter}`,
     productionDateFilter && `Data producció: ${formatData(productionDateFilter, false)}`,
@@ -457,45 +467,58 @@ export default function OrdersPage() {
       {printError && <p className="-mt-6 mb-6 text-sm text-red-600">{printError}</p>}
       {duplicateError && <p className="-mt-6 mb-6 text-sm text-red-600">{duplicateError}</p>}
 
+      {/* Punt 35: dues files perquè no quedi tan atapeït — a dalt els
+          filtres de text, client, estat i origen; a baix, les tres dates. */}
       <FilterBar>
-        <SearchInput
-          label="Cerca (núm. comanda, núm. web o client)"
-          value={search}
-          onChange={setSearch}
-        />
-        <MultiCombobox
-          label="Clients"
-          selected={selectedClients}
-          onChange={setSelectedClients}
-          placeholder="Cercar client..."
-          addMorePlaceholder="Afegir un altre client..."
-          loadOptions={loadClientOptions}
-        />
-        <SimpleDropdown
-          label="Estat"
-          options={Object.values(ESTAT_LABELS)}
-          value={statusFilter}
-          onChange={setStatusFilter}
-          allLabel={ALL}
-        />
-        <SimpleDropdown
-          label="Origen"
-          options={origins.map((origin) => origin.nom)}
-          value={originFilter}
-          onChange={setOriginFilter}
-          allLabel={ALL}
-        />
-        <DateInput
-          label="Data producció"
-          value={productionDateFilter}
-          onChange={setProductionDateFilter}
-        />
-        <DateInput label="Data comanda" value={orderDateFilter} onChange={setOrderDateFilter} />
-        <DateInput
-          label="Data lliurament"
-          value={deliveryDateFilter}
-          onChange={setDeliveryDateFilter}
-        />
+        <div className="flex w-full flex-wrap gap-4">
+          <SearchInput
+            label="Cerca (núm. comanda, núm. web o client)"
+            value={search}
+            onChange={setSearch}
+          />
+          <MultiCombobox
+            label="Clients"
+            selected={selectedClients}
+            onChange={setSelectedClients}
+            placeholder="Cercar client..."
+            addMorePlaceholder="Afegir un altre client..."
+            loadOptions={loadClientOptions}
+          />
+          <SimpleDropdown
+            label="Tipus de client"
+            options={TIPUS_CLIENT_OPTIONS.map((opcio) => opcio.label)}
+            value={tipusClientFilter}
+            onChange={setTipusClientFilter}
+            allLabel={ALL}
+          />
+          <SimpleDropdown
+            label="Estat"
+            options={Object.values(ESTAT_LABELS)}
+            value={statusFilter}
+            onChange={setStatusFilter}
+            allLabel={ALL}
+          />
+          <SimpleDropdown
+            label="Origen"
+            options={origins.map((origin) => origin.nom)}
+            value={originFilter}
+            onChange={setOriginFilter}
+            allLabel={ALL}
+          />
+        </div>
+        <div className="flex w-full flex-wrap gap-4">
+          <DateInput
+            label="Data producció"
+            value={productionDateFilter}
+            onChange={setProductionDateFilter}
+          />
+          <DateInput label="Data comanda" value={orderDateFilter} onChange={setOrderDateFilter} />
+          <DateInput
+            label="Data lliurament"
+            value={deliveryDateFilter}
+            onChange={setDeliveryDateFilter}
+          />
+        </div>
       </FilterBar>
 
       {isLoading && <p className="text-sm text-gray-500">Carregant...</p>}

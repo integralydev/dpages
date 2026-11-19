@@ -43,6 +43,7 @@ describe('API negoci — /clients (Postgres real, esquema aislado)', () => {
       tarifa: null,
       transportistaDefecte: null,
       actiu: true,
+      tipus: 'esporadic', // Punt 35: per defecte.
     });
 
     await fastify.close();
@@ -262,6 +263,73 @@ describe('API negoci — /clients (Postgres real, esquema aislado)', () => {
       expect(res.statusCode).toBe(409);
       expect(res.json()).toMatchObject({ error: { codi: 'CONFLICTE' } });
 
+      await fastify.close();
+    });
+  });
+
+  describe('punt 35 — tipus de client', () => {
+    it('PATCH canvia el tipus i GET /clients?tipus= filtra', async () => {
+      const fastify = construirServidor();
+      const res = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/clients/${clientId}`,
+        payload: { tipus: 'fix' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(cuerpoJson<ClientApi>(res).tipus).toBe('fix');
+
+      const fixos = cuerpoJson<RespostaPaginada<ClientApi>>(
+        await fastify.inject({ method: 'GET', url: '/api/v1/clients?tipus=fix' }),
+      );
+      expect(fixos.dades.map((client) => client.id)).toEqual([clientId]);
+
+      const torna = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/clients/${clientId}`,
+        payload: { tipus: 'esporadic' },
+      });
+      expect(cuerpoJson<ClientApi>(torna).tipus).toBe('esporadic');
+      await fastify.close();
+    });
+
+    it('rebutja un tipus que no existeix (PATCH, POST i filtre)', async () => {
+      const fastify = construirServidor();
+      const patch = await fastify.inject({
+        method: 'PATCH',
+        url: `/api/v1/clients/${clientId}`,
+        payload: { tipus: 'habitual' },
+      });
+      expect(patch.statusCode).toBe(400);
+      const post = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/clients',
+        payload: { nom: 'Client [redactat]', poblacio: 'Vic', tipus: 'habitual' },
+      });
+      expect(post.statusCode).toBe(400);
+      const get = await fastify.inject({ method: 'GET', url: '/api/v1/clients?tipus=habitual' });
+      expect(get.statusCode).toBe(400);
+      await fastify.close();
+    });
+
+    it("POST crea esporàdic per defecte, o del tipus que s'indiqui", async () => {
+      const fastify = construirServidor();
+      const perDefecte = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/clients',
+        payload: { nom: 'Client A [redactat]', poblacio: 'Vic' } satisfies ClientCreacioApi,
+      });
+      expect(perDefecte.statusCode).toBe(201);
+      expect(cuerpoJson<ClientApi>(perDefecte).tipus).toBe('esporadic');
+      const fix = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/clients',
+        payload: {
+          nom: 'Client B [redactat]',
+          poblacio: 'Vic',
+          tipus: 'fix',
+        } satisfies ClientCreacioApi,
+      });
+      expect(cuerpoJson<ClientApi>(fix).tipus).toBe('fix');
       await fastify.close();
     });
   });
