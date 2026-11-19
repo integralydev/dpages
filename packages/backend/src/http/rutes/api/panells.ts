@@ -27,6 +27,7 @@ import {
   resolverTarifaUuid,
   resolverTransportistaUuid,
 } from './comu.js';
+import { tancarSiTotLliurat } from './estat-automatic.js';
 
 /**
  * Tasca 45 (Ari, 20/10/2026): `?cercaProducte=` filtra mentre s'escriu,
@@ -737,6 +738,67 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         },
         dades,
       };
+    },
+  );
+
+  // Tasca 51 (Ari, 17/11/2026): «Marcar tot com a lliurat». Mateix criteri
+  // que «marcar totes com a fetes» d'Obrador (tasca 26): totes les línies
+  // PENDENTS que compleixen els filtres actius del panell (els mateixos
+  // paràmetres que GET /panells/empaquetat, construïts per la mateixa
+  // funció), no només les de la pàgina visible. Cada línia queda confirmada
+  // amb el que es va demanar (unitats i kg demanats), igual que si es desés
+  // una per una amb aquests valors: confirmat_a/confirmat_per i el tancament
+  // automàtic de la comanda. La confirmació explícita la fa el diàleg del
+  // frontend, un sol cop per a totes. Les línies de comandes congelades no
+  // es toquen i es compten a part.
+  fastify.post(
+    '/panells/empaquetat/marcar-lliurades',
+    { preHandler: crearGuardaModul('panell-empaquetat') },
+    async (req, reply) => {
+      const filtres = await construirFiltresEmpaquetat(reply, req.query as Record<string, unknown>);
+      if (filtres === null) return;
+      const { condicions, valors } = filtres;
+      const where = [...condicions, 'cl.confirmat_a IS NULL'].join(' AND ');
+
+      // Recompte de congelades, marcatge i tancament de comandes, tot dins
+      // d'una sola transacció: si alguna cosa falla, no queden línies
+      // confirmades amb la comanda encara oberta.
+      const client = await pool.connect();
+      let marcades: { comanda_id: string }[];
+      let congeladesOmeses: number;
+      try {
+        await client.query('BEGIN');
+        const congelades = await client.query<{ n: string }>(
+          `SELECT count(*) AS n ${BASE_EMPAQUETAT} WHERE ${where} AND c.congelat_a IS NOT NULL`,
+          valors,
+        );
+        congeladesOmeses = Number(congelades.rows[0]?.n ?? 0);
+        const resultat = await client.query<{ comanda_id: string }>(
+          `UPDATE comanda_linia AS lin SET
+             unitats_lliurades = lin.unitats_demanades,
+             kg_lliurats = lin.pes_calculat_kg,
+             confirmat_a = now(),
+             confirmat_per = $${valors.length + 1}
+           WHERE lin.id IN (
+             SELECT cl.id ${BASE_EMPAQUETAT} WHERE ${where} AND c.congelat_a IS NULL
+           )
+           RETURNING lin.comanda_id`,
+          [...valors, req.usuari!.uid],
+        );
+        marcades = resultat.rows;
+        // Mateix tancament automàtic que la confirmació d'una sola línia.
+        for (const comandaUuid of new Set(marcades.map((m) => m.comanda_id))) {
+          await tancarSiTotLliurat(client, comandaUuid);
+        }
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw err;
+      } finally {
+        client.release();
+      }
+
+      return { marcades: marcades.length, congeladesOmeses };
     },
   );
 

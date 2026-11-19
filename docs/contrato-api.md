@@ -1567,6 +1567,19 @@ Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramen
 > - `observacions` (tarea 23, 01/10/2026): `si` / `no` — línea con
 >   **observación de empaquetado** (`obsEmpaquetat`, ver abajo).
 >
+> **`POST /panells/empaquetat/marcar-lliurades`** (tarea 51, 17/11/2026) —
+> mismo criterio que `POST /panells/obrador/marcar-fets`: acepta **los
+> mismos filtros** que `GET /panells/empaquetat` como query string y
+> confirma **todas** las líneas pendientes (`confirmatA` nulo) que los
+> cumplen, no sólo una página, con `unitatsLliurades` = unidades pedidas y
+> `kgLliurats` = kg pedidos (`confirmatA` = ahora, `confirmatPer` = el
+> usuario), como si se guardaran una a una. Cierra los pedidos que queden
+> con todo entregado (igual que `PATCH .../lliurament`). Las de pedidos
+> congelados se dejan igual. Sin filtro mínimo a propósito (Francesc,
+> 17/11/2026): sin filtros marca todas las pendientes; el diálogo de
+> confirmación del frontend ya muestra cuántas son. Respuesta: `{ "marcades": 34,
+"congeladesOmeses": 0 }`. Exige el mòdul `panell-empaquetat`.
+>
 > **`obsEmpaquetat`** (tarea 7, 01/10/2026, migración `0022`): observación
 > de empaquetado a nivel de **línea** de pedido (por ejemplo, la unidad
 > familiar a la que va el producto). Cada fila del panel la trae (`null` si
