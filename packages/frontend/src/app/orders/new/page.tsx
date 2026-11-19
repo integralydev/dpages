@@ -13,6 +13,7 @@ import { useOrigensComanda } from '@/hooks/useOrigensComanda';
 import { useRates } from '@/hooks/useRates';
 import type { ComandaDetallApi } from '@/lib/api';
 import { OrderForm, type OrderFormHandle } from '../OrderForm';
+import { useAlcadaBarraFixa } from '@/hooks/useAlcadaBarraFixa';
 
 export default function NewOrderPage() {
   const router = useRouter();
@@ -23,6 +24,8 @@ export default function NewOrderPage() {
   const { data: products } = useCatalog();
   const { data: origins } = useOrigensComanda();
   const formRef = useRef<OrderFormHandle>(null);
+  // Alçada de la barra fixa, per als títols fixos de les línies (OrderForm).
+  const { mesurar: mesurarBarraFixa, estil: estilBarraFixa } = useAlcadaBarraFixa();
   const [error, setError] = useState<string | null>(null);
   const [createdOrder, setCreatedOrder] = useState<ComandaDetallApi | null>(null);
   const [patchWarning, setPatchWarning] = useState<string | null>(null);
@@ -58,14 +61,17 @@ export default function NewOrderPage() {
   }
 
   return (
-    <div>
+    <div style={estilBarraFixa}>
       {/* Issue #15 — sticky, no fixed: manté el mateix ample/columna que la
           resta de la pàgina (dins del padding de <main>), no cal cap
           marge negatiu. top-14 a mòbil deixa lloc a la barra fixa del
           Sidebar (h-14, ver Sidebar.tsx); lg:top-0 perquè en desktop no hi
           ha cap barra per sobre. bg-[var(--background)] evita que el
           contingut que scrolleja per sota es vegi a través. */}
-      <div className="sticky top-14 z-20 mb-8 flex flex-wrap items-center justify-between gap-4 bg-[var(--background)] py-3 lg:top-0">
+      <div
+        ref={mesurarBarraFixa}
+        className="sticky top-14 z-20 mb-8 flex flex-wrap items-center justify-between gap-4 bg-[var(--background)] py-3 lg:top-0"
+      >
         <div className="flex items-center gap-4">
           <GuardedLink
             href="/orders"

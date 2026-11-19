@@ -10,9 +10,8 @@ import {
   type ReactNode,
 } from 'react';
 import { AsyncCombobox, type ComboboxOption } from '@/components/ui/AsyncCombobox';
-import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { DataCard, DataCardField, DataCardGrid } from '@/components/ui/DataCard';
+import { DataCard } from '@/components/ui/DataCard';
 import { DecimalInput } from '@/components/ui/DecimalInput';
 import { IconButton } from '@/components/ui/IconButton';
 import { SimpleDropdown } from '@/components/ui/SimpleDropdown';
@@ -442,7 +441,6 @@ function LineFormCard({
   tarifaId,
   tariffCoverage,
   disabled,
-  headerDates,
   onUpdate,
   onRemove,
   moveButtons,
@@ -452,24 +450,11 @@ function LineFormCard({
   tarifaId: number | null;
   tariffCoverage: Map<string, TariffCoverageStatus>;
   disabled: boolean;
-  headerDates: {
-    dataComanda: string;
-    dataLliurament: string;
-    dataExpedicio: string;
-    dataProduccio: string;
-  };
   onUpdate: (patch: Partial<LineDraft>) => void;
   onRemove: () => void;
   moveButtons: ReactNode;
 }) {
   const product = products.find((p) => p.id === line.producte?.id);
-  const dateError = validateLineDate(
-    line.dataProduccio,
-    headerDates.dataComanda,
-    headerDates.dataLliurament,
-    headerDates.dataExpedicio,
-    headerDates.dataProduccio,
-  );
   const { risk: priceRisk } = resolvePriceRisk(line, tarifaId, products, tariffCoverage);
   // Línia ja existent (persistida, id>0): PATCH /comandes/:id/linies/:liniaId
   // no accepta producteId — no hi ha manera de comunicar un canvi de
@@ -510,39 +495,7 @@ function LineFormCard({
         />
       </div>
 
-      <div className="mt-3">
-        <DataCardGrid>
-          <DataCardField label="Categoria">{line.categoria ?? '—'}</DataCardField>
-          <DataCardField label="Format">{line.format ?? '—'}</DataCardField>
-          <DataCardField label="Envasat">{line.envasat ?? '—'}</DataCardField>
-        </DataCardGrid>
-      </div>
-
       <div className="mt-3 grid grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-gray-500">Data producció</span>
-          <input
-            type="date"
-            disabled={disabled}
-            value={line.dataProduccio ? line.dataProduccio.slice(0, 10) : ''}
-            onChange={(event) =>
-              onUpdate({
-                dataProduccio: event.target.value ? `${event.target.value}T00:00:00Z` : null,
-              })
-            }
-            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
-          />
-          {dateError && <span className="text-xs text-red-600">{dateError}</span>}
-          {/* Issue #21 — indicador informatiu, no una incidència: dataProduccio
-              ja no és obligatòria, però una línia ja existent (persistida)
-              sense data assignada val la pena que es noti a primer cop d'ull,
-              en comptes de confondre's amb un input buit qualsevol. Només per
-              a línies ja existents (line.id > 0) — una línia nova encara no
-              tocada no és "un problema", és l'estat inicial normal. */}
-          {line.id > 0 && line.dataProduccio === null && (
-            <Badge variant="neutral">Sense data assignada</Badge>
-          )}
-        </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-xs text-gray-500">Unitats demanades</span>
           <DecimalInput
@@ -561,15 +514,6 @@ function LineFormCard({
             className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-right text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
           />
         </label>
-        {/* Unitats/pes lliurats: sólo lectura acá — únicamente el Panell
-            Empaquetat los edita (PATCH .../linies/:liniaId/lliurament),
-            nunca esta pantalla (regla de negocio confirmada). */}
-        <div className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-gray-500">Unitats lliurades</span>
-          <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-right text-gray-500">
-            {formatDecimal(line.unitatsLliurades, 2)}
-          </span>
-        </div>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-xs text-gray-500">Pes demanat (kg)</span>
           {/* kgEditable es el campo autoritativo del backend (contrato §4.5:
@@ -593,12 +537,6 @@ function LineFormCard({
             />
           )}
         </label>
-        <div className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-gray-500">Pes lliurat (kg)</span>
-          <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-right text-gray-500">
-            {formatDecimal(line.kgLliurats, 3)}
-          </span>
-        </div>
       </div>
 
       <label className="mt-3 flex flex-col gap-1 text-sm">
@@ -788,15 +726,15 @@ export const OrderForm = forwardRef<
   }
 
   // Tasca 15: en canviar la data de producció de capçalera, s'actualitzen
-  // les línies que encara seguien la de capçalera (o no en tenien cap); les
-  // que l'usuari ha canviat a mà es respecten.
+  // les línies. Tasca 46: des que la fitxa ja no mostra la data de cada
+  // línia, s'actualitzen totes (abans es respectaven les canviades a mà),
+  // igual que el canvi massiu de la tasca 44: si no, una data de línia fora
+  // de rang bloquejaria el desar sense que es pogués corregir des d'aquí.
   function handleHeaderProductionDateChange(value: string) {
-    const anterior = dataProduccio;
     setHeaderTouched(true);
     setDataProduccio(value);
     for (const line of lines) {
-      const actual = dateOnly(line.dataProduccio);
-      if (actual === '' || actual === anterior) {
+      if (dateOnly(line.dataProduccio) !== value) {
         updateLine(line.id, { dataProduccio: value ? `${value}T00:00:00Z` : null });
       }
     }
@@ -1337,6 +1275,16 @@ export const OrderForm = forwardRef<
           </button>
         </div>
 
+        {/* Tasca 46: la data de cada línia ja no es veu a la fitxa. Si alguna
+            queda fora de les dates de la comanda, s'avisa aquí (si no, el
+            botó de desar es bloquejaria sense saber per què). */}
+        {hasLineDateErrors && (
+          <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+            Alguna línia té una data de producció fora de les dates de la comanda. Canvia la Data de
+            producció de la comanda: s&apos;aplica a totes les línies.
+          </p>
+        )}
+
         <div className="flex flex-col gap-3 xl:hidden">
           {lines.map((line, index) => (
             <LineFormCard
@@ -1346,7 +1294,6 @@ export const OrderForm = forwardRef<
               tarifaId={tarifaId}
               tariffCoverage={tariffCoverage}
               disabled={isFrozen}
-              headerDates={{ dataComanda, dataLliurament, dataExpedicio, dataProduccio }}
               onUpdate={(patch) => updateLine(line.id, patch)}
               onRemove={() => removeLine(line)}
               moveButtons={renderMoveButtons(line, index)}
@@ -1357,50 +1304,36 @@ export const OrderForm = forwardRef<
           </div>
         </div>
 
-        <div className="hidden overflow-x-auto rounded-lg border border-gray-200 xl:block">
+        {/* Sense overflow-x-auto: amb overflow el contenidor fa de "finestra"
+            del sticky i els títols no es quedarien fixos respecte de la
+            pàgina. La taula és table-fixed w-full, no desborda. */}
+        <div className="hidden rounded-lg border border-gray-200 xl:block">
           <table className="w-full table-fixed text-sm">
-            <thead className="border-b border-gray-200">
+            {/* Títols fixos en fer scroll, just a sota de la barra fixa de la
+                pàgina (--alcada-barra-fixa, ver useAlcadaBarraFixa). La vora
+                inferior va amb ombra: una border-b no es queda enganxada. */}
+            <thead className="sticky top-[var(--alcada-barra-fixa,0px)] z-10 bg-white shadow-[inset_0_-1px_0_theme(colors.gray.200)]">
               <tr>
-                <th className="w-[16%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
+                {/* Tasca 46 (17/11/2026, confirmat pel client): per entrar
+                    comandes més de pressa, les línies només mostren producte,
+                    unitats i pes demanats. Categoria, format, envasat, la data
+                    de producció i el que s'ha lliurat continuen al sistema i
+                    als panells. */}
+                <th className="w-[54%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
                   Producte
                 </th>
-                <th className="w-[10%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
-                  Categoria
-                </th>
-                <th className="w-[8%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
-                  Format
-                </th>
-                <th className="w-[10%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
-                  Envasat
-                </th>
-                <th className="w-[13%] px-1.5 py-2 text-left font-medium text-gray-500 break-words">
-                  Data producció
-                </th>
-                <th className="w-[9%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
+                <th className="w-[17%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
                   Unitats demanades
                 </th>
-                <th className="w-[9%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
-                  Unitats lliurades
-                </th>
-                <th className="w-[8%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
+                <th className="w-[17%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
                   Pes demanat (kg)
                 </th>
-                <th className="w-[7%] px-1.5 py-2 text-right font-medium text-gray-500 break-words">
-                  Pes lliurat (kg)
-                </th>
-                <th className="w-[10%] px-1.5 py-2" />
+                <th className="w-[12%] px-1.5 py-2" />
               </tr>
             </thead>
             <tbody>
               {lines.map((line, index) => {
                 const product = products.find((p) => p.id === line.producte?.id);
-                const lineDateError = validateLineDate(
-                  line.dataProduccio,
-                  dataComanda,
-                  dataLliurament,
-                  dataExpedicio,
-                  dataProduccio,
-                );
                 return (
                   <Fragment key={line.id}>
                     <tr>
@@ -1427,41 +1360,6 @@ export const OrderForm = forwardRef<
                           </p>
                         )}
                       </td>
-                      <td className="px-1.5 py-2 break-words text-gray-500">
-                        {line.categoria ?? '—'}
-                      </td>
-                      <td className="px-1.5 py-2 break-words text-gray-500">
-                        {line.format ?? '—'}
-                      </td>
-                      <td className="px-1.5 py-2 break-words text-gray-500">
-                        {line.envasat ?? '—'}
-                      </td>
-                      <td className="px-1.5 py-2">
-                        <input
-                          type="date"
-                          disabled={isFrozen}
-                          value={line.dataProduccio ? line.dataProduccio.slice(0, 10) : ''}
-                          onChange={(event) =>
-                            updateLine(line.id, {
-                              dataProduccio: event.target.value
-                                ? `${event.target.value}T00:00:00Z`
-                                : null,
-                            })
-                          }
-                          className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
-                        />
-                        {lineDateError && (
-                          <p className="mt-1 text-xs text-red-600">{lineDateError}</p>
-                        )}
-                        {/* Issue #21 — mateix criteri que a la vista de card:
-                          indicador informatiu, no una incidència; només per a
-                          línies ja existents (line.id > 0). */}
-                        {line.id > 0 && line.dataProduccio === null && (
-                          <div className="mt-1">
-                            <Badge variant="neutral">Sense data assignada</Badge>
-                          </div>
-                        )}
-                      </td>
                       <td className="px-1.5 py-2">
                         <DecimalInput
                           disabled={isFrozen}
@@ -1478,10 +1376,6 @@ export const OrderForm = forwardRef<
                           }}
                           className="w-full rounded-md border border-gray-300 px-1.5 py-1 text-right text-sm text-gray-900 focus:border-brand focus:outline-none disabled:bg-gray-50 disabled:text-gray-400"
                         />
-                      </td>
-                      {/* Sólo lectura: ver nota de Unitats/Pes lliurades en LineFormCard. */}
-                      <td className="px-1.5 py-2 text-right text-gray-500">
-                        {formatDecimal(line.unitatsLliurades, 2)}
                       </td>
                       <td className="px-1.5 py-2">
                         {!line.kgEditable ? (
@@ -1505,9 +1399,6 @@ export const OrderForm = forwardRef<
                           />
                         )}
                       </td>
-                      <td className="px-1.5 py-2 text-right text-gray-500">
-                        {formatDecimal(line.kgLliurats, 3)}
-                      </td>
                       <td className="px-1.5 py-2">
                         <div className="flex items-center justify-end gap-1">
                           {renderMoveButtons(line, index)}
@@ -1523,7 +1414,7 @@ export const OrderForm = forwardRef<
                     {/* Observacions a la fila de sota, a tota l'amplada (abans
                       eren dues columnes massa estretes). */}
                     <tr className="border-b border-gray-100 last:border-0">
-                      <td colSpan={10} className="px-1.5 pb-3">
+                      <td colSpan={4} className="px-1.5 pb-3">
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                           <label className="flex flex-col gap-1">
                             <span className="text-xs font-medium text-gray-500">
