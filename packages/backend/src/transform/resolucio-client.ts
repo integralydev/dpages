@@ -12,7 +12,9 @@ type Consultable = Pool | PoolClient | Client;
  * `nif` nunca puede aparecer como "el otro índice que chocó": si `nif` no
  * es null, siempre es el target de `ON CONFLICT` de este mismo upsert (ver
  * `columnaConflicto` más abajo), así que un choque contra `idx_client_nif`
- * ya lo resuelve Postgres solo, nunca llega a lanzar.
+ * ya lo resuelve Postgres solo, nunca llega a lanzar. (`'nif'` sí puede
+ * llegar como conflicto por otro camino: la carrera que comprueba el
+ * UPDATE de `resolverOCrearClient`.)
  */
 const INDEXS_UNICS_CLIENT: Record<string, 'nif' | 'email' | 'woo_customer_id'> = {
   idx_client_nif: 'nif',
@@ -59,10 +61,55 @@ function extraerMetaData(metaData: WooMetaData[], clau: string): string | null {
  * `transform/idioma.ts`: documentada, no silenciosa).
  */
 function extraerNif(wooOrder: WooOrder): string | null {
-  return (
+  const nif =
     extraerMetaData(wooOrder.meta_data, 'nif') ??
-    extraerMetaData(wooOrder.meta_data, '_billing_myfield5')
+    extraerMetaData(wooOrder.meta_data, '_billing_myfield5');
+  // Un "NIF" sin ninguna letra ni cifra ("-", ".") no identifica a nadie.
+  return nif !== null && /[A-Za-z0-9]/.test(nif) ? nif : null;
+}
+
+/**
+ * Forma normalizada del NIF para COMPARAR (nunca para guardar: se guarda
+ * tal cual llegó): mayúsculas y sólo letras y cifras. Así `B-43.123.456`,
+ * `b43123456` y `B 43123456` son el mismo cliente (incidencia de las
+ * comandas web sin cliente, 23/11/2026).
+ */
+const NIF_NORMALITZAT = (expressio: string): string =>
+  `upper(regexp_replace(${expressio}, '[^A-Za-z0-9]', '', 'g'))`;
+
+/**
+ * Busca el cliente ya registrado de un pedido que trae NIF, antes del
+ * upsert (que sólo compara el NIF exacto):
+ *
+ * 1. Por NIF normalizado — el mismo NIF escrito distinto.
+ * 2. Si no, por email, pero sólo si ese cliente todavía NO tiene NIF (su
+ *    primer pedido llegó sin NIF, o lo dio de alta oficina sin él): es el
+ *    mismo cliente y este pedido le completa el NIF. Si el cliente del
+ *    email tiene OTRO NIF no se resuelve acá: sigue siendo un conflicto de
+ *    identidad (ADR-023), pendiente del criterio del cliente (P-11).
+ *
+ * Sólo lee; el que escribe es quien llama, dentro de su SAVEPOINT.
+ */
+async function cercarClientPerNif(
+  client: Consultable,
+  nif: string,
+  email: string | null,
+): Promise<string | null> {
+  const perNif = await client.query<{ id: string }>(
+    `SELECT id FROM client
+     WHERE nif IS NOT NULL AND ${NIF_NORMALITZAT('nif')} = ${NIF_NORMALITZAT('$1')}
+     ORDER BY (nif = $1) DESC, id_seq
+     LIMIT 1`,
+    [nif],
   );
+  if (perNif.rows[0]) return perNif.rows[0].id;
+
+  if (email === null) return null;
+  const perEmail = await client.query<{ id: string }>(
+    `SELECT id FROM client WHERE lower(email) = $1 AND nif IS NULL ORDER BY id_seq LIMIT 1`,
+    [email],
+  );
+  return perEmail.rows[0]?.id ?? null;
 }
 
 function extraerEmail(wooOrder: WooOrder): string | null {
@@ -84,7 +131,8 @@ function extraerOpcional(valor: string | undefined): string | null {
  * Resuelve el cliente de un pedido — primero por NIF, si no por email
  * (criterio confirmado para esta capa). `null` si no hay ninguno de los
  * dos (en la práctica, casi nunca: el email tiene 100% de cobertura en los
- * pedidos reales).
+ * pedidos reales). Con NIF, antes del upsert se busca el cliente por NIF
+ * normalizado y, si no, por email sin NIF (`cercarClientPerNif`).
  *
  * Upsert atómico (`INSERT ... ON CONFLICT`), no "SELECT y después INSERT":
  * dos pedidos del MISMO cliente nuevo pueden procesarse casi al mismo
@@ -127,11 +175,30 @@ export async function resolverOCrearClient(
   // transacción entera.
   await client.query('SAVEPOINT resolucio_client');
   try {
-    const res = await client.query<{ id: string; id_seq: string }>(
-      // Tarea 42: un cliente nuevo de la web nace con la tarifa 01. El
-      // `DO UPDATE` no toca `tarifa_id` a propósito: la tarifa de un cliente
-      // que ya existía (con otra o sin ninguna) no se cambia.
-      `INSERT INTO client (nif, email, nom, telefon, poblacio, woo_customer_id, es_convidat, tarifa_id)
+    const existent = nif !== null ? await cercarClientPerNif(client, nif, email) : null;
+    // Mismo criterio que el `DO UPDATE` de abajo: sólo completa huecos.
+    // Rellenar un hueco (p. ej. el email) todavía puede chocar con otro
+    // cliente — lo captura el mismo catch como conflicto de identidad.
+    const res =
+      existent !== null
+        ? await client.query<{ id: string; id_seq: string }>(
+            `UPDATE client SET
+               nif = COALESCE(nif, $2),
+               email = COALESCE(email, $3),
+               nom = COALESCE(nom, $4),
+               telefon = COALESCE(telefon, $5),
+               poblacio = COALESCE(poblacio, $6),
+               woo_customer_id = COALESCE(woo_customer_id, $7)
+             WHERE id = $1
+               AND (nif IS NULL OR ${NIF_NORMALITZAT('nif')} = ${NIF_NORMALITZAT('$2')})
+             RETURNING id, id_seq`,
+            [existent, ...valores.slice(0, 6)],
+          )
+        : await client.query<{ id: string; id_seq: string }>(
+            // Tarea 42: un cliente nuevo de la web nace con la tarifa 01. El
+            // `DO UPDATE` no toca `tarifa_id` a propósito: la tarifa de un cliente
+            // que ya existía (con otra o sin ninguna) no se cambia.
+            `INSERT INTO client (nif, email, nom, telefon, poblacio, woo_customer_id, es_convidat, tarifa_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT id FROM tarifa WHERE codi = $8))
        ON CONFLICT (${columnaConflicto}) WHERE ${columnaConflicto} IS NOT NULL DO UPDATE SET
          nif = COALESCE(client.nif, EXCLUDED.nif),
@@ -141,8 +208,18 @@ export async function resolverOCrearClient(
          poblacio = COALESCE(client.poblacio, EXCLUDED.poblacio),
          woo_customer_id = COALESCE(client.woo_customer_id, EXCLUDED.woo_customer_id)
        RETURNING id, id_seq`,
-      valores,
-    );
+            valores,
+          );
+    if (res.rows[0] === undefined) {
+      // Sólo el UPDATE puede no devolver fila: entre la búsqueda y el
+      // UPDATE otro pedido del mismo email (el lock es por pedido, no por
+      // cliente) le puso a ese cliente un NIF distinto, o el cliente se
+      // borró. Volver a comprobar la premisa en el WHERE evita vincular
+      // este pedido en silencio a un cliente con otro NIF: es un
+      // conflicto de identidad como cualquier otro.
+      await client.query('ROLLBACK TO SAVEPOINT resolucio_client');
+      throw new ConflicteIdentitatClient('nif');
+    }
     await client.query('RELEASE SAVEPOINT resolucio_client');
 
     // Todo cliente recibe un `codi` autogenerado, sin importar el origen
@@ -150,9 +227,9 @@ export async function resolverOCrearClient(
     // dos caminos de este upsert sin distinguirlos: un cliente
     // nuevo siempre tiene `codi` null recién insertado; uno existente
     // resuelto por `ON CONFLICT` puede ya tener `codi` y no se toca.
-    await assignarCodiAutogenerat(client, res.rows[0]!.id, res.rows[0]!.id_seq);
+    await assignarCodiAutogenerat(client, res.rows[0].id, res.rows[0].id_seq);
 
-    return res.rows[0]!.id;
+    return res.rows[0].id;
   } catch (err) {
     // 23505 = unique_violation. El índice que chocó nunca es el que declara
     // `ON CONFLICT` (ese lo resuelve Postgres solo) — es SIEMPRE uno de los

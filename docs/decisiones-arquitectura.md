@@ -916,6 +916,32 @@ resolverlo sólo con código — si Integraly confirma otro criterio o aporta
 un dato más confiable (P-11), esta ADR se marca `Superseded` y se corrige
 `resolucio-client.ts`, no el resto del sistema.
 
+> **Actualización (23/11/2026) — falsos conflictos de email:** en los
+> últimos 30 días, 15 comandas web entraron sin cliente, todas por el
+> índice de `email` (p. ej. la web 6904). Dos de las causas posibles no
+> eran contradicciones reales sino defectos del criterio, y se corrigen sin
+> esperar a P-11:
+>
+> - **El cliente del email todavía no tenía NIF** (su primer pedido llegó
+>   sin NIF, o lo dio de alta oficina sin él). El upsert comparaba sólo
+>   por NIF, no lo encontraba e intentaba crear otro cliente con el mismo
+>   email. Ahora, si el pedido trae NIF y ningún cliente lo tiene, se
+>   busca por email (sin distinguir mayúsculas) **un cliente sin NIF**, se
+>   le vincula el pedido y se le completa el NIF.
+> - **El mismo NIF escrito distinto** (`B-43.123.456` y `b43123456`).
+>   Ahora se compara normalizado (mayúsculas, sólo letras y cifras). Se
+>   guarda tal como llegó; un valor sin letras ni cifras (`-`) no cuenta
+>   como NIF.
+>
+> Sigue siendo conflicto (incidencia, `client_id` en `NULL`) cuando el
+> cliente del email tiene **otro** NIF: eso sí depende de P-11. Además,
+> cuando un sync posterior consigue vincular el cliente, las incidencias
+> `sense_dades_client`/`conflicte_identitat_client` abiertas de esa comanda
+> se marcan resueltas. Como cada ciclo vuelve a transformar todo lo
+> aterrizado, las comandas pendientes que caen en estos dos casos se
+> vinculan solas en el primer sync tras el despliegue (salvo las
+> congeladas, que el sync no toca).
+
 ---
 
 ## ADR-021 — Firebase Auth: autenticado sí, restringido por rol no
