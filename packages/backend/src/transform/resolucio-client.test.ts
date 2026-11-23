@@ -146,6 +146,108 @@ describe('resolverOCrearClient (Postgres real, esquema aislado)', () => {
     expect(clientId).toBeNull();
   });
 
+  describe('falsos conflictos: el mismo cliente con el NIF escrito distinto o sin NIF (23/11/2026)', () => {
+    it('cliente creado sin NIF; un pedido posterior con NIF y el mismo email lo reutiliza y le completa el NIF', async () => {
+      const sinNif: WooOrder = {
+        ...comandaSimple,
+        id: 777301,
+        customer_id: 0,
+        meta_data: [],
+        billing: { ...comandaSimple.billing, email: 'Primer.Sense.Nif@example.com' },
+      };
+      const ambNif: WooOrder = {
+        ...sinNif,
+        id: 777302,
+        meta_data: [{ id: 1, key: 'nif', value: 'NIF-COMPLETAT' }],
+      };
+
+      await client.query('BEGIN');
+      const primer = await resolverOCrearClient(client, sinNif);
+      const segon = await resolverOCrearClient(client, ambNif);
+      await client.query('COMMIT');
+
+      expect(segon).toBe(primer);
+      const fila = await client.query<{ nif: string | null; email: string }>(
+        'SELECT nif, email FROM client WHERE id = $1',
+        [primer],
+      );
+      expect(fila.rows[0]).toEqual({ nif: 'NIF-COMPLETAT', email: 'primer.sense.nif@example.com' });
+    });
+
+    it('cliente dado de alta a mano sin NIF y con el email en mayúsculas: también lo encuentra', async () => {
+      const alta = await client.query<{ id: string }>(
+        `INSERT INTO client (nom, email) VALUES ('Alta manual', 'Alta.Manual@Example.com') RETURNING id`,
+      );
+      const pedido: WooOrder = {
+        ...comandaSimple,
+        id: 777303,
+        customer_id: 0,
+        meta_data: [{ id: 1, key: 'nif', value: 'NIF-ALTA-MANUAL' }],
+        billing: { ...comandaSimple.billing, email: 'alta.manual@example.com' },
+      };
+
+      await client.query('BEGIN');
+      const clientId = await resolverOCrearClient(client, pedido);
+      await client.query('COMMIT');
+
+      expect(clientId).toBe(alta.rows[0]!.id);
+      const fila = await client.query<{ nif: string | null; nom: string }>(
+        'SELECT nif, nom FROM client WHERE id = $1',
+        [clientId],
+      );
+      // Completa el hueco (nif) pero no pisa lo que cargó oficina (nom).
+      expect(fila.rows[0]).toEqual({ nif: 'NIF-ALTA-MANUAL', nom: 'Alta manual' });
+    });
+
+    it('el mismo NIF escrito distinto (guiones, puntos, espacios, minúsculas) es el mismo cliente, y no se reescribe', async () => {
+      const primer: WooOrder = {
+        ...comandaSimple,
+        id: 777304,
+        customer_id: 0,
+        meta_data: [{ id: 1, key: 'nif', value: 'NIF-TEST.000.001' }],
+        billing: { ...comandaSimple.billing, email: 'format.nif.1@example.com' },
+      };
+      const segon: WooOrder = {
+        ...primer,
+        id: 777305,
+        meta_data: [{ id: 2, key: 'nif', value: ' nif test 000001 ' }],
+        billing: { ...comandaSimple.billing, email: 'format.nif.2@example.com' },
+      };
+
+      await client.query('BEGIN');
+      const idPrimer = await resolverOCrearClient(client, primer);
+      const idSegon = await resolverOCrearClient(client, segon);
+      await client.query('COMMIT');
+
+      expect(idSegon).toBe(idPrimer);
+      const fila = await client.query<{ nif: string; email: string }>(
+        'SELECT nif, email FROM client WHERE id = $1',
+        [idPrimer],
+      );
+      expect(fila.rows[0]).toEqual({ nif: 'NIF-TEST.000.001', email: 'format.nif.1@example.com' });
+    });
+
+    it('un "NIF" sin letras ni cifras se ignora y resuelve por email', async () => {
+      const pedido: WooOrder = {
+        ...comandaSimple,
+        id: 777306,
+        customer_id: 0,
+        meta_data: [{ id: 1, key: 'nif', value: '-' }],
+        billing: { ...comandaSimple.billing, email: 'nif.guio@example.com' },
+      };
+
+      await client.query('BEGIN');
+      const clientId = await resolverOCrearClient(client, pedido);
+      await client.query('COMMIT');
+
+      const fila = await client.query<{ nif: string | null }>(
+        'SELECT nif FROM client WHERE id = $1',
+        [clientId],
+      );
+      expect(fila.rows[0]?.nif).toBeNull();
+    });
+  });
+
   describe('conflictos reales de identidad (dos NIF/email/woo_customer_id que no coinciden entre sí) — ADR-023', () => {
     it('NIF nuevo cuyo email ya pertenece a OTRO cliente existente: lanza ConflicteIdentitatClient("email"), no duplica ni mezcla silenciosamente', async () => {
       // Cliente A: nif=NIF-A, email=compartido@example.com, customer_id propio

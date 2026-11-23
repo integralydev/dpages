@@ -539,6 +539,41 @@ describe('transformarComanda (Postgres real, esquema aislado)', () => {
       );
       expect(incidenciaEmailDespues.rows[0]?.count).toBe('1');
     });
+
+    it('cuando el conflicto deja de existir, el siguiente sync vincula el cliente y resuelve la incidencia', async () => {
+      const pedidoBase: WooOrder = {
+        ...comandaSimple,
+        id: 777211,
+        customer_id: 0,
+        meta_data: [{ id: 1, key: 'nif', value: 'NIF-ANTIC' }],
+        billing: { ...comandaSimple.billing, email: 'canvia.nif@example.com' },
+      };
+      await conClient((client) => transformarComanda(client, pedidoBase));
+
+      const pedidoNifNou: WooOrder = {
+        ...pedidoBase,
+        id: 777212,
+        meta_data: [{ id: 2, key: 'nif', value: 'NIF-NOU' }],
+      };
+      const resultat = await conClient((client) => transformarComanda(client, pedidoNifNou));
+
+      // Oficina corrige el NIF del cliente: ahora el pedido sí lo encuentra.
+      await poolTest.query(`UPDATE client SET nif = 'NIF-NOU' WHERE nif = 'NIF-ANTIC'`);
+      await conClient((client) => transformarComanda(client, pedidoNifNou));
+
+      const comanda = await poolTest.query<{ client_id: string | null }>(
+        'SELECT client_id FROM comanda WHERE id = $1',
+        [resultat.comandaId],
+      );
+      expect(comanda.rows[0]?.client_id).not.toBeNull();
+      const incidencia = await poolTest.query<{ resolta: boolean; resolta_en: Date | null }>(
+        `SELECT resolta, resolta_en FROM incidencia_comanda WHERE comanda_id = $1 AND tipus = 'conflicte_identitat_client'`,
+        [resultat.comandaId],
+      );
+      expect(incidencia.rows).toHaveLength(1);
+      expect(incidencia.rows[0]?.resolta).toBe(true);
+      expect(incidencia.rows[0]?.resolta_en).not.toBeNull();
+    });
   });
 
   // Piso de activación (08/10/2026) — ningún pedido CREADO antes de esta

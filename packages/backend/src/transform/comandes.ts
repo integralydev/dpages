@@ -263,6 +263,12 @@ async function crearComanda(
  * actualización más nueva de WooCommerce, es un backfill idempotente que
  * tiene que poder correr incluso cuando la cabecera ya está al día. Nunca
  * pisa un client_id ya asignado.
+ *
+ * Si lo vincula, las incidencias de cliente que quedaban abiertas
+ * (`sense_dades_client`, `conflicte_identitat_client`) ya no tienen motivo
+ * y se marcan resueltas — p. ej. los pedidos que chocaban por un NIF
+ * escrito distinto o un cliente sin NIF (23/11/2026). No toca `estat`: la
+ * comanda puede tener otras incidencias, eso lo revisa oficina.
  */
 async function vincularClientSiFalta(
   client: PoolClient,
@@ -270,10 +276,17 @@ async function vincularClientSiFalta(
   clientId: string | null,
 ): Promise<void> {
   if (clientId === null) return;
-  await client.query(`UPDATE comanda SET client_id = $2 WHERE id = $1 AND client_id IS NULL`, [
-    comandaId,
-    clientId,
-  ]);
+  const res = await client.query(
+    `UPDATE comanda SET client_id = $2 WHERE id = $1 AND client_id IS NULL`,
+    [comandaId, clientId],
+  );
+  if ((res.rowCount ?? 0) === 0) return;
+  await client.query(
+    `UPDATE incidencia_comanda SET resolta = true, resolta_en = now()
+     WHERE comanda_id = $1 AND NOT resolta
+       AND tipus IN ('sense_dades_client', 'conflicte_identitat_client')`,
+    [comandaId],
+  );
 }
 
 /**
