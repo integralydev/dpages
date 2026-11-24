@@ -100,7 +100,8 @@ están documentadas ahí mismo y en el agente `woocommerce-integration`.
   restricción de "mayor que cero" que tenían se sacó a propósito, reabriendo
   y reemplazando una decisión anterior. Tarea 57 (17/11/2026): la pantalla
   deja confirmar una línea pendiente en 0 y pide confirmación antes de
-  guardar un 0. Tarea 51 (17/11/2026): única
+  guardar 0 unidades (24/11/2026, petición del cliente: con 0 kilos ya no
+  se pregunta, porque hoy no cargan el peso). Tarea 51 (17/11/2026): única
   excepción a la confirmación línea a línea — «Marcar tot com a lliurat»
   confirma de una vez todas las pendientes de los filtros activos con lo
   pedido, tras un diálogo que pide desar antes, una a una, las que se
