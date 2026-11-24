@@ -89,7 +89,7 @@ function NumWoo({ line }: { line: FilaPanellEmpaquetatApi }) {
  * amb 0 (producte no servit per falta d'estoc). Com que els camps ja
  * arrenquen a 0, «Desar» no depèn de si s'ha tocat res mentre la línia
  * estigui pendent; una vegada confirmada, només s'activa si hi ha canvis.
- * Si es desa amb 0 unitats o 0 quilos, abans es demana confirmació.
+ * Si es desa amb 0 unitats, abans es demana confirmació (amb 0 quilos no).
  */
 function useLliuramentLinia(line: FilaPanellEmpaquetatApi, onSave: OnSaveLliurament) {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -123,19 +123,19 @@ function useLliuramentLinia(line: FilaPanellEmpaquetatApi, onSave: OnSaveLliuram
 
   const potDesar = !isSaving && (isDirty || line.confirmatA === null);
   const unitatsZero = Number(draft.unitatsLliurades) === 0;
-  const kgZero = Number(parseDecimalInput(draft.kgLliurats, 3)) === 0;
 
+  // Només es demana confirmació amb 0 unitats; amb 0 quilos no (Ari,
+  // 24/11/2026: avui no hi posen el pes i sortia a cada línia).
   function demanarDesar() {
-    if (unitatsZero || kgZero) setConfirmantZero(true);
+    if (unitatsZero) setConfirmantZero(true);
     else save();
   }
 
-  const quinsZero = [unitatsZero && 'unitats', kgZero && 'quilos'].filter(Boolean).join(' i ');
   const dialegZero = (
     <ConfirmDialog
       isOpen={confirmantZero}
       title="Confirmar amb 0"
-      message={`Vols confirmar la línia de ${line.producte} amb 0 ${quinsZero} servits? Quedarà marcada com a enviada.`}
+      message={`Vols confirmar la línia de ${line.producte} amb 0 unitats servides? Quedarà marcada com a enviada.`}
       confirmLabel="Confirmar"
       confirmingLabel="Desant..."
       cancelLabel="Cancel·lar"
