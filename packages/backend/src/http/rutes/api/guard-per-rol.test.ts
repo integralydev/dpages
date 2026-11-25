@@ -527,6 +527,14 @@ describe('API negoci — guard por módulo, contra los 6 roles reales (B1, halla
         await estat('PATCH', `${linia}/lliurament`, { unitatsLliurades: 1, kgLliurats: '1.250' }),
       ).toBe(200);
       expect(await estat('PATCH', `${linia}/lliurament/desfer`)).toBe(200);
+      // «Marcar tot com a lliurat» també des de Compres. Un client que no
+      // existeix: no marca cap línia que facin servir els altres tests.
+      const marcarTot = await fastify.inject({
+        method: 'POST',
+        url: '/api/v1/panells/empaquetat/marcar-lliurades?clientId=999999',
+      });
+      expect(marcarTot.statusCode).toBe(200);
+      expect(marcarTot.json()).toEqual({ marcades: 0, congeladesOmeses: 0 });
 
       // Cap altre panell ni cap escriptura d'un altre mòdul.
       expect(await estat('GET', '/panells/oficina')).toBe(403);

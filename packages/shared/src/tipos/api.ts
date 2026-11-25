@@ -735,6 +735,11 @@ export interface FilaPanellEmpaquetatApi {
   dataLliurament: string | null;
   transportista: string | null;
   client: string | null;
+  /**
+   * Id públic del client (`null` = comanda sense client). Per agrupar les
+   * línies per client al PDF del Panell de Compres (25/11/2026).
+   */
+  clientId: number | null;
   /** Nombre de la categoría del artículo; `null` si no tiene (petición de Ari, 29/09/2026). */
   categoria: string | null;
   codi: string | null;

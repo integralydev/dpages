@@ -808,10 +808,13 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
   // una per una amb aquests valors: confirmat_a/confirmat_per i el tancament
   // automàtic de la comanda. La confirmació explícita la fa el diàleg del
   // frontend, un sol cop per a totes. Les línies de comandes congelades no
-  // es toquen i es compten a part.
+  // es toquen i es compten a part. El Panell de Compres (25/11/2026, la
+  // vedella s'envia des d'allà) fa servir el mateix endpoint amb els
+  // mateixos filtres: per això n'hi ha prou amb qualsevol dels dos mòduls,
+  // igual que el PATCH de lliurament d'una sola línia.
   fastify.post(
     '/panells/empaquetat/marcar-lliurades',
-    { preHandler: crearGuardaModul('panell-empaquetat') },
+    { preHandler: crearGuardaModul(MODULS_LLIURAMENT) },
     async (req, reply) => {
       const filtres = await construirFiltresEmpaquetat(reply, req.query as Record<string, unknown>);
       if (filtres === null) return;
@@ -909,6 +912,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         data_lliurament: Date | null;
         transportista_nom: string | null;
         client_nom: string | null;
+        client_id_seq: string | null;
         categoria_nom: string | null;
         codi: string | null;
         descripcio: string | null;
@@ -922,8 +926,8 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         produir: boolean;
       }>(
         `SELECT cl.id_seq, c.id_seq AS comanda_id_seq, c.num, c.num_woo, c.data_expedicio, c.data_lliurament,
-              tr.nom AS transportista_nom, cli.nom AS client_nom, cat.nom AS categoria_nom,
-              p.codi, p.descripcio,
+              tr.nom AS transportista_nom, cli.nom AS client_nom, cli.id_seq AS client_id_seq,
+              cat.nom AS categoria_nom, p.codi, p.descripcio,
               cl.unitats_demanades, cl.pes_calculat_kg AS kg_demanats, cl.unitats_lliurades,
               cl.kg_lliurats, cl.confirmat_a, cl.confirmat_per, cl.obs_empaquetat, cl.produir
        ${base}
@@ -948,6 +952,7 @@ export function registrarRutesPanells(fastify: FastifyInstance): void {
         dataLliurament: formatearDataApi(f.data_lliurament),
         transportista: f.transportista_nom,
         client: f.client_nom,
+        clientId: f.client_id_seq === null ? null : Number(f.client_id_seq),
         categoria: f.categoria_nom,
         codi: f.codi,
         producte: f.descripcio ?? '',

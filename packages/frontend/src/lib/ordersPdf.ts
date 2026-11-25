@@ -2,9 +2,12 @@ import type {
   ClientApi,
   ComandaDetallApi,
   ComandaResumApi,
+  FilaPanellCompresApi,
+  FilaPanellEmpaquetatApi,
   FilaPanellObradorAcumulatApi,
   FilaPanellObradorApi,
   FilaPanellOficinaApi,
+  TotalsPanellCompresApi,
 } from '@/lib/api';
 import { ESTAT_LABELS } from '@/lib/comandaEstat';
 import { formatData } from '@/lib/dates';
@@ -475,6 +478,141 @@ export function descarregarPdfObradorAgrupat({
       formatDecimal(grup.unitats, 2),
       formatDecimal(grup.kg, 3),
       `${grup.liniesFetes}/${grup.linies}`,
+    ]),
+  });
+}
+
+// ── Panell de Compres (25/11/2026) ───────────────────────────────────────
+// La vedella s'envia des del Panell de Compres (agrupat per client, com ho
+// ha de rebre el destinatari): els mateixos dos llistats que Obrador,
+// desglossat i agrupat, però per client.
+
+function nomClientCompres(grup: FilaPanellCompresApi): string {
+  if (grup.client === null) return 'Sense client';
+  return grup.client.nom ?? grup.client.codi ?? `Client ${grup.client.id}`;
+}
+
+function resumCompres(totals: TotalsPanellCompresApi): string {
+  return [
+    `${totals.clients} ${totals.clients === 1 ? 'client' : 'clients'}`,
+    comptarComandes(totals.comandes),
+    `${totals.linies} ${totals.linies === 1 ? 'línia' : 'línies'}`,
+    `${formatDecimal(totals.kgDemanats, 3)} kg demanats`,
+    `${formatDecimal(totals.kgLliurats, 3)} kg lliurats`,
+  ].join(' · ');
+}
+
+// 273 mm útils.
+const COLUMNES_COMPRES_DESGLOSSAT: ColumnaPdf[] = [
+  { titol: 'Comanda', ample: 22 },
+  { titol: 'Producte', ample: 62 },
+  { titol: 'Categoria', ample: 28 },
+  { titol: 'Obs. empaquetat', ample: 53 },
+  { titol: 'Unitats demanades', ample: 22, alineacio: 'right' },
+  { titol: 'Unitats lliurades', ample: 22, alineacio: 'right' },
+  { titol: 'Kilos demanats', ample: 22, alineacio: 'right' },
+  { titol: 'Kilos lliurats', ample: 22, alineacio: 'right' },
+  { titol: 'Enviada', ample: 20, alineacio: 'center' },
+];
+
+/**
+ * El Panell de Compres desplegat sencer: una fila per client amb els
+ * acumulats i, a sota, totes les seves línies (enviades i pendents) que
+ * compleixen els filtres. Les quantitats lliurades d'una línia pendent
+ * surten en blanc: encara no s'han confirmat.
+ */
+export function descarregarPdfCompresDesglossat({
+  grups,
+  liniesPerClient,
+  totals,
+  filtres,
+}: {
+  grups: FilaPanellCompresApi[];
+  /** Clau: id del client, o 0 per a les comandes sense client. */
+  liniesPerClient: Map<number, FilaPanellEmpaquetatApi[]>;
+  totals: TotalsPanellCompresApi;
+  filtres: string[];
+}): Promise<void> {
+  const files: string[][] = [];
+  const destacades = new Set<number>();
+  for (const grup of grups) {
+    destacades.add(files.length);
+    files.push([
+      grup.client?.codi ?? '-',
+      `${nomClientCompres(grup)} (${comptarComandes(grup.comandes)})`,
+      '',
+      '',
+      formatDecimal(grup.unitatsDemanades, 2),
+      formatDecimal(grup.unitatsLliurades, 2),
+      formatDecimal(grup.kgDemanats, 3),
+      formatDecimal(grup.kgLliurats, 3),
+      `${grup.liniesConfirmades}/${grup.linies}`,
+    ]);
+    for (const linia of liniesPerClient.get(grup.client?.id ?? 0) ?? []) {
+      const enviada = linia.confirmatA !== null;
+      files.push([
+        linia.num,
+        linia.codi ? `${linia.codi} · ${linia.producte}` : linia.producte,
+        linia.categoria ?? '-',
+        linia.obsEmpaquetat ?? '',
+        formatDecimal(linia.unitatsDemanades, 2),
+        enviada ? formatDecimal(linia.unitatsLliurades, 2) : '',
+        formatDecimal(linia.kgDemanats, 3),
+        enviada ? formatDecimal(linia.kgLliurats, 3) : '',
+        enviada ? 'Sí' : '',
+      ]);
+    }
+  }
+  return descarregarPdfLlistat({
+    titol: 'Panell de Compres (desglossat)',
+    nomFitxer: 'panell-compres-desglossat',
+    columnes: COLUMNES_COMPRES_DESGLOSSAT,
+    resum: resumCompres(totals),
+    filtres,
+    senseFiltres: 'Filtres: cap (totes les línies)',
+    filesDestacades: destacades,
+    files,
+  });
+}
+
+// 273 mm útils.
+const COLUMNES_COMPRES_AGRUPAT: ColumnaPdf[] = [
+  { titol: 'Codi', ample: 25 },
+  { titol: 'Client', ample: 108, negreta: true },
+  { titol: 'Comandes', ample: 20, alineacio: 'right' },
+  { titol: 'Unitats demanades', ample: 24, alineacio: 'right' },
+  { titol: 'Unitats lliurades', ample: 24, alineacio: 'right' },
+  { titol: 'Kilos demanats', ample: 24, alineacio: 'right' },
+  { titol: 'Kilos lliurats', ample: 24, alineacio: 'right' },
+  { titol: 'Enviades', ample: 24, alineacio: 'center' },
+];
+
+/** Només la fila d'acumulats de cada client, sense les línies de sota. */
+export function descarregarPdfCompresAgrupat({
+  grups,
+  totals,
+  filtres,
+}: {
+  grups: FilaPanellCompresApi[];
+  totals: TotalsPanellCompresApi;
+  filtres: string[];
+}): Promise<void> {
+  return descarregarPdfLlistat({
+    titol: 'Panell de Compres (agrupat)',
+    nomFitxer: 'panell-compres-agrupat',
+    columnes: COLUMNES_COMPRES_AGRUPAT,
+    resum: resumCompres(totals),
+    filtres,
+    senseFiltres: 'Filtres: cap (totes les línies)',
+    files: grups.map((grup) => [
+      grup.client?.codi ?? '-',
+      nomClientCompres(grup),
+      String(grup.comandes),
+      formatDecimal(grup.unitatsDemanades, 2),
+      formatDecimal(grup.unitatsLliurades, 2),
+      formatDecimal(grup.kgDemanats, 3),
+      formatDecimal(grup.kgLliurats, 3),
+      `${grup.liniesConfirmades}/${grup.linies}`,
     ]),
   });
 }

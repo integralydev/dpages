@@ -105,7 +105,9 @@ están documentadas ahí mismo y en el agente `woocommerce-integration`.
   excepción a la confirmación línea a línea — «Marcar tot com a lliurat»
   confirma de una vez todas las pendientes de los filtros activos con lo
   pedido, tras un diálogo que pide desar antes, una a una, las que se
-  enviaron con menos.
+  enviaron con menos. Desde el 25/11/2026 el botón está también en el
+  Panell de Compres (la vedella se envía desde allí), con el mismo
+  endpoint.
 - Cada línea de pedido tiene «producir» (sí/no, por defecto sí; tarea 57,
   acordado en reunión, 17/11/2026). En «no» (sale de stock, no se fabrica
   pero se envía) la línea no cuenta en Obrador ni en Producción; sí en
@@ -149,6 +151,8 @@ están documentadas ahí mismo y en el agente `woocommerce-integration`.
   confirmación — pero acumulada por cliente, con el detalle de sus líneas al
   desplegarlo. Módulo de permisos propio (`panell-compres`); la migración
   `0025` se lo dio a todos los roles que ya tenían `panell-empaquetat`.
+  Desde el 25/11/2026 imprime, como Obrador, la lista desglosada (cada
+  cliente y sus líneas) y la agrupada (sólo los totales por cliente).
 
 ## Decisiones de integración ya tomadas
 
