@@ -299,6 +299,7 @@ en datos reales:
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `article_no_resolt`          | Una línea del pedido no pudo resolverse a ningún artículo del catálogo.                                                                  |
 | `conflicte_identitat_client` | El NIF/email resuelto contradice el ya registrado para ese cliente.                                                                      |
+| `nif_diferent`               | (ADR-027) Aviso, no bloquea: el pedido se asignó al cliente de su email, pero trae otro NIF. `detall` en catalán, para oficina.          |
 | `sense_dades_client`         | El pedido no trae ni NIF ni email utilizable — no se pudo crear cliente.                                                                 |
 | `manual`                     | (capa 31) Un usuario de oficina marcó el pedido `amb_incidencia` a mano, con un motivo (`detall`) que el sistema no podía detectar solo. |
 
@@ -773,7 +774,8 @@ VALIDACIO`; un id inexistente no coincide con nada (no es error).
       "totalEur": "312.40",
       "congelada": false,
       "totalIncidencies": 0,
-      "tipusIncidencia": null
+      "tipusIncidencia": null,
+      "avisClient": false
     }
   ],
   "paginacio": { "pagina": 1, "mida": 50, "total": 411, "totalPagines": 9 }
@@ -788,6 +790,11 @@ VALIDACIO`; un id inexistente no coincide con nada (no es error).
 > queda `null` y hay que abrir el detalle (`GET /comandes/:id`) para ver de
 > qué se trata. El detalle completo de motivos está en `incidencies` de esa
 > misma respuesta — ver abajo.
+>
+> **`avisClient`** (ADR-027): `true` si la comanda tiene alguna incidencia de
+> cliente (`nif_diferent`, `conflicte_identitat_client`, `sense_dades_client`
+> — `TIPUS_INCIDENCIA_CLIENT` en `packages/shared`) sin revisar. El listado
+> muestra un aviso junto al cliente.
 >
 > **`datesProduccioLinies`** (capa 21): las fechas de producción DISTINTAS
 > entre las líneas del pedido (`linies[].dataProduccio`, ver más abajo),
@@ -900,9 +907,11 @@ VALIDACIO`; un id inexistente no coincide con nada (no es error).
   ],
   "incidencies": [
     {
+      "id": "6c1f0e0a-2b9d-4c55-9a51-2f0f3c1d7e10",
       "tipus": "article_no_resolt",
       "detall": "Línia 2: SKU sense alias a AliasProducte",
-      "creatA": "2026-08-14T09:12:05Z"
+      "creatA": "2026-08-14T09:12:05Z",
+      "resolta": false
     }
   ]
 }
@@ -914,7 +923,13 @@ VALIDACIO`; un id inexistente no coincide con nada (no es error).
 > `sense_dades_client`); `detall` es texto libre pensado para que oficina
 > entienda el problema sin tener que investigar en la base. Ordenado del más
 > antiguo al más nuevo — si hay más de una, la primera suele ser la causa
-> original.
+> original. Trae también las ya resueltas (`resolta: true`).
+>
+> **`POST /comandes/:id/incidencies/:incidenciaId/revisada`** (ADR-027,
+> mismo permiso que editar comandes): oficina marca como revisado un aviso de
+> cliente. Sólo para los tipos de `TIPUS_INCIDENCIA_CLIENT`; cualquier otra
+> incidencia (o un id que no es de esa comanda) da `404`. Idempotente, no
+> cambia `estat`. Devuelve el detalle de la comanda (`ComandaDetallApi`).
 
 > **`adrecaLliurament`** es la dirección de entrega en texto libre — distinta
 > de `poblacioDesti`, que es sólo la población/ciudad. Editable vía

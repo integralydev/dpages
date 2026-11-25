@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CalendarClock, Copy, FileText, Printer } from 'lucide-react';
+import { AlertTriangle, CalendarClock, Copy, FileText, Printer } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DataCard, DataCardActions, DataCardField, DataCardGrid } from '@/components/ui/DataCard';
@@ -57,6 +57,16 @@ function productionDates(order: ComandaResumApi): string {
   return order.datesProduccioLinies.map((data) => formatData(data, false)).join(', ');
 }
 
+/** ADR-027: la comanda té un avís de client sense revisar («NIF diferent»…). */
+function AvisClientIcona({ order }: { order: ComandaResumApi }) {
+  if (!order.avisClient) return null;
+  return (
+    <span title="Cal revisar el client" className="ml-1 inline-flex align-text-bottom">
+      <AlertTriangle className="h-4 w-4 text-amber-600" aria-label="Cal revisar el client" />
+    </span>
+  );
+}
+
 function OrderCard({
   order,
   originLabel,
@@ -90,7 +100,10 @@ function OrderCard({
             {order.numWoo && (
               <span className="block text-xs text-gray-500">Web {order.numWoo}</span>
             )}
-            <span className="block text-sm text-gray-500">{order.client?.nom ?? '—'}</span>
+            <span className="block text-sm text-gray-500">
+              {order.client?.nom ?? '—'}
+              <AvisClientIcona order={order} />
+            </span>
           </span>
         </label>
         <div className="flex flex-col items-end gap-1">
@@ -637,6 +650,7 @@ export default function OrdersPage() {
                     </td>
                     <td className="px-2 py-3 break-words text-gray-900">
                       {order.client?.nom ?? '—'}
+                      <AvisClientIcona order={order} />
                     </td>
                     <td className="px-2 py-3 break-words">
                       <Badge variant={origenBadgeVariant(order.origen)}>

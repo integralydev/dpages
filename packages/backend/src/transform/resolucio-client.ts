@@ -9,12 +9,10 @@ type Consultable = Pool | PoolClient | Client;
 
 /**
  * Los tres índices únicos reales de `client` (migraciones 0003 y 0009).
- * `nif` nunca puede aparecer como "el otro índice que chocó": si `nif` no
- * es null, siempre es el target de `ON CONFLICT` de este mismo upsert (ver
- * `columnaConflicto` más abajo), así que un choque contra `idx_client_nif`
- * ya lo resuelve Postgres solo, nunca llega a lanzar. (`'nif'` sí puede
- * llegar como conflicto por otro camino: la carrera que comprueba el
- * UPDATE de `resolverOCrearClient`.)
+ * Desde el 25/11/2026 casi nunca chocan: antes de escribir se busca el
+ * cliente por email y por NIF, y no se escribe un NIF ni un
+ * woo_customer_id que ya tenga otro cliente. Quedan las carreras entre dos
+ * pedidos procesados a la vez y el `woo_customer_id` de un cliente nuevo.
  */
 const INDEXS_UNICS_CLIENT: Record<string, 'nif' | 'email' | 'woo_customer_id'> = {
   idx_client_nif: 'nif',
@@ -77,39 +75,86 @@ function extraerNif(wooOrder: WooOrder): string | null {
 const NIF_NORMALITZAT = (expressio: string): string =>
   `upper(regexp_replace(${expressio}, '[^A-Za-z0-9]', '', 'g'))`;
 
-/**
- * Busca el cliente ya registrado de un pedido que trae NIF, antes del
- * upsert (que sólo compara el NIF exacto):
- *
- * 1. Por NIF normalizado — el mismo NIF escrito distinto.
- * 2. Si no, por email, pero sólo si ese cliente todavía NO tiene NIF (su
- *    primer pedido llegó sin NIF, o lo dio de alta oficina sin él): es el
- *    mismo cliente y este pedido le completa el NIF. Si el cliente del
- *    email tiene OTRO NIF no se resuelve acá: sigue siendo un conflicto de
- *    identidad (ADR-023), pendiente del criterio del cliente (P-11).
- *
- * Sólo lee; el que escribe es quien llama, dentro de su SAVEPOINT.
- */
-async function cercarClientPerNif(
-  client: Consultable,
-  nif: string,
-  email: string | null,
-): Promise<string | null> {
-  const perNif = await client.query<{ id: string }>(
-    `SELECT id FROM client
-     WHERE nif IS NOT NULL AND ${NIF_NORMALITZAT('nif')} = ${NIF_NORMALITZAT('$1')}
-     ORDER BY (nif = $1) DESC, id_seq
-     LIMIT 1`,
-    [nif],
-  );
-  if (perNif.rows[0]) return perNif.rows[0].id;
+/** Misma normalización que `NIF_NORMALITZAT`, del lado de JavaScript. */
+const normalitzarNif = (nif: string): string => nif.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
 
-  if (email === null) return null;
-  const perEmail = await client.query<{ id: string }>(
-    `SELECT id FROM client WHERE lower(email) = $1 AND nif IS NULL ORDER BY id_seq LIMIT 1`,
+/**
+ * Aviso de «NIF diferent» (decisión del cliente, 25/11/2026): el pedido se
+ * asignó al cliente de su email, pero trae otro NIF. Se registra como
+ * incidencia para que oficina lo revise.
+ */
+export interface AvisNifDiferent {
+  /** NIF que tenía el cliente antes de este pedido (`null` si no tenía). */
+  nifAnterior: string | null;
+  nifComanda: string;
+  /**
+   * El NIF del pedido ya es de OTRO cliente (no puede repetirse): el
+   * cliente conserva el anterior. `null` = el cliente pasó a tener el NIF
+   * del pedido. Si es de otro cliente sin codi, cadena vacía.
+   */
+  codiAltreClient: string | null;
+}
+
+export interface ResolucioClient {
+  clientId: string | null;
+  avisNif: AvisNifDiferent | null;
+}
+
+export interface OpcionsResolucioClient {
+  /**
+   * `true` sólo cuando el pedido se vincula ahora a un cliente por primera
+   * vez (pedido nuevo o todavía sin cliente). Cada ciclo del sync vuelve a
+   * transformar todos los pedidos aterrizados: si los ya vinculados
+   * también cambiaran el NIF, el del cliente iría saltando entre los NIF de
+   * sus pedidos viejos y cada ciclo generaría avisos.
+   */
+  permetreCanviNif: boolean;
+}
+
+interface FilaClientTrobat {
+  id: string;
+  nif: string | null;
+}
+
+async function cercarPerEmail(
+  client: Consultable,
+  email: string,
+): Promise<FilaClientTrobat | null> {
+  // FOR UPDATE: dos pedidos del mismo email procesados a la vez (el lock de
+  // `transformarComanda` es por pedido, no por cliente) se serializan acá.
+  const res = await client.query<FilaClientTrobat>(
+    `SELECT id, nif FROM client WHERE lower(email) = $1 ORDER BY id_seq LIMIT 1 FOR UPDATE`,
     [email],
   );
-  return perEmail.rows[0]?.id ?? null;
+  return res.rows[0] ?? null;
+}
+
+async function cercarPerNif(client: Consultable, nif: string): Promise<FilaClientTrobat | null> {
+  const res = await client.query<FilaClientTrobat>(
+    `SELECT id, nif FROM client
+     WHERE nif IS NOT NULL AND ${NIF_NORMALITZAT('nif')} = ${NIF_NORMALITZAT('$1')}
+     ORDER BY (nif = $1) DESC, id_seq
+     LIMIT 1
+     FOR UPDATE`,
+    [nif],
+  );
+  return res.rows[0] ?? null;
+}
+
+/** Otro cliente (no `excepteId`) que ya tiene este NIF, comparado normalizado. */
+async function altreClientAmbNif(
+  client: Consultable,
+  nif: string,
+  excepteId: string,
+): Promise<{ codi: string | null } | null> {
+  const res = await client.query<{ codi: string | null }>(
+    `SELECT codi FROM client
+     WHERE id <> $2 AND nif IS NOT NULL AND ${NIF_NORMALITZAT('nif')} = ${NIF_NORMALITZAT('$1')}
+     ORDER BY id_seq
+     LIMIT 1`,
+    [nif, excepteId],
+  );
+  return res.rows[0] ?? null;
 }
 
 function extraerEmail(wooOrder: WooOrder): string | null {
@@ -128,116 +173,143 @@ function extraerOpcional(valor: string | undefined): string | null {
 }
 
 /**
- * Resuelve el cliente de un pedido — primero por NIF, si no por email
- * (criterio confirmado para esta capa). `null` si no hay ninguno de los
- * dos (en la práctica, casi nunca: el email tiene 100% de cobertura en los
- * pedidos reales). Con NIF, antes del upsert se busca el cliente por NIF
- * normalizado y, si no, por email sin NIF (`cercarClientPerNif`).
+ * Resuelve el cliente de un pedido de la web. Criterio confirmado por el
+ * cliente el 25/11/2026 (reemplaza el supuesto «NIF primero» de ADR-020,
+ * ver ADR-027): **manda el email**.
  *
- * Upsert atómico (`INSERT ... ON CONFLICT`), no "SELECT y después INSERT":
- * dos pedidos del MISMO cliente nuevo pueden procesarse casi al mismo
- * tiempo (webhook + polling) y el lock de concurrencia de
- * `transformarComanda` es por `woo_order_id`, no por cliente — no los
- * serializa entre sí. El upsert nunca pisa un dato que la oficina ya haya
- * cargado a mano vía `PATCH /clients/:id` (`COALESCE(client.columna, ...)`
- * en el `DO UPDATE`, sólo completa huecos).
+ * 1. Si el email ya es de un cliente (sin distinguir mayúsculas), es ése.
+ *    Si el pedido trae otro NIF y `permetreCanviNif`, el cliente se queda
+ *    con el NIF del pedido (decisión del cliente) y se devuelve un
+ *    `avisNif` — salvo que ese NIF ya sea de otro cliente: entonces
+ *    conserva el suyo y el aviso lo dice. Si no tenía NIF, se le completa
+ *    sin aviso.
+ * 2. Si el email no es de nadie, por NIF normalizado (`B-43.123.456` =
+ *    `b43123456`).
+ * 3. Si tampoco, se crea (upsert, para la carrera de dos pedidos del mismo
+ *    cliente nuevo procesados a la vez).
+ *
+ * Fuera del NIF del punto 1, nunca pisa un dato ya cargado (sólo completa
+ * huecos). `clientId` es `null` si el pedido no trae ni NIF ni email.
+ * Puede lanzar `ConflicteIdentitatClient` (ver `INDEXS_UNICS_CLIENT`).
  */
-export async function resolverOCrearClient(
+export async function resolverClientComanda(
   client: Consultable,
   wooOrder: WooOrder,
-): Promise<string | null> {
+  opcions: OpcionsResolucioClient,
+): Promise<ResolucioClient> {
   const nif = extraerNif(wooOrder);
   const email = extraerEmail(wooOrder);
-  if (nif === null && email === null) return null;
+  if (nif === null && email === null) return { clientId: null, avisNif: null };
 
-  const valores = [
-    nif,
-    email,
-    extraerNom(wooOrder),
-    extraerOpcional(wooOrder.billing.phone),
-    extraerOpcional(wooOrder.billing.city),
-    wooOrder.customer_id > 0 ? wooOrder.customer_id : null,
-    wooOrder.customer_id === 0,
-    CODI_TARIFA_WEB,
-  ];
+  const nom = extraerNom(wooOrder);
+  const telefon = extraerOpcional(wooOrder.billing.phone);
+  const poblacio = extraerOpcional(wooOrder.billing.city);
+  const wooCustomerId = wooOrder.customer_id > 0 ? wooOrder.customer_id : null;
 
-  // Sólo dos valores posibles, fijados acá mismo — nunca viene de la
-  // petición, así que interpolarlo en el SQL no es una inyección.
-  const columnaConflicto = nif !== null ? 'nif' : 'email';
-
-  // SAVEPOINT antes del INSERT riesgoso: un unique_violation dentro de una
-  // transacción no sólo falla ESA sentencia, deja TODA la transacción en
-  // estado "aborted" hasta el próximo ROLLBACK — capturar el error en JS no
-  // alcanza para seguir usando la misma conexión. El caller (transformarComanda)
-  // sigue escribiendo más filas (comanda, comanda_linia, incidencia_comanda)
-  // en la MISMA transacción después de este conflicto, así que hace falta
-  // acotar el daño a un SAVEPOINT propio y volver a él, no a toda la
-  // transacción entera.
+  // SAVEPOINT: un unique_violation deja TODA la transacción en estado
+  // "aborted" hasta el próximo ROLLBACK, y quien llama
+  // (transformarComanda) sigue escribiendo en la misma transacción después
+  // de un conflicto — hay que acotar el daño a este SAVEPOINT (ADR-023).
   await client.query('SAVEPOINT resolucio_client');
   try {
-    const existent = nif !== null ? await cercarClientPerNif(client, nif, email) : null;
-    // Mismo criterio que el `DO UPDATE` de abajo: sólo completa huecos.
-    // Rellenar un hueco (p. ej. el email) todavía puede chocar con otro
-    // cliente — lo captura el mismo catch como conflicto de identidad.
+    let avisNif: AvisNifDiferent | null = null;
+    // NIF que se escribe en el cliente encontrado; `null` = no se toca.
+    let nifNou: string | null = null;
+
+    let trobat = email !== null ? await cercarPerEmail(client, email) : null;
+    if (trobat !== null) {
+      const nifActual = trobat.nif;
+      const nifCanvia =
+        nif !== null && (nifActual === null || normalitzarNif(nifActual) !== normalitzarNif(nif));
+      if (nif !== null && nifCanvia && (nifActual === null || opcions.permetreCanviNif)) {
+        const altre = await altreClientAmbNif(client, nif, trobat.id);
+        if (altre === null) {
+          nifNou = nif;
+          if (nifActual !== null) {
+            avisNif = { nifAnterior: nifActual, nifComanda: nif, codiAltreClient: null };
+          }
+        } else if (opcions.permetreCanviNif) {
+          avisNif = { nifAnterior: nifActual, nifComanda: nif, codiAltreClient: altre.codi ?? '' };
+        }
+      }
+    } else if (nif !== null) {
+      trobat = await cercarPerNif(client, nif);
+    }
+
     const res =
-      existent !== null
-        ? await client.query<{ id: string; id_seq: string }>(
+      trobat !== null
+        ? await client.query<{ id: string; id_seq: string; existia?: boolean }>(
+            // El email sólo se completa si faltaba: por el camino del NIF
+            // ningún cliente tiene ya ese email (punto 1). El
+            // woo_customer_id, sólo si no es de otro cliente.
             `UPDATE client SET
-               nif = COALESCE(nif, $2),
+               nif = COALESCE($2, nif),
                email = COALESCE(email, $3),
                nom = COALESCE(nom, $4),
                telefon = COALESCE(telefon, $5),
                poblacio = COALESCE(poblacio, $6),
-               woo_customer_id = COALESCE(woo_customer_id, $7)
+               woo_customer_id = COALESCE(
+                 woo_customer_id,
+                 CASE WHEN NOT EXISTS (SELECT 1 FROM client altre WHERE altre.woo_customer_id = $7)
+                   THEN $7::bigint END
+               )
              WHERE id = $1
-               AND (nif IS NULL OR ${NIF_NORMALITZAT('nif')} = ${NIF_NORMALITZAT('$2')})
              RETURNING id, id_seq`,
-            [existent, ...valores.slice(0, 6)],
+            [trobat.id, nifNou, email, nom, telefon, poblacio, wooCustomerId],
           )
-        : await client.query<{ id: string; id_seq: string }>(
-            // Tarea 42: un cliente nuevo de la web nace con la tarifa 01. El
-            // `DO UPDATE` no toca `tarifa_id` a propósito: la tarifa de un cliente
-            // que ya existía (con otra o sin ninguna) no se cambia.
+        : await client.query<{ id: string; id_seq: string; existia: boolean }>(
+            // Tarea 42: un cliente nuevo de la web nace con la tarifa 01.
+            // `columnaConflicto` sólo puede ser uno de estos dos literales
+            // fijados acá — interpolarlo no es una inyección.
             `INSERT INTO client (nif, email, nom, telefon, poblacio, woo_customer_id, es_convidat, tarifa_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT id FROM tarifa WHERE codi = $8))
-       ON CONFLICT (${columnaConflicto}) WHERE ${columnaConflicto} IS NOT NULL DO UPDATE SET
-         nif = COALESCE(client.nif, EXCLUDED.nif),
-         email = COALESCE(client.email, EXCLUDED.email),
-         nom = COALESCE(client.nom, EXCLUDED.nom),
-         telefon = COALESCE(client.telefon, EXCLUDED.telefon),
-         poblacio = COALESCE(client.poblacio, EXCLUDED.poblacio),
-         woo_customer_id = COALESCE(client.woo_customer_id, EXCLUDED.woo_customer_id)
-       RETURNING id, id_seq`,
-            valores,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT id FROM tarifa WHERE codi = $8))
+             ON CONFLICT (${email !== null ? 'email' : 'nif'})
+               WHERE ${email !== null ? 'email' : 'nif'} IS NOT NULL
+             DO UPDATE SET
+               nif = COALESCE(client.nif, EXCLUDED.nif),
+               email = COALESCE(client.email, EXCLUDED.email),
+               nom = COALESCE(client.nom, EXCLUDED.nom),
+               telefon = COALESCE(client.telefon, EXCLUDED.telefon),
+               poblacio = COALESCE(client.poblacio, EXCLUDED.poblacio),
+               woo_customer_id = COALESCE(client.woo_customer_id, EXCLUDED.woo_customer_id)
+             RETURNING id, id_seq, (xmax <> 0) AS existia`,
+            [
+              nif,
+              email,
+              nom,
+              telefon,
+              poblacio,
+              wooCustomerId,
+              wooOrder.customer_id === 0,
+              CODI_TARIFA_WEB,
+            ],
           );
-    if (res.rows[0] === undefined) {
-      // Sólo el UPDATE puede no devolver fila: entre la búsqueda y el
-      // UPDATE otro pedido del mismo email (el lock es por pedido, no por
-      // cliente) le puso a ese cliente un NIF distinto, o el cliente se
-      // borró. Volver a comprobar la premisa en el WHERE evita vincular
-      // este pedido en silencio a un cliente con otro NIF: es un
-      // conflicto de identidad como cualquier otro.
+    const fila = res.rows[0];
+    if (fila === undefined) {
+      // Sólo el UPDATE puede no devolver fila: el cliente se borró entre
+      // la búsqueda y el UPDATE.
       await client.query('ROLLBACK TO SAVEPOINT resolucio_client');
-      throw new ConflicteIdentitatClient('nif');
+      throw new Error('El client trobat ha desaparegut abans de vincular-lo');
     }
     await client.query('RELEASE SAVEPOINT resolucio_client');
 
-    // Todo cliente recibe un `codi` autogenerado, sin importar el origen
-    // (sync o alta manual) — ver assignarCodiAutogenerat. Acá cubre los
-    // dos caminos de este upsert sin distinguirlos: un cliente
-    // nuevo siempre tiene `codi` null recién insertado; uno existente
-    // resuelto por `ON CONFLICT` puede ya tener `codi` y no se toca.
-    await assignarCodiAutogenerat(client, res.rows[0].id, res.rows[0].id_seq);
+    // Carrera: otro pedido del mismo email nuevo creó el cliente entre la
+    // búsqueda y el INSERT (sin fila, el FOR UPDATE no bloqueó nada) y el
+    // `DO UPDATE` sólo completó huecos. Se repite la resolución, que ahora
+    // lo encuentra por email y aplica el criterio de ADR-027 (NIF y aviso).
+    if (fila.existia === true && email !== null) {
+      return resolverClientComanda(client, wooOrder, opcions);
+    }
 
-    return res.rows[0].id;
+    // Todo cliente recibe un `codi` autogenerado (ver
+    // assignarCodiAutogenerat); uno que ya lo tenía no se toca.
+    await assignarCodiAutogenerat(client, fila.id, fila.id_seq);
+
+    return { clientId: fila.id, avisNif };
   } catch (err) {
-    // 23505 = unique_violation. El índice que chocó nunca es el que declara
-    // `ON CONFLICT` (ese lo resuelve Postgres solo) — es SIEMPRE uno de los
-    // otros dos, la firma del hallazgo de ADR-020/023: el NIF o el email
-    // resuelto para este pedido ya pertenece a otro cliente distinto del
-    // que coincide por `columnaConflicto`. Cualquier otro error (columna
-    // que no existe, conexión caída, lo que sea) se relanza tal cual —
-    // sólo estos tres índices conocidos se tratan como caso de negocio.
+    // 23505 = unique_violation contra uno de los tres índices conocidos:
+    // caso de negocio (ADR-023), no error del sistema. Cualquier otro error
+    // se relanza tal cual.
     if (err instanceof DatabaseError && err.code === '23505' && err.constraint !== undefined) {
       const index = INDEXS_UNICS_CLIENT[err.constraint];
       if (index !== undefined) {
@@ -247,4 +319,12 @@ export async function resolverOCrearClient(
     }
     throw err;
   }
+}
+
+/** Atajo de `resolverClientComanda` que sólo devuelve el id (pedido nuevo). */
+export async function resolverOCrearClient(
+  client: Consultable,
+  wooOrder: WooOrder,
+): Promise<string | null> {
+  return (await resolverClientComanda(client, wooOrder, { permetreCanviNif: true })).clientId;
 }

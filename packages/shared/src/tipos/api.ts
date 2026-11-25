@@ -302,6 +302,8 @@ export interface ComandaResumApi {
   totalIncidencies: number;
   /** El `tipus` cuando todas las incidencias comparten el mismo; `null` si no hay ninguna o si hay de más de un tipo. */
   tipusIncidencia: string | null;
+  /** Hay alguna incidencia de `TIPUS_INCIDENCIA_CLIENT` sin revisar (ADR-027). */
+  avisClient: boolean;
 }
 
 export interface ComandaLiniaApi {
@@ -363,10 +365,26 @@ export interface ComandaLiniaApi {
 
 /** Una fila de `incidencia_comanda` — el motivo detrás de `estat: "amb_incidencia"`. */
 export interface IncidenciaComandaApi {
+  /** UUID de la incidencia — para marcarla revisada (`POST /comandes/:id/incidencies/:incidenciaId/revisada`). */
+  id: string;
   tipus: string;
   detall: string;
   creatA: string;
+  /** `true` = ya revisada/resuelta (a mano por oficina o sola, cuando el sync vincula el cliente). */
+  resolta: boolean;
 }
+
+/**
+ * Incidencias que piden a oficina revisar el CLIENTE de un pedido de la
+ * web (ADR-027): se muestran como aviso en la ficha del pedido y marcan el
+ * pedido en el listado mientras sigan abiertas.
+ */
+export const TIPUS_INCIDENCIA_CLIENT = [
+  'nif_diferent',
+  'conflicte_identitat_client',
+  'sense_dades_client',
+] as const;
+export type TipusIncidenciaClient = (typeof TIPUS_INCIDENCIA_CLIENT)[number];
 
 /**
  * Respuesta de `POST /comandes/duplicar` (tarea 17): una entrada por

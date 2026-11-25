@@ -133,10 +133,6 @@ que se cierren — el código no debería anticiparlas ni asumir una respuesta:
 - **Asignación de transportista**: los 11 métodos de envío observados en
   WooCommerce mezclan zona, gratuidad e idioma, y no identifican al
   transportista real.
-- **Criterio final de identificación de cliente**: el NIF llega en dos
-  campos distintos de WooCommerce con cobertura parcial y casos de
-  discrepancia; falta definir la regla de negocio final (más allá del
-  fallback técnico que se implemente).
 - **Campos de agrupación del catálogo**: cómo se clasifican los artículos en
   las pantallas (por categoría, por tipo de corte, etc.).
 - **Bilingüismo del sistema**: si la UI final es sólo catalán o

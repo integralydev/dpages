@@ -7,7 +7,11 @@ import { Client } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { env } from '../config/env.js';
 import { migrarArriba } from '../db/migrate.js';
-import { ConflicteIdentitatClient, resolverOCrearClient } from './resolucio-client.js';
+import {
+  ConflicteIdentitatClient,
+  resolverClientComanda,
+  resolverOCrearClient,
+} from './resolucio-client.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -248,10 +252,8 @@ describe('resolverOCrearClient (Postgres real, esquema aislado)', () => {
     });
   });
 
-  describe('conflictos reales de identidad (dos NIF/email/woo_customer_id que no coinciden entre sí) — ADR-023', () => {
-    it('NIF nuevo cuyo email ya pertenece a OTRO cliente existente: lanza ConflicteIdentitatClient("email"), no duplica ni mezcla silenciosamente', async () => {
-      // Cliente A: nif=NIF-A, email=compartido@example.com, customer_id propio
-      // (distinto del de B) para aislar el conflicto en el email, no en woo_customer_id.
+  describe('email con otro NIF (ADR-027) y conflictos que quedan (ADR-023)', () => {
+    it('ADR-027: NIF nuevo cuyo email ya es de otro cliente — manda el email: se asigna a ese cliente, que pasa a tener el NIF nuevo, con aviso', async () => {
       const pedidoA: WooOrder = {
         ...comandaSimple,
         id: 777101,
@@ -262,32 +264,108 @@ describe('resolverOCrearClient (Postgres real, esquema aislado)', () => {
       await client.query('BEGIN');
       const clienteA = await resolverOCrearClient(client, pedidoA);
       await client.query('COMMIT');
-      expect(clienteA).not.toBeNull();
 
-      // Pedido B: NIF distinto (nunca visto) y customer_id distinto, pero el
-      // MISMO email que A. El upsert declara ON CONFLICT (nif) — el
-      // conflicto real ocurre en el índice único de email, que no es el
-      // target declarado, así que Postgres lo rechaza con un error real,
-      // que resolverOCrearClient traduce a ConflicteIdentitatClient.
       const pedidoB: WooOrder = {
-        ...comandaSimple,
+        ...pedidoA,
         id: 777102,
         customer_id: 222222,
         meta_data: [{ id: 2, key: 'nif', value: 'NIF-B' }],
+        billing: { ...comandaSimple.billing, email: 'Compartido@Example.com' },
+      };
+      await client.query('BEGIN');
+      const resolucio = await resolverClientComanda(client, pedidoB, { permetreCanviNif: true });
+      await client.query('COMMIT');
+
+      expect(resolucio.clientId).toBe(clienteA);
+      expect(resolucio.avisNif).toEqual({
+        nifAnterior: 'NIF-A',
+        nifComanda: 'NIF-B',
+        codiAltreClient: null,
+      });
+      const fila = await client.query<{ nif: string; woo_customer_id: string }>(
+        'SELECT nif, woo_customer_id FROM client WHERE id = $1',
+        [clienteA],
+      );
+      // Se queda el NIF del pedido nuevo (decisión del cliente); el
+      // woo_customer_id que ya tenía no se pisa.
+      expect(fila.rows[0]).toEqual({ nif: 'NIF-B', woo_customer_id: '111111' });
+    });
+
+    it('ADR-027: sin permetreCanviNif (pedido ya vinculado que se reprocesa) no toca el NIF ni avisa', async () => {
+      const pedidoViejo: WooOrder = {
+        ...comandaSimple,
+        id: 777110,
+        customer_id: 0,
+        meta_data: [{ id: 1, key: 'nif', value: 'NIF-VELL' }],
         billing: { ...comandaSimple.billing, email: 'compartido@example.com' },
       };
-
       await client.query('BEGIN');
-      const promesa = resolverOCrearClient(client, pedidoB);
-      await expect(promesa).rejects.toBeInstanceOf(ConflicteIdentitatClient);
-      await expect(promesa).rejects.toMatchObject({ index: 'email' });
-      await client.query('ROLLBACK');
+      const resolucio = await resolverClientComanda(client, pedidoViejo, {
+        permetreCanviNif: false,
+      });
+      await client.query('COMMIT');
 
-      // No quedó ningún cliente con nif='NIF-B': el intento se revirtió entero.
-      const total = await client.query<{ count: string }>(
-        `SELECT count(*) FROM client WHERE nif = 'NIF-B'`,
+      expect(resolucio.avisNif).toBeNull();
+      const fila = await client.query<{ nif: string }>('SELECT nif FROM client WHERE id = $1', [
+        resolucio.clientId,
+      ]);
+      expect(fila.rows[0]?.nif).toBe('NIF-B');
+    });
+
+    it('ADR-027: el NIF del pedido ya es de OTRO cliente — se asigna por email, conserva su NIF y el aviso dice de quién es', async () => {
+      const altre: WooOrder = {
+        ...comandaSimple,
+        id: 777111,
+        customer_id: 0,
+        meta_data: [{ id: 1, key: 'nif', value: 'NIF-ALTRE' }],
+        billing: { ...comandaSimple.billing, email: 'altre.client@example.com' },
+      };
+      await client.query('BEGIN');
+      const altreId = await resolverOCrearClient(client, altre);
+      await client.query('COMMIT');
+      const codiAltre = await client.query<{ codi: string }>(
+        'SELECT codi FROM client WHERE id = $1',
+        [altreId],
       );
-      expect(total.rows[0]?.count).toBe('0');
+
+      const pedido: WooOrder = {
+        ...altre,
+        id: 777112,
+        meta_data: [{ id: 2, key: 'nif', value: 'nif-altre' }],
+        billing: { ...comandaSimple.billing, email: 'compartido@example.com' },
+      };
+      await client.query('BEGIN');
+      const resolucio = await resolverClientComanda(client, pedido, { permetreCanviNif: true });
+      await client.query('COMMIT');
+
+      expect(resolucio.clientId).not.toBe(altreId);
+      expect(resolucio.avisNif).toEqual({
+        nifAnterior: 'NIF-B',
+        nifComanda: 'nif-altre',
+        codiAltreClient: codiAltre.rows[0]!.codi,
+      });
+      const fila = await client.query<{ nif: string }>('SELECT nif FROM client WHERE id = $1', [
+        resolucio.clientId,
+      ]);
+      expect(fila.rows[0]?.nif).toBe('NIF-B');
+    });
+
+    it('ADR-027: el mismo NIF con otro email (otra persona de la misma empresa) sigue resolviendo por NIF, sin aviso', async () => {
+      const pedido: WooOrder = {
+        ...comandaSimple,
+        id: 777113,
+        customer_id: 0,
+        meta_data: [{ id: 1, key: 'nif', value: 'NIF-B' }],
+        billing: { ...comandaSimple.billing, email: 'altra.persona@example.com' },
+      };
+      await client.query('BEGIN');
+      const resolucio = await resolverClientComanda(client, pedido, { permetreCanviNif: true });
+      await client.query('COMMIT');
+
+      const compartit = await client.query<{ id: string }>(
+        `SELECT id FROM client WHERE email = 'compartido@example.com'`,
+      );
+      expect(resolucio).toEqual({ clientId: compartit.rows[0]!.id, avisNif: null });
     });
 
     it('woo_customer_id ya pertenece a otro cliente con NIF distinto: lanza ConflicteIdentitatClient("woo_customer_id")', async () => {
