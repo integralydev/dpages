@@ -414,7 +414,13 @@ export default function OrderDetailPage() {
       {duplicateError && <p className="mb-4 text-sm text-red-600">{duplicateError}</p>}
       {lineWarning && <p className="mb-4 text-sm text-amber-700">{lineWarning}</p>}
 
-      {order && <AvisosClient incidencies={order.incidencies} onRevisar={handleReviewIncidence} />}
+      {order && (
+        <AvisosClient
+          incidencies={order.incidencies}
+          teClient={order.client !== null}
+          onRevisar={handleReviewIncidence}
+        />
+      )}
 
       {order && (
         <OrderForm

@@ -315,6 +315,24 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
     // ADR-027: avís de client obert → avisClient; «Revisat» el tanca
     // (només els tipus de client: article_no_resolt dona 404).
     expect(resum?.avisClient).toBe(true);
+
+    // Si l'oficina posa el client a mà, el «client no assignat» ja no és
+    // un avís (encara que la incidència segueixi oberta).
+    const clientMa = await entorn.poolTest.query<{ id: string }>(
+      `INSERT INTO client (nom) VALUES ('Client posat a mà') RETURNING id`,
+    );
+    await entorn.poolTest.query(`UPDATE comanda SET client_id = $2 WHERE id = $1`, [
+      comandaUuid.rows[0]!.id,
+      clientMa.rows[0]!.id,
+    ]);
+    const ambClient = cuerpoJson<RespostaPaginada<ComandaResumApi>>(
+      await fastify.inject({ method: 'GET', url: '/api/v1/comandes' }),
+    );
+    expect(ambClient.dades.find((c) => c.id === comandaId)?.avisClient).toBe(false);
+    await entorn.poolTest.query(`UPDATE comanda SET client_id = NULL WHERE id = $1`, [
+      comandaUuid.rows[0]!.id,
+    ]);
+
     const conflicte = detall.incidencies[1]!;
     const article = detall.incidencies[0]!;
     expect(conflicte.resolta).toBe(false);

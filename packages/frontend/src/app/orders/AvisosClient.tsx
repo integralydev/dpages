@@ -1,6 +1,10 @@
 'use client';
 
-import { TIPUS_INCIDENCIA_CLIENT, type TipusIncidenciaClient } from '@dpages/shared';
+import {
+  TIPUS_INCIDENCIA_CLIENT,
+  TIPUS_INCIDENCIA_SENSE_CLIENT,
+  type TipusIncidenciaClient,
+} from '@dpages/shared';
 import { AlertTriangle } from 'lucide-react';
 import { useState } from 'react';
 import { ApiError, type IncidenciaComandaApi } from '@/lib/api';
@@ -36,21 +40,36 @@ function esAvisClient(tipus: string): tipus is TipusIncidenciaClient {
   return (TIPUS_INCIDENCIA_CLIENT as readonly string[]).includes(tipus);
 }
 
-export function avisosClientOberts(incidencies: IncidenciaComandaApi[]): IncidenciaComandaApi[] {
-  return incidencies.filter((inc) => !inc.resolta && esAvisClient(inc.tipus));
+/**
+ * Avisos per mostrar: els no revisats. Els de «client no assignat» només si
+ * la comanda continua sense client (l'oficina el pot haver posat a mà).
+ */
+export function avisosClientOberts(
+  incidencies: IncidenciaComandaApi[],
+  teClient: boolean,
+): IncidenciaComandaApi[] {
+  return incidencies.filter(
+    (inc) =>
+      !inc.resolta &&
+      esAvisClient(inc.tipus) &&
+      !(teClient && (TIPUS_INCIDENCIA_SENSE_CLIENT as readonly string[]).includes(inc.tipus)),
+  );
 }
 
 export function AvisosClient({
   incidencies,
+  teClient,
   onRevisar,
 }: {
   incidencies: IncidenciaComandaApi[];
+  /** La comanda desada té client (no el que s'estigui editant sense desar). */
+  teClient: boolean;
   /** Marca l'avís com a revisat (POST .../revisada). */
   onRevisar: (incidenciaId: string) => Promise<void>;
 }) {
   const [enCurs, setEnCurs] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const oberts = avisosClientOberts(incidencies);
+  const oberts = avisosClientOberts(incidencies, teClient);
   if (oberts.length === 0) return null;
 
   async function revisar(id: string) {

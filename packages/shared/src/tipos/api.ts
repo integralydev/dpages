@@ -302,7 +302,10 @@ export interface ComandaResumApi {
   totalIncidencies: number;
   /** El `tipus` cuando todas las incidencias comparten el mismo; `null` si no hay ninguna o si hay de más de un tipo. */
   tipusIncidencia: string | null;
-  /** Hay alguna incidencia de `TIPUS_INCIDENCIA_CLIENT` sin revisar (ADR-027). */
+  /**
+   * Hay alguna incidencia de `TIPUS_INCIDENCIA_CLIENT` sin revisar (ADR-027);
+   * las de `TIPUS_INCIDENCIA_SENSE_CLIENT` sólo si la comanda no tiene cliente.
+   */
   avisClient: boolean;
 }
 
@@ -385,6 +388,17 @@ export const TIPUS_INCIDENCIA_CLIENT = [
   'sense_dades_client',
 ] as const;
 export type TipusIncidenciaClient = (typeof TIPUS_INCIDENCIA_CLIENT)[number];
+
+/**
+ * De `TIPUS_INCIDENCIA_CLIENT`, los que dicen «el pedido no tiene cliente»:
+ * sólo cuentan como aviso mientras la comanda siga sin cliente. Si oficina
+ * lo pone a mano, el aviso deja de tener sentido aunque la incidencia siga
+ * abierta (el sync sólo la cierra cuando vincula él).
+ */
+export const TIPUS_INCIDENCIA_SENSE_CLIENT = [
+  'conflicte_identitat_client',
+  'sense_dades_client',
+] as const satisfies readonly TipusIncidenciaClient[];
 
 /**
  * Respuesta de `POST /comandes/duplicar` (tarea 17): una entrada por

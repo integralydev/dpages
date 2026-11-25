@@ -1,4 +1,9 @@
-import { TIPUS_CLIENT, TIPUS_INCIDENCIA_CLIENT, type TipusClient } from '@dpages/shared';
+import {
+  TIPUS_CLIENT,
+  TIPUS_INCIDENCIA_CLIENT,
+  TIPUS_INCIDENCIA_SENSE_CLIENT,
+  type TipusClient,
+} from '@dpages/shared';
 import type {
   ComandaDetallApi,
   ComandaDuplicadaApi,
@@ -153,6 +158,11 @@ function aApiResum(fila: FilaComandaResum): ComandaResumApi {
 // comanda comparten el mismo tipus (min() de un conjunto de un solo valor
 // distinto); si hay más de un tipo mezclado, queda null — "resumen liviano",
 // el detalle completo por tipo está en GET /comandes/:id (incidencies[]).
+/** Lista SQL de constantes fijas del código (nunca valores de la petición). */
+function sqlLlista(valors: readonly string[]): string {
+  return valors.map((v) => `'${v}'`).join(', ');
+}
+
 const SELECT_COMANDA_RESUM = `
   SELECT c.id_seq, c.num, c.num_woo, oc.codi AS origen, c.estat, c.calcul_per_pes,
          cl.id_seq AS client_id_seq, cl.nom AS client_nom, cl.poblacio AS client_poblacio,
@@ -180,8 +190,14 @@ const SELECT_COMANDA_RESUM = `
   LEFT JOIN LATERAL (
     SELECT count(*) AS total_incidencies,
            CASE WHEN count(DISTINCT tipus) = 1 THEN min(tipus) END AS tipus_incidencia,
-           -- Valores fijos de TIPUS_INCIDENCIA_CLIENT (packages/shared), no de la petición.
-           bool_or(NOT resolta AND tipus IN (${TIPUS_INCIDENCIA_CLIENT.map((t) => `'${t}'`).join(', ')})) AS avis_client
+           -- Valores fijos de packages/shared, no de la petición. Los de
+           -- TIPUS_INCIDENCIA_SENSE_CLIENT sólo cuentan si la comanda sigue
+           -- sin cliente (oficina puede haberlo puesto a mano).
+           bool_or(
+             NOT resolta
+             AND tipus IN (${sqlLlista(TIPUS_INCIDENCIA_CLIENT)})
+             AND (c.client_id IS NULL OR tipus NOT IN (${sqlLlista(TIPUS_INCIDENCIA_SENSE_CLIENT)}))
+           ) AS avis_client
     FROM incidencia_comanda WHERE comanda_id = c.id
   ) inc ON true
   -- Fechas de producción DISTINTAS entre las líneas del pedido, ordenadas
