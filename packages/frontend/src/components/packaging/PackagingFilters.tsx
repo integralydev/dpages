@@ -14,6 +14,7 @@ import { useCategories } from '@/hooks/useCategories';
 import { useOrigensComanda } from '@/hooks/useOrigensComanda';
 import type { PackagingPanelFilters } from '@/hooks/usePanellEmpaquetat';
 import { api, type ClientApi, type RespostaPaginada } from '@/lib/api';
+import { formatData } from '@/lib/dates';
 import { MAX_LOCAL_COMBOBOX_RESULTS, matchesProductQuery } from '@/lib/productSearch';
 
 // Filtres del Panell Empaquetat. Vivien a packaging/page.tsx; es comparteixen
@@ -176,6 +177,48 @@ export function usePackagingFilters() {
     ],
   );
 
+  // Etiquetes llegibles dels filtres actius, per a la capçalera dels PDF
+  // del Panell de Compres (25/11/2026), mateix criteri que Obrador.
+  const etiquetes = useMemo(() => {
+    const rang = (des: string, fins: string) =>
+      des && fins
+        ? `${formatData(des, false)} - ${formatData(fins, false)}`
+        : des
+          ? `des del ${formatData(des, false)}`
+          : `fins al ${formatData(fins, false)}`;
+    return [
+      (shippingDateFrom || shippingDateTo) &&
+        `Data d'expedició: ${rang(shippingDateFrom, shippingDateTo)}`,
+      selectedCarriers.length > 0 &&
+        `Transportista: ${selectedCarriers.map((item) => item.label).join(', ')}`,
+      selectedClient && `Client: ${selectedClient.label}`,
+      deliveryDateFilter && `Data de lliurament: ${formatData(deliveryDateFilter, false)}`,
+      selectedProducts.length > 0 &&
+        `Productes: ${selectedProducts.map((item) => item.label).join(', ')}`,
+      productSearch.trim() && `Cerca producte: ${productSearch.trim()}`,
+      orderNumberSearch.trim() && `Núm. comanda: ${orderNumberSearch.trim()}`,
+      categoryFilter !== ALL_FEM && `Categoria: ${categoryFilter}`,
+      originFilter !== ALL && `Origen: ${originFilter}`,
+      confirmacioFilter !== ALL_FEM && `Estat: ${confirmacioFilter}`,
+      observacionsFilter !== ALL_FEM && observacionsFilter,
+      produirFilter !== ALL_FEM && produirFilter,
+    ].filter((etiqueta): etiqueta is string => Boolean(etiqueta));
+  }, [
+    shippingDateFrom,
+    shippingDateTo,
+    selectedCarriers,
+    selectedClient,
+    deliveryDateFilter,
+    selectedProducts,
+    productSearch,
+    orderNumberSearch,
+    categoryFilter,
+    originFilter,
+    confirmacioFilter,
+    observacionsFilter,
+    produirFilter,
+  ]);
+
   function clearFilters() {
     setShippingDateFrom('');
     setShippingDateTo('');
@@ -194,6 +237,7 @@ export function usePackagingFilters() {
 
   return {
     filters,
+    etiquetes,
     state: {
       categories,
       origins,

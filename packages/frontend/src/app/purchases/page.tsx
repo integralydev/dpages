@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronRight } from 'lucide-react';
+import { CheckCheck, ChevronRight, Printer } from 'lucide-react';
 import { Fragment, useState } from 'react';
 import { PackagingFilterBar, usePackagingFilters } from '@/components/packaging/PackagingFilters';
 import { PackagingCard, PackagingRow } from '@/components/packaging/PackagingLines';
@@ -14,8 +14,17 @@ import {
   type PackagingPanelFilters,
   usePanellEmpaquetat,
 } from '@/hooks/usePanellEmpaquetat';
-import type { FilaPanellCompresApi, FilaPanellEmpaquetatApi } from '@/lib/api';
+import {
+  api,
+  ApiError,
+  obtenirTotesLesPagines,
+  type FilaPanellCompresApi,
+  type FilaPanellEmpaquetatApi,
+  type PanellCompresApi,
+  type PanellEmpaquetatApi,
+} from '@/lib/api';
 import { formatDecimal } from '@/lib/decimals';
+import { descarregarPdfCompresAgrupat, descarregarPdfCompresDesglossat } from '@/lib/ordersPdf';
 
 // Tasca 41 (Excel del client): la mateixa informació que el Panell
 // Empaquetat (mateixos filtres, mateixes línies, mateixa edició d'unitats i
@@ -189,7 +198,7 @@ function ClientLinies({
 }
 
 export default function PurchasesPage() {
-  const { filters, state: filterState } = usePackagingFilters();
+  const { filters, etiquetes, state: filterState } = usePackagingFilters();
   const {
     data: grups,
     totals,
@@ -237,6 +246,99 @@ export default function PurchasesPage() {
     else setUndoError(result.generalError);
   }
 
+  // Les línies dels clients desplegats es carreguen a part (ClientLinies):
+  // després de «Marcar tot com a lliurat» es tornen a muntar amb aquesta
+  // clau perquè mostrin les línies ja confirmades.
+  const [versioLinies, setVersioLinies] = useState(0);
+
+  // 25/11/2026 (Ari): la vedella s'envia des d'aquest panell. Com a
+  // Empaquetat (tasca 51), confirma d'un cop totes les línies pendents dels
+  // filtres actius, de tots els clients i no només de la pàgina visible,
+  // amb les unitats i els quilos demanats. Mateix endpoint i mateixos
+  // filtres que Empaquetat.
+  const pendents = totals?.liniesPendents ?? 0;
+  const [isConfirmingMarkAll, setIsConfirmingMarkAll] = useState(false);
+  const [isMarkingAll, setIsMarkingAll] = useState(false);
+  const [markAllError, setMarkAllError] = useState<string | null>(null);
+  const [markAllNotice, setMarkAllNotice] = useState<string | null>(null);
+
+  async function handleConfirmMarkAll() {
+    setIsMarkingAll(true);
+    setMarkAllError(null);
+    try {
+      // `confirmacio` no aplica: l'acció ja només toca les pendents.
+      const filtresAccio = { ...filters };
+      delete filtresAccio.confirmacio;
+      const resposta = await api.post<{ marcades: number; congeladesOmeses: number }>(
+        '/panells/empaquetat/marcar-lliurades',
+        {},
+        filtresAccio,
+      );
+      setIsConfirmingMarkAll(false);
+      setMarkAllNotice(
+        resposta.congeladesOmeses > 0
+          ? `${resposta.marcades} línies marcades com a enviades. ${resposta.congeladesOmeses} no s'han pogut marcar perquè la comanda està congelada.`
+          : `${resposta.marcades} línies marcades com a enviades.`,
+      );
+      refetch();
+      setVersioLinies((versio) => versio + 1);
+    } catch (caught) {
+      setMarkAllError(caught instanceof ApiError ? caught.message : "No s'han pogut marcar.");
+    } finally {
+      setIsMarkingAll(false);
+    }
+  }
+
+  // Com «Imprimir llista desglossada / agrupada» d'Obrador: TOTS els
+  // clients dels filtres actius (no només la pàgina visible). El desglossat
+  // porta, sota cada client, totes les seves línies (enviades i pendents).
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
+
+  async function handlePrint(desglossat: boolean) {
+    if (!totals) return;
+    setIsPrinting(true);
+    setPrintError(null);
+    try {
+      const totsElsGrups = await obtenirTotesLesPagines((pagina) =>
+        api.get<PanellCompresApi>('/panells/compres', { ...filters, mida: 200, pagina }),
+      );
+      if (!desglossat) {
+        await descarregarPdfCompresAgrupat({ grups: totsElsGrups, totals, filtres: etiquetes });
+        return;
+      }
+      const linies = await obtenirTotesLesPagines((pagina) =>
+        api.get<PanellEmpaquetatApi>('/panells/empaquetat', {
+          ...filters,
+          ordre: 'comanda',
+          mida: 200,
+          pagina,
+        }),
+      );
+      const liniesPerClient = new Map<number, FilaPanellEmpaquetatApi[]>();
+      for (const linia of linies) {
+        const clau = linia.clientId ?? 0;
+        const delClient = liniesPerClient.get(clau) ?? [];
+        delClient.push(linia);
+        liniesPerClient.set(clau, delClient);
+      }
+      await descarregarPdfCompresDesglossat({
+        grups: totsElsGrups,
+        liniesPerClient,
+        totals,
+        filtres: etiquetes,
+      });
+    } catch (caught) {
+      setPrintError(
+        caught instanceof ApiError
+          ? `No s'ha pogut generar el PDF: ${caught.message}`
+          : "No s'ha pogut generar el PDF.",
+      );
+    } finally {
+      setIsPrinting(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -259,9 +361,47 @@ export default function PurchasesPage() {
               value={totals?.linies ?? 0}
               secondary={`${totals?.liniesConfirmades ?? 0} confirmades · ${totals?.liniesPendents ?? 0} pendents`}
             />
+            {/* Un sota l'altre, com a Obrador. */}
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setMarkAllError(null);
+                  setMarkAllNotice(null);
+                  setIsConfirmingMarkAll(true);
+                }}
+                disabled={isLoading || pendents === 0}
+                className="flex items-center justify-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <CheckCheck className="h-4 w-4" />
+                Marcar tot com a lliurat ({pendents})
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePrint(true)}
+                disabled={isLoading || isPrinting || grups.length === 0}
+                className="flex items-center justify-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Printer className="h-4 w-4" />
+                Imprimir llista desglossada
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePrint(false)}
+                disabled={isLoading || isPrinting || grups.length === 0}
+                className="flex items-center justify-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Printer className="h-4 w-4" />
+                Imprimir llista agrupada
+              </button>
+            </div>
           </div>
         }
       />
+
+      {isPrinting && <p className="-mt-6 mb-6 text-sm text-gray-500">Generant PDF...</p>}
+      {printError && <p className="-mt-6 mb-6 text-sm text-red-600">{printError}</p>}
+      {markAllNotice && <p className="-mt-6 mb-6 text-sm text-green-700">{markAllNotice}</p>}
 
       <PackagingFilterBar state={filterState} />
 
@@ -323,6 +463,7 @@ export default function PurchasesPage() {
                   {obert && (
                     <div className="pl-4">
                       <ClientLinies
+                        key={versioLinies}
                         filters={filters}
                         clientId={grup.client?.id ?? null}
                         vista="targetes"
@@ -418,6 +559,7 @@ export default function PurchasesPage() {
                           <tr className="border-b border-gray-100">
                             <td colSpan={7} className="bg-gray-50 px-3 py-3">
                               <ClientLinies
+                                key={versioLinies}
                                 filters={filters}
                                 clientId={grup.client?.id ?? null}
                                 vista="taula"
@@ -454,6 +596,17 @@ export default function PurchasesPage() {
         }}
         errorMessage={undoError}
         isConfirming={isUndoing}
+      />
+      <ConfirmDialog
+        isOpen={isConfirmingMarkAll}
+        title="Marcar tot com a lliurat"
+        message={`Es marcaran com a enviades les ${pendents} línies pendents que compleixen els filtres actuals, de tots els clients (no només els de la pàgina visible), amb les unitats i els quilos demanats. Les que s'hagin enviat amb menys, desa-les abans una per una. Vols continuar?`}
+        confirmLabel="Marcar tot"
+        confirmingLabel="Marcant..."
+        onConfirm={handleConfirmMarkAll}
+        onCancel={() => setIsConfirmingMarkAll(false)}
+        errorMessage={markAllError}
+        isConfirming={isMarkingAll}
       />
     </div>
   );

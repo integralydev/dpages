@@ -1627,6 +1627,8 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
       }),
     );
     expect(detall.dades).toHaveLength(3);
+    // Cada línia porta l'id del client (per agrupar-les al PDF de Compres).
+    expect(detall.dades.every((linia) => linia.clientId === bar)).toBe(true);
 
     // Editar una línia (unitats i kg lliurats) es reflecteix a l'acumulat.
     const linia = comandaBar.linies[0]!;
@@ -1779,7 +1781,6 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
     });
   });
 
-
   describe('tasca 51 — POST /panells/empaquetat/marcar-lliurades', () => {
     it('confirma amb el que es va demanar totes les pendents dels filtres; respecta les ja confirmades, les congelades i la resta', async () => {
       const fastify = construirServidor();
@@ -1867,7 +1868,6 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
     });
   });
 
-
   describe('tasca 53 — filtre numComanda (núm. de comanda o de la web)', () => {
     it('Oficina i Empaquetat només tornen la comanda que coincideix, i mostren el núm. de la web', async () => {
       const fastify = construirServidor();
@@ -1941,7 +1941,6 @@ describe('API negoci — /panells (Postgres real, esquema aislado)', () => {
       await fastify.close();
     });
   });
-
 
   describe('tasca 54 — GET /panells/oficina?ordre=transportista', () => {
     it('ordena per transportista A-Z (sense majúscules), sense transportista al final; sense ordre, el de sempre', async () => {

@@ -1625,6 +1625,9 @@ Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramen
 
 > **Peticiones de Ari (29/09/2026):**
 >
+> - Cada fila trae `clientId` (id público del cliente, `null` si el pedido
+>   no tiene; 25/11/2026) además del nombre en `client`: el PDF desglosado
+>   del Panell de Compres agrupa con él las líneas por cliente.
 > - `categoriaId`: categoría del artículo de la línea, mismo criterio que
 >   `?categoriaId=` en `/panells/obrador`. Cada fila trae además
 >   `categoria` (nombre, `null` si el artículo no tiene categoría).
@@ -1648,7 +1651,8 @@ Filtros: `?dataExpedicioDes=&dataExpedicioFins=&dataLliuramentDes=&dataLliuramen
 > congelados se dejan igual. Sin filtro mínimo a propósito (Francesc,
 > 17/11/2026): sin filtros marca todas las pendientes; el diálogo de
 > confirmación del frontend ya muestra cuántas son. Respuesta: `{ "marcades": 34,
-"congeladesOmeses": 0 }`. Exige el mòdul `panell-empaquetat`.
+"congeladesOmeses": 0 }`. Exige el mòdul `panell-empaquetat` **o**
+> `panell-compres` (25/11/2026: el Panell de Compres tiene el mismo botón).
 >
 > **`obsEmpaquetat`** (tarea 7, 01/10/2026, migración `0022`): observación
 > de empaquetado a nivel de **línea** de pedido (por ejemplo, la unidad
@@ -1797,6 +1801,15 @@ mientras se trabaja en él.
   regla: unidades y kilos enviados obligatorios, pueden valer 0, y guardar
   confirma la línea. Esos dos endpoints aceptan el módulo
   `panell-empaquetat` **o** `panell-compres`.
+- **«Marcar tot com a lliurat»** (25/11/2026, Ari: la vedella se envía
+  desde este panel): el mismo `POST /panells/empaquetat/marcar-lliurades`
+  de la sección 4.8, con los filtros activos (de todos los clientes, no
+  sólo la página visible).
+- **Imprimir** (25/11/2026): «Imprimir llista desglossada» (cada cliente con
+  sus totales y, debajo, todas sus líneas, enviadas y pendientes) e
+  «Imprimir llista agrupada» (sólo los totales de cada cliente), como en
+  Obrador. El PDF se genera en el navegador (`lib/ordersPdf.ts`) con todas
+  las páginas de este endpoint y de `GET /panells/empaquetat?ordre=comanda`.
 
 ---
 
