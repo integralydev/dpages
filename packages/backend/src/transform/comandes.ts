@@ -7,8 +7,8 @@ import { parsearFechaGmt } from '../sync/fechas.js';
 import { calcularDatesComandaNova, diaMadrid, type DatesComandaNova } from './dates-per-defecte.js';
 import { calcularPesLinia } from './pes.js';
 import { resolverArticle } from './resolucio-article.js';
-import { ConflicteIdentitatClient, resolverOCrearClient } from './resolucio-client.js';
-import type { IndexConflicteClient } from './resolucio-client.js';
+import { ConflicteIdentitatClient, resolverClientComanda } from './resolucio-client.js';
+import type { AvisNifDiferent, IndexConflicteClient } from './resolucio-client.js';
 import { CODI_TARIFA_WEB } from './tarifa-web.js';
 
 export interface ResultatComanda {
@@ -51,6 +51,8 @@ interface FilaComandaExistent {
   data_produccio: Date | null;
   /** ADR-026: no nula = Oficina ya editó una línea de este pedido — el sync deja de tocar líneas. */
   linies_editades_a: Date | null;
+  /** ADR-027: el NIF del cliente sólo se cambia al vincular el pedido por primera vez. */
+  client_id: string | null;
 }
 
 async function obtenirComandaExistent(
@@ -58,7 +60,7 @@ async function obtenirComandaExistent(
   wooOrderId: number,
 ): Promise<FilaComandaExistent | null> {
   const res = await client.query<FilaComandaExistent>(
-    'SELECT id, congelat_a, data_produccio, linies_editades_a FROM comanda WHERE woo_order_id = $1',
+    'SELECT id, congelat_a, data_produccio, linies_editades_a, client_id FROM comanda WHERE woo_order_id = $1',
     [wooOrderId],
   );
   return res.rows[0] ?? null;
@@ -73,17 +75,22 @@ async function obtenirComandaExistent(
  * sync la volvería a meter en los paneles; y una 'esborrany' sigue en
  * esborrany (tarea 38), si no entraría en Obrador y Empaquetat antes de que
  * oficina la revise — al revisarla ya verá la incidencia.
+ *
+ * `canviarEstat = false` para los avisos que no bloquean el pedido
+ * (`nif_diferent`, ADR-027): se ven en la pantalla del pedido, nada más.
  */
 async function registrarIncidencia(
   client: PoolClient,
   comandaId: string,
   tipus: string,
   detall: string,
+  canviarEstat = true,
 ): Promise<void> {
   await client.query(
     `INSERT INTO incidencia_comanda (comanda_id, tipus, detall) VALUES ($1, $2, $3)`,
     [comandaId, tipus, detall],
   );
+  if (!canviarEstat) return;
   await client.query(
     `UPDATE comanda SET estat = 'amb_incidencia' WHERE id = $1 AND estat NOT IN ('cancellada', 'esborrany')`,
     [comandaId],
@@ -98,14 +105,16 @@ async function registrarIncidencia(
  * previa evita acumular una fila nueva en cada corrida mientras el pedido
  * siga sin datos de cliente — `resolverOCrearClient` se reintenta en TODA
  * transformación (no está detrás del guardián de versión), así que sin
- * este chequeo se repetiría en cada ciclo de sync.
+ * este chequeo se repetiría en cada ciclo de sync. Cuenta también la ya
+ * resuelta: si oficina la marcó «Revisat» (ADR-027), no vuelve a aparecer
+ * ni a cambiar el estat de la comanda.
  */
 async function registrarIncidenciaSenseDadesClientSiFalta(
   client: PoolClient,
   comandaId: string,
 ): Promise<void> {
   const existent = await client.query(
-    `SELECT 1 FROM incidencia_comanda WHERE comanda_id = $1 AND tipus = 'sense_dades_client' AND NOT resolta`,
+    `SELECT 1 FROM incidencia_comanda WHERE comanda_id = $1 AND tipus = 'sense_dades_client'`,
     [comandaId],
   );
   if ((existent.rowCount ?? 0) > 0) return;
@@ -125,7 +134,8 @@ async function registrarIncidenciaSenseDadesClientSiFalta(
  * silencio. Mismo patrón que `sense_dades_client`: se registra la
  * incidencia y el pedido sigue existiendo con `client_id` en null, en vez
  * de desaparecer. El chequeo de idempotencia evita acumular una fila nueva
- * en cada corrida mientras el conflicto siga sin resolverse a mano.
+ * en cada corrida mientras el conflicto siga sin resolverse a mano; cuenta
+ * también la ya resuelta («Revisat», ADR-027), para que no reaparezca.
  */
 async function registrarIncidenciaConflicteIdentitatSiFalta(
   client: PoolClient,
@@ -133,7 +143,7 @@ async function registrarIncidenciaConflicteIdentitatSiFalta(
   index: IndexConflicteClient,
 ): Promise<void> {
   const existent = await client.query(
-    `SELECT 1 FROM incidencia_comanda WHERE comanda_id = $1 AND tipus = 'conflicte_identitat_client' AND NOT resolta`,
+    `SELECT 1 FROM incidencia_comanda WHERE comanda_id = $1 AND tipus = 'conflicte_identitat_client'`,
     [comandaId],
   );
   if ((existent.rowCount ?? 0) > 0) return;
@@ -144,6 +154,22 @@ async function registrarIncidenciaConflicteIdentitatSiFalta(
     'conflicte_identitat_client',
     `El NIF/email/woo_customer_id resuelto para este pedido choca con el índice único "${index}" de un cliente distinto ya registrado.`,
   );
+}
+
+/**
+ * ADR-027 (decisión del cliente, 25/11/2026): el pedido se asignó al
+ * cliente de su email pero trae otro NIF — aviso para que oficina lo
+ * revise. El texto lo lee oficina (catalán) y lleva los NIF: va a la base,
+ * nunca a los logs.
+ */
+export function detallAvisNifDiferent(avis: AvisNifDiferent): string {
+  if (avis.codiAltreClient === null) {
+    return `El client tenia el NIF ${avis.nifAnterior ?? '(cap)'} i aquesta comanda porta el ${avis.nifComanda}. La comanda s'ha assignat pel correu i a la fitxa del client s'ha desat el NIF de la comanda.`;
+  }
+  const altre =
+    avis.codiAltreClient === '' ? 'un altre client' : `el client ${avis.codiAltreClient}`;
+  const conserva = avis.nifAnterior !== null ? `el NIF ${avis.nifAnterior}` : 'la fitxa sense NIF';
+  return `Aquesta comanda porta el NIF ${avis.nifComanda}, que ja és de ${altre}. La comanda s'ha assignat pel correu i el client conserva ${conserva}.`;
 }
 
 /**
@@ -584,9 +610,14 @@ export async function transformarComanda(
   // incidencia más abajo). Cualquier otro error sigue propagándose sin
   // capturar, tal como antes.
   let clientId: string | null;
+  let avisNif: AvisNifDiferent | null = null;
   let conflicteIdentitat: IndexConflicteClient | null = null;
   try {
-    clientId = await resolverOCrearClient(client, wooOrder);
+    const resolucio = await resolverClientComanda(client, wooOrder, {
+      permetreCanviNif: existent === null || existent.client_id === null,
+    });
+    clientId = resolucio.clientId;
+    avisNif = resolucio.avisNif;
   } catch (err) {
     if (!(err instanceof ConflicteIdentitatClient)) throw err;
     clientId = null;
@@ -627,6 +658,20 @@ export async function transformarComanda(
     logger.warn(
       { wooOrderId: wooOrder.id, comandaId },
       'Pedido sin NIF ni email resoluble — se registró como incidencia',
+    );
+  } else if (avisNif !== null) {
+    // Sólo llega al vincular el pedido por primera vez (permetreCanviNif),
+    // así que no se repite en los ciclos siguientes.
+    await registrarIncidencia(
+      client,
+      comandaId,
+      'nif_diferent',
+      detallAvisNifDiferent(avisNif),
+      false,
+    );
+    logger.info(
+      { wooOrderId: wooOrder.id, comandaId },
+      'Cliente asignado por email con un NIF distinto — se registró el aviso nif_diferent',
     );
   }
 

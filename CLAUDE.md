@@ -143,6 +143,13 @@ están documentadas ahí mismo y en el agente `woocommerce-integration`.
   `comanda_linia.proveidor_id` (opcional; al crear la línea, el preferido
   del artículo, también desde el sync de WooCommerce). Filtro en Obrador
   (`?proveidorId=`, también `sense`). Sólo se borra si nadie lo usa.
+- Cliente de un pedido web (ADR-027, confirmado por el cliente el
+  25/11/2026): **manda el email**. Si el email ya es de un cliente, el
+  pedido es suyo aunque traiga otro NIF; el cliente se queda con el NIF del
+  pedido nuevo (salvo que ya sea de otro cliente) y queda un aviso
+  `nif_diferent` que oficina ve en la ficha del pedido y cierra con
+  «Revisat». Si el email no es de nadie, por NIF normalizado. Sólo al
+  vincular el pedido por primera vez: los ciclos del sync no lo repiten.
 - Cinco paneles: oficina, obrador, empaquetado, compres, producció/planificació.
   **Sólo empaquetado y compres editan**; los otros tres son de sólo lectura con
   filtros y subtotales. El Panell de Compres (tarea 41 del Excel del cliente,
@@ -186,8 +193,8 @@ Si un cambio de código contradice un ADR, se actualiza el ADR primero.
 ## Pendiente de definición con el cliente
 
 No implementar, sólo documentar como abierto: tratamiento de descuentos,
-asignación de transportista, criterio final de identificación de cliente,
-campos de agrupación del catálogo, si el sistema es bilingüe o sólo catalán.
+asignación de transportista, campos de agrupación del catálogo, si el
+sistema es bilingüe o sólo catalán.
 Detalle: [`docs/contexto-negocio.md`](./docs/contexto-negocio.md).
 
 ## Subagentes disponibles (`.claude/agents/`)

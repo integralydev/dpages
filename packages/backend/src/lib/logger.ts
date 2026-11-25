@@ -25,6 +25,9 @@ export const configRedaccio = {
     '*.telefon',
     '*.telefono',
     '*.nif',
+    // ADR-027: el aviso «NIF diferent» lleva los dos NIF.
+    '*.nifAnterior',
+    '*.nifComanda',
     '*.dni',
     '*.adreca',
     '*.direccion',

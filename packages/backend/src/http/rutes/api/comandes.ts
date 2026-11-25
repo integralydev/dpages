@@ -1,4 +1,9 @@
-import { TIPUS_CLIENT, type TipusClient } from '@dpages/shared';
+import {
+  TIPUS_CLIENT,
+  TIPUS_INCIDENCIA_CLIENT,
+  TIPUS_INCIDENCIA_SENSE_CLIENT,
+  type TipusClient,
+} from '@dpages/shared';
 import type {
   ComandaDetallApi,
   ComandaDuplicadaApi,
@@ -103,6 +108,7 @@ interface FilaComandaResum {
   total_eur: string;
   total_incidencies: string;
   tipus_incidencia: string | null;
+  avis_client: boolean;
   calcul_per_pes: boolean;
 }
 
@@ -139,6 +145,7 @@ function aApiResum(fila: FilaComandaResum): ComandaResumApi {
     congelada: fila.congelat_a !== null,
     totalIncidencies: Number(fila.total_incidencies),
     tipusIncidencia: fila.tipus_incidencia,
+    avisClient: fila.avis_client,
   };
 }
 
@@ -151,6 +158,11 @@ function aApiResum(fila: FilaComandaResum): ComandaResumApi {
 // comanda comparten el mismo tipus (min() de un conjunto de un solo valor
 // distinto); si hay más de un tipo mezclado, queda null — "resumen liviano",
 // el detalle completo por tipo está en GET /comandes/:id (incidencies[]).
+/** Lista SQL de constantes fijas del código (nunca valores de la petición). */
+function sqlLlista(valors: readonly string[]): string {
+  return valors.map((v) => `'${v}'`).join(', ');
+}
+
 const SELECT_COMANDA_RESUM = `
   SELECT c.id_seq, c.num, c.num_woo, oc.codi AS origen, c.estat, c.calcul_per_pes,
          cl.id_seq AS client_id_seq, cl.nom AS client_nom, cl.poblacio AS client_poblacio,
@@ -163,7 +175,8 @@ const SELECT_COMANDA_RESUM = `
          COALESCE(agg.total_kg, 0)::numeric(14,3) AS total_kg,
          COALESCE(agg.total_eur, 0)::numeric(14,2) AS total_eur,
          COALESCE(inc.total_incidencies, 0) AS total_incidencies,
-         inc.tipus_incidencia
+         inc.tipus_incidencia,
+         COALESCE(inc.avis_client, false) AS avis_client
   FROM comanda c
   JOIN origen_comanda oc ON oc.id = c.origen_id
   LEFT JOIN client cl ON cl.id = c.client_id
@@ -176,7 +189,15 @@ const SELECT_COMANDA_RESUM = `
   ) agg ON true
   LEFT JOIN LATERAL (
     SELECT count(*) AS total_incidencies,
-           CASE WHEN count(DISTINCT tipus) = 1 THEN min(tipus) END AS tipus_incidencia
+           CASE WHEN count(DISTINCT tipus) = 1 THEN min(tipus) END AS tipus_incidencia,
+           -- Valores fijos de packages/shared, no de la petición. Los de
+           -- TIPUS_INCIDENCIA_SENSE_CLIENT sólo cuentan si la comanda sigue
+           -- sin cliente (oficina puede haberlo puesto a mano).
+           bool_or(
+             NOT resolta
+             AND tipus IN (${sqlLlista(TIPUS_INCIDENCIA_CLIENT)})
+             AND (c.client_id IS NULL OR tipus NOT IN (${sqlLlista(TIPUS_INCIDENCIA_SENSE_CLIENT)}))
+           ) AS avis_client
     FROM incidencia_comanda WHERE comanda_id = c.id
   ) inc ON true
   -- Fechas de producción DISTINTAS entre las líneas del pedido, ordenadas
@@ -274,17 +295,25 @@ const SELECT_COMANDA_LINIA = `
 `;
 
 interface FilaIncidenciaComanda {
+  id: string;
   tipus: string;
   detall: string;
   creat_en: Date;
+  resolta: boolean;
 }
 
 function aApiIncidencia(fila: FilaIncidenciaComanda): IncidenciaComandaApi {
-  return { tipus: fila.tipus, detall: fila.detall, creatA: formatearDataApi(fila.creat_en)! };
+  return {
+    id: fila.id,
+    tipus: fila.tipus,
+    detall: fila.detall,
+    creatA: formatearDataApi(fila.creat_en)!,
+    resolta: fila.resolta,
+  };
 }
 
 const SELECT_COMANDA_INCIDENCIES = `
-  SELECT tipus, detall, creat_en FROM incidencia_comanda
+  SELECT id, tipus, detall, creat_en, resolta FROM incidencia_comanda
   WHERE comanda_id = $1
   ORDER BY creat_en ASC
 `;
@@ -303,6 +332,7 @@ async function carregarDetallPerUuid(comandaUuid: string): Promise<ComandaDetall
     totalLinies: _totalLinies,
     totalIncidencies: _totalInc,
     tipusIncidencia: _tipusInc,
+    avisClient: _avisClient,
     ...resum
   } = aApiResum(fila);
   return {
@@ -690,6 +720,35 @@ export function registrarRutesComandes(fastify: FastifyInstance): void {
     if (comandaUuid === null) return;
     return carregarDetallPerUuid(comandaUuid);
   });
+
+  /**
+   * ADR-027: oficina marca como revisado un aviso de cliente del pedido
+   * («NIF diferent» y los conflictos de identidad). Sólo esos tipos: las
+   * demás incidencias tienen su propio flujo (estat, precio, artículo).
+   * No toca `estat`. Idempotente: una ya revisada se deja igual.
+   */
+  fastify.post(
+    '/comandes/:id/incidencies/:incidenciaId/revisada',
+    { preHandler: GUARD_COMANDES },
+    async (req, reply) => {
+      const params = req.params as { id: string; incidenciaId: string };
+      const comandaUuid = await resolverComandaOResponder(reply, params.id);
+      if (comandaUuid === null) return;
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.incidenciaId)
+      ) {
+        return enviarNoTrobat(reply, 'Incidència no trobada');
+      }
+      const res = await pool.query(
+        `UPDATE incidencia_comanda
+         SET resolta = true, resolta_en = COALESCE(resolta_en, now())
+         WHERE id = $1 AND comanda_id = $2 AND tipus = ANY($3::text[])`,
+        [params.incidenciaId, comandaUuid, [...TIPUS_INCIDENCIA_CLIENT]],
+      );
+      if ((res.rowCount ?? 0) === 0) return enviarNoTrobat(reply, 'Incidència no trobada');
+      return carregarDetallPerUuid(comandaUuid);
+    },
+  );
 
   fastify.post('/comandes', { preHandler: GUARD_COMANDES }, async (req, reply) => {
     const cos = req.body as Partial<{

@@ -17,6 +17,7 @@ import { api, ApiError, type ComandaDetallApi, type ComandaDuplicadaApi } from '
 import { duplicarComandes } from '@/lib/duplicarComandes';
 import { eliminarComanda, potEliminarComanda } from '@/lib/eliminarComanda';
 import { descarregarPdfComandes } from '@/lib/ordersPdf';
+import { AvisosClient } from '../AvisosClient';
 import { OrderForm, type OrderFormHandle } from '../OrderForm';
 import { ResultatDuplicatDialog } from '../ResultatDuplicatDialog';
 import { useAlcadaBarraFixa } from '@/hooks/useAlcadaBarraFixa';
@@ -37,7 +38,8 @@ function ambAvisSiCal(missatge: string, hiHaLiniaEliminada: boolean): string {
 export default function OrderDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
-  const { editOrder, deleteLine, markIncidence, addLine, reorderLines, editLine } = useOrders();
+  const { editOrder, deleteLine, markIncidence, reviewIncidence, addLine, reorderLines, editLine } =
+    useOrders();
   const { data: clients } = useClientTariffs();
   const { tariffColumns } = useRates();
   const { data: carriers } = useCarriers();
@@ -281,6 +283,16 @@ export default function OrderDetailPage() {
     }
   }
 
+  // ADR-027: només es refresquen les incidències — el formulari pot tenir
+  // canvis sense desar i no s'ha de tornar a carregar.
+  async function handleReviewIncidence(incidenciaId: string) {
+    if (!order) return;
+    const actualitzada = await reviewIncidence(order.id, incidenciaId);
+    setOrder((anterior) =>
+      anterior ? { ...anterior, incidencies: actualitzada.incidencies } : anterior,
+    );
+  }
+
   async function handleConfirmIncidence() {
     if (!order) return;
     setIsMarkingIncidence(true);
@@ -401,6 +413,14 @@ export default function OrderDetailPage() {
       {saveError && <p className="mb-4 text-sm text-red-600">{saveError}</p>}
       {duplicateError && <p className="mb-4 text-sm text-red-600">{duplicateError}</p>}
       {lineWarning && <p className="mb-4 text-sm text-amber-700">{lineWarning}</p>}
+
+      {order && (
+        <AvisosClient
+          incidencies={order.incidencies}
+          teClient={order.client !== null}
+          onRevisar={handleReviewIncidence}
+        />
+      )}
 
       {order && (
         <OrderForm

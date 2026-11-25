@@ -312,6 +312,58 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
     expect(resum?.totalIncidencies).toBe(2);
     expect(resum?.tipusIncidencia).toBeNull();
 
+    // ADR-027: avís de client obert → avisClient; «Revisat» el tanca
+    // (només els tipus de client: article_no_resolt dona 404).
+    expect(resum?.avisClient).toBe(true);
+
+    // Si l'oficina posa el client a mà, el «client no assignat» ja no és
+    // un avís (encara que la incidència segueixi oberta).
+    const clientMa = await entorn.poolTest.query<{ id: string }>(
+      `INSERT INTO client (nom) VALUES ('Client posat a mà') RETURNING id`,
+    );
+    await entorn.poolTest.query(`UPDATE comanda SET client_id = $2 WHERE id = $1`, [
+      comandaUuid.rows[0]!.id,
+      clientMa.rows[0]!.id,
+    ]);
+    const ambClient = cuerpoJson<RespostaPaginada<ComandaResumApi>>(
+      await fastify.inject({ method: 'GET', url: '/api/v1/comandes' }),
+    );
+    expect(ambClient.dades.find((c) => c.id === comandaId)?.avisClient).toBe(false);
+    await entorn.poolTest.query(`UPDATE comanda SET client_id = NULL WHERE id = $1`, [
+      comandaUuid.rows[0]!.id,
+    ]);
+
+    const conflicte = detall.incidencies[1]!;
+    const article = detall.incidencies[0]!;
+    expect(conflicte.resolta).toBe(false);
+
+    const noClient = await fastify.inject({
+      method: 'POST',
+      url: `/api/v1/comandes/${comandaId}/incidencies/${article.id}/revisada`,
+    });
+    expect(noClient.statusCode).toBe(404);
+    const idDolent = await fastify.inject({
+      method: 'POST',
+      url: `/api/v1/comandes/${comandaId}/incidencies/no-es-un-uuid/revisada`,
+    });
+    expect(idDolent.statusCode).toBe(404);
+
+    const revisada = await fastify.inject({
+      method: 'POST',
+      url: `/api/v1/comandes/${comandaId}/incidencies/${conflicte.id}/revisada`,
+    });
+    expect(revisada.statusCode).toBe(200);
+    const despres = cuerpoJson<ComandaDetallApi>(revisada);
+    expect(despres.incidencies.find((i) => i.id === conflicte.id)?.resolta).toBe(true);
+    expect(despres.incidencies.find((i) => i.id === article.id)?.resolta).toBe(false);
+    // L'estat no canvia.
+    expect(despres.estat).toBe('amb_incidencia');
+
+    const llistatDespres = cuerpoJson<RespostaPaginada<ComandaResumApi>>(
+      await fastify.inject({ method: 'GET', url: '/api/v1/comandes' }),
+    );
+    expect(llistatDespres.dades.find((c) => c.id === comandaId)?.avisClient).toBe(false);
+
     await fastify.close();
   });
 
@@ -3780,7 +3832,6 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
     });
   });
 
-
   describe('tasca 53 — núm. comanda WooCommerce', () => {
     it('POST i PATCH el desen (buit = sense número), la cerca el troba i es rebutja si és massa llarg', async () => {
       const fastify = construirServidor();
@@ -3830,7 +3881,6 @@ describe('API negoci — /comandes (Postgres real, esquema aislado)', () => {
       await fastify.close();
     });
   });
-
 
   describe('punt 35 — GET /comandes?tipusClient=', () => {
     it('filtra les comandes pel tipus del client', async () => {

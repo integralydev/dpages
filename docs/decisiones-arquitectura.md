@@ -775,8 +775,9 @@ exactamente los 2.216 pedidos marcados por la migración 0007/ADR-018.
 
 ## ADR-020 — Resolución de cliente: NIF primero, email después (supuesto por defecto, no cerrado)
 
-**Estado**: Aceptado como supuesto por defecto — **no confirmado por
-Integraly**. Ver P-11 del backlog. Reversible: es una función aislada
+**Estado**: **Reemplazado por ADR-027** (25/11/2026: el cliente confirmó
+que manda el email). Lo que sigue es el supuesto original — **no confirmado
+por Integraly**. Ver P-11 del backlog. Reversible: es una función aislada
 (`transform/resolucio-client.ts`) y dos índices de base, no algo entretejido
 en el resto del sistema — cambiar el criterio el día que Integraly lo
 confirme o lo corrija no debería tocar nada más.
@@ -1360,3 +1361,64 @@ sólo trae `proveidorId` no fija `linies_editades_a`. El proveedor de la
 línea es una columna del sistema que el sync no escribe nunca (sólo la
 rellena al insertar la línea), así que no hay nada que proteger, y asignar
 proveedores en lote no debe cortar la sincronización de los pedidos web.
+
+---
+
+## ADR-027 — Cliente de un pedido web: manda el email (confirmado por el cliente)
+
+**Estado**: Aceptado. Decisión del cliente (dPagès), 25/11/2026. Reemplaza
+el supuesto «NIF primero» de ADR-020 y cierra P-11.
+
+**Contexto**: tras la corrección del 23/11 (nota en ADR-020), seguían
+entrando pedidos web sin cliente cuando el email ya era de un cliente con
+**otro** NIF: 4 de 15 en los últimos 30 días (web 6716, 6769, 6870 y
+6906). Se preguntó al cliente qué hacer y respondió:
+
+- Que mande el correo: el pedido se asigna al cliente que ya tiene ese
+  email y queda marcado con un aviso de «NIF diferent» para que oficina lo
+  revise.
+- Que en la ficha del cliente se quede el NIF del pedido nuevo.
+
+**Decisión** (`transform/resolucio-client.ts`, `resolverClientComanda`):
+
+1. Si el email (sin distinguir mayúsculas) ya es de un cliente, es ése.
+   Si el pedido trae otro NIF (comparado normalizado), el cliente pasa a
+   tener el del pedido y se devuelve un aviso. Si ese NIF ya es de **otro**
+   cliente (el índice único no permite repetirlo), el cliente conserva el
+   suyo y el aviso dice de quién es. Si no tenía NIF, se completa sin aviso.
+2. Si el email no es de nadie, por NIF normalizado (así una empresa con
+   varias personas que compran sigue siendo un solo cliente).
+3. Si tampoco, se crea.
+
+El cambio de NIF y el aviso sólo ocurren **al vincular el pedido por
+primera vez** (pedido nuevo o todavía sin cliente,
+`permetreCanviNif`). Cada ciclo del sync vuelve a transformar todos los
+pedidos aterrizados: sin esta condición, el NIF del cliente saltaría entre
+los de sus pedidos viejos y cada ciclo generaría avisos.
+
+El aviso es una incidencia `nif_diferent` con el `detall` en catalán (NIF
+anterior y nuevo — va a la base, nunca a los logs) que **no cambia
+`estat`**: los pedidos web entran en `esborrany` y el aviso no debe
+bloquearlos. Como la pantalla de pedidos no mostraba ninguna incidencia
+del sync, se agregan:
+
+- `ComandaResumApi.avisClient` y un icono de aviso junto al cliente en el
+  listado de Comandes.
+- En la ficha del pedido, un aviso por cada incidencia de cliente abierta
+  (`TIPUS_INCIDENCIA_CLIENT`: `nif_diferent`, `conflicte_identitat_client`,
+  `sense_dades_client`), con un botón «Revisat»
+  (`POST /comandes/:id/incidencies/:incidenciaId/revisada`).
+
+**Qué no cambia**: el conflicto por `woo_customer_id` (la misma cuenta de
+la web con email y NIF nuevos) sigue dejando el pedido sin cliente y con
+`conflicte_identitat_client`; el cliente no se pronunció sobre ese caso. Al
+completar huecos de un cliente existente ya no se escribe un
+`woo_customer_id` que tenga otro cliente (antes eso también acababa en
+conflicto).
+
+**Consecuencias**: al desplegar, el primer ciclo del sync vincula los
+pedidos pendientes de este caso al cliente de su email, cada uno con su
+aviso. Si un mismo cliente tiene varios pendientes con NIF distintos, se
+queda el del último procesado (orden de `woo_id`). Oficina pierde el NIF
+que hubiera cargado a mano en la ficha si un pedido web posterior trae
+otro — es lo que pidió el cliente, y el aviso deja constancia del anterior.

@@ -749,6 +749,27 @@ paths:
         '404': { $ref: '#/components/responses/NoTrobat' }
         '409': { $ref: '#/components/responses/Conflicte' }
 
+  /api/v1/comandes/{id}/incidencies/{incidenciaId}/revisada:
+    post:
+      tags: [Comandes]
+      summary: Marca revisado un aviso de cliente (ADR-027)
+      description: >-
+        Sólo incidencias de cliente (nif_diferent, conflicte_identitat_client,
+        sense_dades_client). Idempotente; no cambia el estat.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - name: incidenciaId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Pedido actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ComandaDetall' }
+        '404': { $ref: '#/components/responses/NoTrobat' }
+
   /api/v1/comandes/{comandaId}/linies:
     post:
       tags: [Comandes]
@@ -1995,6 +2016,11 @@ components:
           type: string
           nullable: true
           description: Null si hay más de un tipo de incidencia mezclado
+        avisClient:
+          type: boolean
+          description: >-
+            ADR-027. Alguna incidencia de cliente (nif_diferent,
+            conflicte_identitat_client, sense_dades_client) sin revisar.
 
     ComandaLinia:
       type: object
@@ -2068,11 +2094,13 @@ components:
     Incidencia:
       type: object
       properties:
+        id: { type: string, format: uuid }
         tipus:
           type: string
           example: article_no_resolt
         detall: { type: string }
         creatA: { type: string, format: date-time }
+        resolta: { type: boolean }
 
     ComandaDetall:
       type: object

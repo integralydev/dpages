@@ -158,6 +158,8 @@ type UseOrdersResult = {
   deleteLine: (comandaId: number, liniaId: number) => Promise<void>;
   /** PATCH { estat: "amb_incidencia", detall }. `detall` és obligatori (400 si arriba buit). */
   markIncidence: (comandaId: number, detall: string) => Promise<ComandaDetallApi>;
+  /** POST /comandes/:comandaId/incidencies/:incidenciaId/revisada — tanca un avís de client (ADR-027). */
+  reviewIncidence: (comandaId: number, incidenciaId: string) => Promise<ComandaDetallApi>;
   /** POST /comandes/:comandaId/linies. */
   addLine: (comandaId: number, linia: LiniaCreacioApi) => Promise<ComandaDetallApi>;
   /** PUT /comandes/:comandaId/linies/ordre — `ids`: totes les línies, en el nou ordre. */
@@ -372,6 +374,19 @@ export function useOrders(filters: OrderListFilters = {}): UseOrdersResult {
     [refetch],
   );
 
+  // ADR-027: l'oficina ha revisat un avís de client («NIF diferent»…).
+  const reviewIncidence = useCallback(
+    async (comandaId: number, incidenciaId: string): Promise<ComandaDetallApi> => {
+      const actualitzada = await api.post<ComandaDetallApi>(
+        `/comandes/${comandaId}/incidencies/${incidenciaId}/revisada`,
+        {},
+      );
+      refetch();
+      return actualitzada;
+    },
+    [refetch],
+  );
+
   // Agregar una línia a una comanda ja creada.
   const addLine = useCallback(
     async (comandaId: number, linia: LiniaCreacioApi): Promise<ComandaDetallApi> => {
@@ -424,6 +439,7 @@ export function useOrders(filters: OrderListFilters = {}): UseOrdersResult {
     editOrder,
     deleteLine,
     markIncidence,
+    reviewIncidence,
     addLine,
     reorderLines,
     editLine,
